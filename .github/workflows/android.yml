@@ -48,19 +48,8 @@ jobs:
           npx cap add android
           npx cap sync android
 
-      - name: Klucz podpisu
-        env:
-          KS_B64: ${{ secrets.KEYSTORE_BASE64 }}
-          KS_PASS: ${{ secrets.KEYSTORE_PASSWORD }}
+      - name: Klucz podpisu (keystore/xyxword.jks z repo)
         run: |
-          if [ -n "$KS_B64" ] && [ -n "$KS_PASS" ]; then
-            echo "$KS_B64" | base64 -d > "$RUNNER_TEMP/xyx.jks"
-          else
-            echo "::warning::Brak sekretow KEYSTORE_BASE64/KEYSTORE_PASSWORD - tymczasowy klucz, aktualizacje nie zainstaluja sie na starej wersji"
-            KS_PASS=tymczasowe123
-            keytool -genkeypair -keystore "$RUNNER_TEMP/xyx.jks" -alias xyxword -keyalg RSA -keysize 2048 -validity 10000 \
-              -storepass "$KS_PASS" -keypass "$KS_PASS" -dname "CN=XyxWord temp"
-          fi
           cat >> android/app/build.gradle <<GRADLE
 
           android {
@@ -70,7 +59,7 @@ jobs:
               }
               signingConfigs {
                   xyx {
-                      storeFile file("${RUNNER_TEMP}/xyx.jks")
+                      storeFile file("${GITHUB_WORKSPACE}/keystore/xyxword.jks")
                       storePassword System.getenv("KS_PASS_GRADLE")
                       keyAlias "xyxword"
                       keyPassword System.getenv("KS_PASS_GRADLE")
@@ -84,8 +73,7 @@ jobs:
               }
           }
           GRADLE
-          echo "::add-mask::$KS_PASS"
-          echo "KS_PASS_GRADLE=$KS_PASS" >> $GITHUB_ENV
+          echo "KS_PASS_GRADLE=arvv7JY9QkPyx7pOuIjs1GrC" >> $GITHUB_ENV
 
       - name: Build
         working-directory: android

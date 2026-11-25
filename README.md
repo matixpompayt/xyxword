@@ -18,7 +18,7 @@ Każdy push do `main` → GitHub Actions buduje APK (Capacitor) → tworzy Relea
 - `www/` – cała gra (HTML/CSS/JS), ten sam kod pójdzie później na przeglądarkę
 - `capacitor.config.json` – konfiguracja aplikacji Android
 - `.github/workflows/android.yml` – automatyczny build APK + release
-- Podpis APK – sekrety repo `KEYSTORE_BASE64` i `KEYSTORE_PASSWORD` (Settings → Secrets and variables → Actions). Bez nich build używa tymczasowego klucza. (hasło domyślne w workflow; można nadpisać sekretem `KEYSTORE_PASSWORD`)
+- `keystore/xyxword.jks` – stały klucz podpisu APK (dzięki niemu aktualizacje instalują się na starej wersji)
 
 ## Lokalnie
 Otwórz `www/index.html` w przeglądarce – gra działa bez instalacji.
