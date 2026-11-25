@@ -24,9 +24,21 @@ jobs:
           distribution: temurin
           java-version: 21
 
-      - name: Wersja
+      - name: Usun stare wydania 1.x
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          VERSION="1.0.${{ github.run_number }}"
+          for t in $(gh release list -R "$GITHUB_REPOSITORY" --limit 100 --json tagName -q '.[].tagName' | grep '^v1\.' || true); do
+            gh release delete "$t" -R "$GITHUB_REPOSITORY" --cleanup-tag -y
+          done
+
+      - name: Wersja (0.1, 0.2, 0.3 ...)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          LAST=$(gh release list -R "$GITHUB_REPOSITORY" --limit 100 --json tagName -q '.[].tagName' | grep -E '^v0\.[0-9]+$' | sed 's/^v0\.//' | sort -n | tail -1)
+          VERSION="0.$(( ${LAST:-0} + 1 ))"
+          echo "Wersja: $VERSION"
           echo "VERSION=$VERSION" >> $GITHUB_ENV
           echo "window.XYX_VERSION = '$VERSION';" > www/version.js
 

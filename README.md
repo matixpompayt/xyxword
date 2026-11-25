@@ -5,14 +5,14 @@ Zaczynasz od farmy albo kopalni, budujesz łańcuchy produkcji aż do fabryk kom
 wozisz surowce statkami między kontynentami i walczysz w sezonowym rankingu z firmami AI.
 
 ## Pobierz (Android)
-Najnowszy APK: **Releases → najnowsza wersja → `xyxword-X.Y.Z.apk`**
+Najnowszy APK: **Releases → najnowsza wersja → `xyxword-0.X.apk`**
 https://github.com/matixpompayt/xyxword/releases/latest
 
 Gra sama sprawdza GitHub przy starcie i pokazuje pasek „Nowa wersja” → *Pobierz*.
 Nowy APK instaluje się na starym (ten sam podpis), zapis gry zostaje.
 
 ## Jak działa wydawanie wersji
-Każdy push do `main` → GitHub Actions buduje APK (Capacitor) → tworzy Release `v1.0.<numer_buildu>`.
+Każdy push do `main` → GitHub Actions buduje APK (Capacitor) → tworzy Release z kolejną wersją: `v0.1`, `v0.2`, `v0.3`….
 
 ## Struktura
 - `www/` – cała gra (HTML/CSS/JS), ten sam kod pójdzie później na przeglądarkę
