@@ -80,28 +80,44 @@ const SC = g => 3000 / Math.sqrt(G[g].p);  // skala nasycenia rynku
 // ================== STAN ==================
 let S, ui = { tab: 'firma', bc: 'eu', mc: 'eu', buyG: 'zboze', buyQ: 100, sf: {}, resetArm: false, update: null };
 
-function mkAI(base) {
-  const names = [...AI_NAMES].sort(() => Math.random() - .5).slice(0, 7);
-  return names.map(n => ({ n, w: base * rnd(.35, 1.15), r: rnd(.0022, .0042) }));
+const COLORS = ['#e0823f', '#3fcf7f', '#4aa3ff', '#c77dff', '#ff5d8f', '#f5c542'];
+const DIFF = [
+  { n: 'Łatwy', cash: 80000, ai: .8, d: '$80 tys. na start, wolniejsza konkurencja' },
+  { n: 'Normalny', cash: 50000, ai: 1, d: '$50 tys. na start' },
+  { n: 'Trudny', cash: 30000, ai: 1.25, d: '$30 tys. na start, agresywna konkurencja' },
+];
+function mkAI(base, diff = 1) {
+  const names = [...AI_NAMES].sort(() => Math.random() - .5).slice(0, 7), k = DIFF[diff].ai;
+  return names.map(n => ({ n, w: base * rnd(.35, 1.15), r: rnd(.0022, .0042) * k }));
 }
 function newBranch() { return { bld: [], inv: {}, port: false, auto: {} }; }
-function newState() {
+function newState(o = {}) {
+  const hq = o.hq || 'eu', diff = o.diff ?? 1, cash = DIFF[diff].cash;
   const m = {};
   for (const g of GK) m[g] = { sat: 0, d: rnd(.9, 1.1), h: [] };
   const s = {
-    v: 1, name: 'Moja Firma', cash: 50000, hour: 0, last: Date.now(),
-    c: { eu: newBranch() }, ships: [], nid: 1, m, ai: mkAI(50000),
+    v: 1, setup: !!o.done, ceo: o.ceo || '', name: o.name || 'Moja Firma', color: o.color || COLORS[0], hq, diff,
+    cash, hour: 0, last: Date.now(),
+    c: { [hq]: newBranch() }, ships: [], nid: 1, m, ai: mkAI(cash, diff),
     season: 1, pp: 0, perk: { prod: 0, upk: 0, ship: 0, sell: 0 }, ev: [],
-    news: [], inc: 0, upk: 0, lastSeason: null,
+    news: [], inc: 0, upk: 0, lastSeason: null, tut: { step: o.tut === false ? 99 : 0, sold: false, rew: false },
   };
   for (const g of GK) m[g].h = Array(8).fill(price(g, s));
-  addNews(s, 'Start! Masz $50 tys. i oddział w Europie. Zbuduj farmę i młyn.');
+  addNews(s, `Start! ${s.ceo ? 'Prezes ' + s.ceo + ', masz' : 'Masz'} ${money(cash)} i siedzibę: ${CN[hq].n}.`);
   return s;
 }
 function load() {
   try {
     const raw = localStorage.getItem(SAVE);
-    if (raw) { const s = JSON.parse(raw); if (s && s.v === 1) return s; }
+    if (raw) {
+      const s = JSON.parse(raw);
+      if (s && s.v === 1) { // starsze zapisy (0.1) – uzupełnij nowe pola
+        if (s.setup === undefined) s.setup = true;
+        s.hq = s.hq || 'eu'; s.color = s.color || COLORS[0]; s.diff = s.diff ?? 1; s.ceo = s.ceo || '';
+        s.tut = s.tut || { step: 99, sold: true, rew: true };
+        return s;
+      }
+    }
   } catch (e) {}
   return newState();
 }
@@ -119,7 +135,7 @@ function sell(s, cid, g, q) {
   if (q <= 0) return 0;
   const rev = sellPrice(g, q, s) * q;
   s.m[g].sat += q; br.inv[g] -= q; if (br.inv[g] < 1e-6) delete br.inv[g];
-  s.cash += rev; return rev;
+  s.cash += rev; if (s.tut) s.tut.sold = true; return rev;
 }
 function buy(s, cid, g, q) {
   const cost = buyPrice(g, q, s) * q;
@@ -137,7 +153,7 @@ function worth(s = S) {
   let w = s.cash;
   for (const cid in s.c) {
     const br = s.c[cid];
-    if (cid !== 'eu') w += BRANCH_COST * .5;
+    if (cid !== s.hq) w += BRANCH_COST * .5;
     if (br.port) w += PORT_COST * .5;
     for (const b of br.bld) w += bldValue(b);
     for (const g in br.inv) w += br.inv[g] * price(g, s) * .8;
@@ -224,9 +240,89 @@ function endSeason(s) {
   s.pp += pp; s.lastSeason = { season: s.season, pos: pos + 1, pp };
   addNews(s, `Koniec sezonu ${s.season}: miejsce ${pos + 1}. Nagroda: ${pp} pkt prestiżu.`);
   s.season++;
-  s.ai = mkAI(Math.max(50000, worth(s)));
+  s.ai = mkAI(Math.max(50000, worth(s)), s.diff ?? 1);
   ui.seasonEnd = true;
 }
+
+// ================== SAMOUCZEK ==================
+const hasB = t => Object.values(S.c).some(br => br.bld.some(b => b.t === t));
+const hqInv = g => (S.c[S.hq] && S.c[S.hq].inv[g]) || 0;
+const TUT = [
+  { t: 'Witaj, prezesie!', d: () => `${esc(S.name)} startuje w: ${CN[S.hq].n}. Cel gry: zarabiać, budować coraz bardziej zaawansowane łańcuchy produkcji i wygrać sezon w rankingu. Pokażę Ci podstawy w kilku krokach.`, next: true },
+  { t: 'Zakładka Budowa', d: 'Wszystkie zakłady stawiasz w zakładce Budowa. Otwórz ją.', sel: () => ['[data-tab=budowa]'], done: () => ui.tab === 'budowa' },
+  { t: 'Pierwsza farma', d: 'Farma produkuje zboże — najtańszy surowiec. Kliknij cenę przy Farmie, żeby ją zbudować.',
+    sel: () => ['[data-a=build][data-b=farma]', `[data-a=bc][data-c=${S.hq}]`, '[data-tab=budowa]'], done: () => hasB('farma') },
+  { t: 'Młyn', d: 'Młyn przerabia 10 zboża na 8 mąki, a mąka jest ponad 3× droższa. Tak działają łańcuchy produkcji. Zbuduj Młyn.',
+    sel: () => ['[data-a=build][data-b=mlyn]', `[data-a=bc][data-c=${S.hq}]`, '[data-tab=budowa]'], done: () => hasB('mlyn') },
+  { t: 'Produkcja trwa', d: () => `Zakłady pracują same: 1 godzina gry = 4 s. Każdy ma też koszt utrzymania co godzinę. Poczekaj na mąkę: ${qty(Math.min(5, hqInv('maka')))} / 5.`,
+    done: () => hqInv('maka') >= 5 || S.tut.sold },
+  { t: 'Rynek', d: 'Mąka gotowa! Otwórz zakładkę Rynek.', sel: () => ['[data-tab=magazyn]'], done: () => ui.tab === 'magazyn' },
+  { t: 'Sprzedaż', d: 'Sprzedaj mąkę przyciskiem „Wszystko”. Uwaga: im więcej sprzedajesz naraz, tym niższa cena — rynek się nasyca i odbija z czasem.',
+    sel: () => ['[data-a=sell][data-g=maka][data-f="1"]', `[data-a=mc][data-c=${S.hq}]`, '[data-tab=magazyn]'], done: () => S.tut.sold },
+  { t: 'Auto‑sprzedaż', d: 'Włącz „Auto” przy mące. Towar będzie sprzedawany co godzinę, także gdy gra jest zamknięta.',
+    sel: () => ['[data-a=auto][data-g=maka]', `[data-a=mc][data-c=${S.hq}]`, '[data-tab=magazyn]'], done: () => !!(S.c[S.hq].auto || {}).maka },
+  { t: 'Uważaj na surowce', d: 'Nie włączaj auto‑sprzedaży zboża, bo młyn stanie. Zakład bez surowców pokazuje czerwony napis „Stoi — brak”. Brakujące surowce możesz dokupić na rynku (marża 15%).', next: true },
+  { t: 'Ulepszenia', d: 'W Budowie ulepszasz zakłady: więcej produkcji, ale też większe zużycie surowców i koszty. Następny krok: Piekarnia (mąka → chleb).', next: true, sel: () => ['[data-tab=budowa]'] },
+  { t: 'Świat i statki', d: 'Każdy kontynent ma inne bonusy surowców. Otwórz tam oddział, postaw porty po obu stronach i przewoź towary statkami do swoich fabryk.', next: true, sel: () => ['[data-tab=logistyka]'] },
+  { t: 'Ranking i sezony', d: 'Sezon trwa 30 dni gry, ranking liczy wartość firmy. Za miejsce dostajesz punkty prestiżu na stałe ulepszenia.', next: true, sel: () => ['[data-tab=ranking]'] },
+  { t: 'Gotowe!', d: () => S.tut.rew ? 'Samouczek ukończony. Powodzenia!' : 'Nagroda za ukończenie samouczka: $5 tys. Powodzenia!', next: true, btn: 'Zakończ', fin: true },
+];
+function renderTut() {
+  document.querySelectorAll('.tut-hl').forEach(e => e.classList.remove('tut-hl'));
+  const box = $('tut'), tu = S.tut;
+  while (tu.step < TUT.length && TUT[tu.step].done && TUT[tu.step].done()) tu.step++;
+  if (!S.setup || tu.step >= TUT.length) { box.hidden = true; document.body.classList.remove('tuton'); return; }
+  const st = TUT[tu.step], d = typeof st.d === 'function' ? st.d() : st.d;
+  box.hidden = false; document.body.classList.add('tuton');
+  box.innerHTML = `<div class="row"><span class="mut small grow">Samouczek · ${tu.step + 1}/${TUT.length}</span><button class="lnk" data-a="tutSkip">Pomiń</button></div>
+    <div class="tut-t">${st.t}</div><div class="tut-d">${d}</div>
+    ${st.next ? `<div class="btns"><button class="btn p" data-a="tutNext">${st.btn || 'Dalej'}</button></div>` : ''}`;
+  if (st.sel) for (const q of st.sel()) {
+    const el = document.querySelector(q);
+    if (!el) continue;
+    el.classList.add('tut-hl');
+    const key = tu.step + q;
+    if (ui.tutScroll !== key) {
+      ui.tutScroll = key;
+      const r = el.getBoundingClientRect();
+      if (!el.closest('nav') && (r.top < 80 || r.bottom > innerHeight - 260)) el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    }
+    break;
+  }
+}
+
+// ================== KREATOR KONTA ==================
+const wz = { step: 0, ceo: '', name: '', hq: 'eu', color: COLORS[0], diff: 1, tut: true };
+function renderWiz() {
+  const el = $('wiz');
+  if (S.setup) { el.hidden = true; return; }
+  el.hidden = false;
+  const dots = [0, 1, 2, 3].map(i => `<i class="${i <= wz.step ? 'on' : ''}"></i>`).join('');
+  let b = '';
+  if (wz.step === 0) {
+    b = `<div class="wz-logo"><svg viewBox="0 0 64 64" width="72" height="72"><rect x="6" y="30" width="12" height="28" rx="2" fill="#e0823f"/><rect x="26" y="18" width="12" height="40" rx="2" fill="#4aa3ff"/><rect x="46" y="6" width="12" height="52" rx="2" fill="#3fcf7f"/></svg></div>
+      <h1>XyxWord</h1><p class="mut">Zbuduj imperium gospodarcze: od farmy i kopalni do fabryk komputerów i samochodów. Rywalizuj z konkurencją w sezonowym rankingu.</p>
+      <label class="f" for="wzCeo">Imię prezesa</label><input id="wzCeo" data-wz="ceo" maxlength="20" placeholder="np. Mati" value="${esc(wz.ceo)}">
+      <label class="f" for="wzName">Nazwa firmy</label><input id="wzName" data-wz="name" maxlength="24" placeholder="np. Mati Holding" value="${esc(wz.name)}">
+      <div id="wzErr" class="warn"></div>`;
+  } else if (wz.step === 1) {
+    b = `<h1>Siedziba firmy</h1><p class="mut">Tu zaczynasz. Każdy kontynent ma inne bonusy do wydobycia surowców. Inne kontynenty otworzysz później.</p>
+      ${CONT.map(c => { const bon = Object.entries(c.r).filter(([, v]) => v >= 1.2).sort((a, b) => b[1] - a[1]);
+        return `<button class="wz-opt ${wz.hq === c.id ? 'on' : ''}" data-a="wzSet" data-k="hq" data-v="${c.id}"><b>${c.n}</b><span>${bon.map(([g, v]) => `${G[g].n} ×${String(v).replace('.', ',')}`).join(' · ') || 'zrównoważony'}</span></button>`; }).join('')}`;
+  } else if (wz.step === 2) {
+    b = `<h1>Styl i trudność</h1><label class="f">Kolor firmy</label><div class="sw">${COLORS.map(c => `<button class="${wz.color === c ? 'on' : ''}" style="background:${c}" data-a="wzSet" data-k="color" data-v="${c}" aria-label="Kolor ${c}"></button>`).join('')}</div>
+      <label class="f">Poziom trudności</label>
+      ${DIFF.map((d, i) => `<button class="wz-opt ${wz.diff === i ? 'on' : ''}" data-a="wzSet" data-k="diff" data-v="${i}"><b>${d.n}</b><span>${d.d}</span></button>`).join('')}`;
+  } else {
+    b = `<h1>Gotowe do startu</h1>
+      <div class="card"><div class="row"><span class="dot" style="background:${wz.color}"></span><div class="grow"><b>${esc(wz.name)}</b><div class="mut small">Prezes: ${esc(wz.ceo)}</div></div></div>
+      <table style="margin-top:8px"><tr><td>Siedziba</td><td class="n">${CN[wz.hq].n}</td></tr><tr><td>Trudność</td><td class="n">${DIFF[wz.diff].n}</td></tr><tr><td>Gotówka</td><td class="n">${money(DIFF[wz.diff].cash)}</td></tr></table></div>
+      <button class="toggle ${wz.tut ? 'on' : ''}" data-a="wzSet" data-k="tut" data-v="${wz.tut ? 0 : 1}" style="width:100%;min-height:44px">Samouczek: ${wz.tut ? 'włączony' : 'wyłączony'}</button>`;
+  }
+  el.innerHTML = `<div class="wz-in"><div class="wz-dots">${dots}</div>${b}
+    <div class="btns wz-nav">${wz.step ? '<button class="btn" data-a="wzBack">Wstecz</button>' : ''}<button class="btn p grow" data-a="wzNext">${wz.step === 3 ? 'Rozpocznij grę' : 'Dalej'}</button></div></div>`;
+}
+document.addEventListener('input', e => { const k = e.target.dataset.wz; if (k) wz[k] = e.target.value; });
 
 // ================== RENDER ==================
 function spark(h) {
@@ -251,7 +347,7 @@ function vFirma() {
   const day = Math.floor((S.hour % SEASON_H) / 24) + 1;
   const nb = Object.values(S.c).reduce((a, b) => a + b.bld.length, 0);
   let h = '';
-  if (!nb) h += `<div class="card hint"><b>Jak zacząć</b><div class="mut" style="margin-top:4px">Wejdź w <b>Budowa</b>, postaw Farmę (zboże) i Młyn (mąka), potem Piekarnię. W <b>Rynek</b> sprzedawaj towary albo włącz auto‑sprzedaż. Surowce z innych kontynentów przewozisz statkami.</div><div class="btns"><button class="btn p" data-a="tab" data-t="budowa">Do budowy</button></div></div>`;
+  if (!nb && S.tut.step >= TUT.length) h += `<div class="card hint"><b>Jak zacząć</b><div class="mut" style="margin-top:4px">Wejdź w <b>Budowa</b>, postaw Farmę (zboże) i Młyn (mąka), potem Piekarnię. W <b>Rynek</b> sprzedawaj towary albo włącz auto‑sprzedaż. Surowce z innych kontynentów przewozisz statkami.</div><div class="btns"><button class="btn p" data-a="tab" data-t="budowa">Do budowy</button></div></div>`;
   h += mapSvg();
   h += `<div class="kpis">
     <div class="kpi"><span>Wartość firmy</span><b>${money(worth())}</b></div>
@@ -275,7 +371,7 @@ function mapSvg() {
     const [x, y] = POS[c.id], own = !!S.c[c.id], br = S.c[c.id];
     const n = own ? br.bld.length : 0;
     dots += `<g data-a="goBuild" data-c="${c.id}" style="cursor:pointer">
-      <circle cx="${x}" cy="${y}" r="${own ? 4 + Math.min(n, 8) * .5 : 3}" fill="${own ? '#e0823f' : '#2d323b'}" stroke="${own ? '#ffb27a' : '#4a525e'}" stroke-width=".5"/>
+      <circle cx="${x}" cy="${y}" r="${own ? 4 + Math.min(n, 8) * .5 : 3}" fill="${own ? S.color : '#2d323b'}" stroke="${own ? '#fff' : '#4a525e'}" stroke-width=".5"/>
       ${own && br.port ? `<rect x="${x + 3.5}" y="${y - 5.5}" width="3" height="3" rx=".6" fill="#4aa3ff"/>` : ''}
       <text x="${x}" y="${y + 9}" text-anchor="middle" font-size="3.6" fill="${own ? '#eef0f3' : '#9aa3af'}">${c.n}</text>
       ${own ? `<text x="${x}" y="${y + 1.3}" text-anchor="middle" font-size="3.4" font-weight="700" fill="#1b1006">${n}</text>` : ''}
@@ -409,6 +505,7 @@ function vRanking() {
 const VIEWS = { firma: vFirma, budowa: vBudowa, magazyn: vMagazyn, logistyka: vLogistyka, ranking: vRanking };
 function renderTop() {
   $('coName').textContent = S.name;
+  document.documentElement.style.setProperty('--me', S.color);
   $('clock').textContent = tstr(S.hour) + ' · Sezon ' + S.season;
   $('cash').textContent = money(S.cash);
   $('cash').style.color = S.cash < 0 ? 'var(--bad)' : '';
@@ -421,7 +518,7 @@ function render(force) {
   if (!force && ae && (ae.tagName === 'INPUT' || ae.tagName === 'SELECT')) return;
   $('view').innerHTML = VIEWS[ui.tab]();
   document.querySelectorAll('#nav button').forEach(b => b.classList.toggle('on', b.dataset.tab === ui.tab));
-  renderUpd();
+  renderUpd(); renderTut();
 }
 function renderUpd() {
   $('upd').innerHTML = ui.update ? `<div class="updbar"><div class="grow" style="flex:1"><b>Nowa wersja ${esc(ui.update.v)}</b><div class="mut small">Masz ${esc(VERSION)}</div></div><button class="btn p s" data-a="getUpd">Pobierz</button></div>` : '';
@@ -432,10 +529,11 @@ function toast(t) { const el = $('toast'); el.textContent = t; el.classList.add(
 function settings() {
   $('modal').hidden = false;
   $('modal').innerHTML = `<div class="sheet"><div class="row"><b class="grow" style="font-size:17px">Ustawienia</b><button class="btn s" data-a="close">Zamknij</button></div>
+    <label class="f" for="ceo">Imię prezesa</label><input id="ceo" maxlength="20" value="${esc(S.ceo)}">
     <label class="f" for="nm">Nazwa firmy</label><div class="row"><input id="nm" maxlength="24" value="${esc(S.name)}"><button class="btn p" data-a="name">Zapisz</button></div>
     <h2>Aktualizacje</h2><div class="card"><div class="row"><div class="grow">Wersja: <b>${esc(VERSION)}</b><div class="mut small">Źródło: github.com/${REPO}</div></div><button class="btn" data-a="chkUpd">Sprawdź</button></div></div>
     <h2>Gra</h2><div class="card"><div class="mut small">1 godzina gry = ${HOUR_MS / 1000} s. Gra liczy się też offline (do 10 dni gry).</div>
-    <div class="btns"><button class="btn" data-a="reset" style="${ui.resetArm ? 'background:var(--bad);color:#fff' : ''}">${ui.resetArm ? 'Na pewno? Kliknij ponownie' : 'Zacznij od nowa'}</button></div></div></div>`;
+    <div class="btns"><button class="btn" data-a="tutAgain">Powtórz samouczek</button><button class="btn" data-a="reset" style="${ui.resetArm ? 'background:var(--bad);color:#fff' : ''}">${ui.resetArm ? 'Na pewno? Kliknij ponownie' : 'Zacznij od nowa'}</button></div></div></div>`;
 }
 
 // ================== AKCJE ==================
@@ -487,10 +585,23 @@ function act(a, d) {
     case 'perk': { const c = S.perk[d.k] + 1; if (S.pp < c || S.perk[d.k] >= 10) return; S.pp -= c; S.perk[d.k]++; break; }
     case 'settings': ui.resetArm = false; settings(); return;
     case 'close': $('modal').hidden = true; return;
-    case 'name': { const v = $('nm').value.trim().slice(0, 24); if (v) S.name = v; $('modal').hidden = true; break; }
+    case 'name': { const v = $('nm').value.trim().slice(0, 24), c = $('ceo').value.trim().slice(0, 20); if (v) S.name = v; S.ceo = c; $('modal').hidden = true; break; }
+    case 'tutAgain': S.tut.step = 0; ui.tab = 'firma'; $('modal').hidden = true; break;
+    case 'tutNext': { const st = TUT[S.tut.step]; if (st && st.fin && !S.tut.rew) { S.tut.rew = true; S.cash += 5000; toast('+$5 tys. za samouczek'); } S.tut.step++; break; }
+    case 'tutSkip': S.tut.step = TUT.length; break;
+    case 'wzSet': wz[d.k] = d.k === 'diff' ? +d.v : d.k === 'tut' ? d.v === '1' : d.v; renderWiz(); return;
+    case 'wzBack': wz.step = Math.max(0, wz.step - 1); renderWiz(); return;
+    case 'wzNext':
+      if (wz.step === 0) {
+        wz.ceo = wz.ceo.trim(); wz.name = wz.name.trim();
+        if (!wz.ceo || !wz.name) { $('wzErr').textContent = 'Wpisz imię prezesa i nazwę firmy.'; return; }
+      }
+      if (wz.step < 3) { wz.step++; renderWiz(); $('wiz').scrollTo(0, 0); return; }
+      S = newState({ done: true, ceo: wz.ceo, name: wz.name, hq: wz.hq, color: wz.color, diff: wz.diff, tut: wz.tut });
+      ui.bc = ui.mc = S.hq; ui.tab = 'firma'; acc = 0; prev = performance.now(); renderWiz(); break;
     case 'reset':
       if (!ui.resetArm) { ui.resetArm = true; settings(); return; }
-      S = newState(); ui.resetArm = false; $('modal').hidden = true; save(); break;
+      S = newState(); Object.assign(wz, { step: 0, ceo: '', name: '' }); ui.resetArm = false; $('modal').hidden = true; save(); renderWiz(); break;
     case 'chkUpd': checkUpdate(true); return;
     case 'getUpd': openUrl(ui.update.url); return;
   }
@@ -538,7 +649,8 @@ function openUrl(url) {
 
 // ================== PĘTLA ==================
 S = load();
-{
+ui.bc = ui.mc = S.hq;
+if (S.setup) {
   const off = Math.min(OFFLINE_MAX_H, Math.floor((Date.now() - (S.last || Date.now())) / HOUR_MS));
   if (off > 0) {
     const c0 = S.cash;
@@ -549,6 +661,7 @@ S = load();
 let acc = 0, prev = performance.now(), n = 0;
 function loop() {
   const now = performance.now(); acc += Math.min(now - prev, 60000); prev = now;
+  if (!S.setup) { acc = 0; return; }
   let ran = false;
   while (acc >= HOUR_MS) { acc -= HOUR_MS; hour(S); ran = true; }
   if (ran) {
@@ -559,14 +672,14 @@ function loop() {
 }
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) save();
-  else { // po powrocie dolicz czas, który minął w tle
+  else if (S.setup) { // po powrocie dolicz czas, który minął w tle
     const off = Math.min(OFFLINE_MAX_H, Math.floor((Date.now() - S.last) / HOUR_MS));
     for (let i = 0; i < off; i++) hour(S);
     acc = 0; prev = performance.now(); save(); render(true);
   }
 });
 if (VERSION === 'dev') window.__xyx = { get S() { return S; }, hour: n => { for (let i = 0; i < n; i++) hour(S); render(true); } };
-save(); render(true);
+save(); render(true); renderWiz();
 setInterval(loop, 500);
 setTimeout(() => checkUpdate(false), 2000);
 })();
