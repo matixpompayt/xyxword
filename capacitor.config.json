@@ -1,0 +1,8 @@
+{
+  "appId": "pl.matixpompayt.xyxword",
+  "appName": "XyxWord",
+  "webDir": "www",
+  "android": {
+    "backgroundColor": "#121418"
+  }
+}
