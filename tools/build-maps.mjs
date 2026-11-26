@@ -1,5 +1,5 @@
 // Generuje www/maps.js (mapy jako ścieżki SVG) i www/places.js (miasta i wsie) z danych Natural Earth + GeoNames.
-// Użycie: cd tools && npm i world-atlas@2 topojson-client@3 d3-geo@3 all-the-cities@3 countries-list@3 && node build-maps.mjs
+// Użycie (OLD=ścieżka do poprzedniego places.js opcjonalnie): cd tools && npm i world-atlas@2 topojson-client@3 d3-geo@3 all-the-cities@3 countries-list@3 && node build-maps.mjs
 import fs from 'fs';
 import { createRequire } from 'module';
 import * as topo from 'topojson-client';
@@ -44,50 +44,82 @@ const PL = { Warsaw: 'Warszawa', Moscow: 'Moskwa', 'Saint Petersburg': 'Petersbu
   Singapore: 'Singapur', 'New York City': 'Nowy Jork', Philadelphia: 'Filadelfia', 'Mexico City': 'Meksyk', Havana: 'Hawana', 'Rio de Janeiro': 'Rio de Janeiro',
   'Buenos Aires': 'Buenos Aires', Bogotá: 'Bogota', Lima: 'Lima', Cracow: 'Kraków', Krakow: 'Kraków', Breslau: 'Wrocław', Danzig: 'Gdańsk', 'Köln': 'Kolonia', 'Nürnberg': 'Norymberga', 'München': 'Monachium', 'İzmir': 'Izmir', 'Wien': 'Wiedeń', 'Roma': 'Rzym', 'Napoli': 'Neapol', 'Torino': 'Turyn', 'Milano': 'Mediolan', 'Firenze': 'Florencja', 'Genova': 'Genua', 'Venezia': 'Wenecja', 'Lisboa': 'Lizbona', 'Sevilla': 'Sewilla', 'Bruxelles': 'Bruksela', 'Antwerpen': 'Antwerpia', 'København': 'Kopenhaga', 'Göteborg': 'Göteborg', 'Praha': 'Praga', 'Bucureşti': 'Bukareszt', 'Beograd': 'Belgrad', 'Athína': 'Ateny', 'Moskva': 'Moskwa', 'Kyiv': 'Kijów', 'Lviv': 'Lwów', 'Kharkiv': 'Charków' };
 
-// --- ląd: wielokąty (do wykrywania wybrzeża i wysp) ---
+// --- ląd jako raster (0.04°): wartość = numer wielokąta + 1 (wyspy/kontynenty), 0 = woda ---
+const RES = 0.04, LAT0 = -60, LAT1 = 80, COLS = Math.round(360 / RES), ROWS = Math.round((LAT1 - LAT0) / RES);
+const grid = new Int16Array(COLS * ROWS);
 const landF = topo.feature(w50, w50.objects.land);
 const landPolys = (landF.features || [landF]).flatMap(f => f.geometry.type === 'Polygon' ? [f.geometry.coordinates] : f.geometry.coordinates);
-const polys = landPolys.map((c, i) => { const f = { type: 'Polygon', coordinates: c }; return { i, f, b: d3.geoBounds(f), a: d3.geoArea(f) }; });
-const inPoly = (pl, p) => { const [[x0, y0], [x1, y1]] = pl.b; return (x0 > x1 || (p[0] >= x0 && p[0] <= x1)) && p[1] >= y0 && p[1] <= y1 && d3.geoContains(pl.f, p); };
-const polyAt = p => polys.find(pl => inPoly(pl, p));
-function offset([lo, la], km, deg) { const r = km / 6371, b = deg * Math.PI / 180, f1 = la * Math.PI / 180, l1 = lo * Math.PI / 180;
-  const f2 = Math.asin(Math.sin(f1) * Math.cos(r) + Math.cos(f1) * Math.sin(r) * Math.cos(b));
-  const l2 = l1 + Math.atan2(Math.sin(b) * Math.sin(r) * Math.cos(f1), Math.cos(r) - Math.sin(f1) * Math.sin(f2));
-  return [l2 * 180 / Math.PI, f2 * 180 / Math.PI]; }
-function geo(lo, la) { // ld = wyspa/kontynent, port = wybrzeże w promieniu ~12 km
-  const p = [lo, la]; let pl = polyAt(p), coast = false;
-  for (let d = 0; d < 360; d += 30) { const q = offset(p, 12, d), h = polyAt(q); if (!h) coast = true; else if (!pl) pl = h; }
-  return { ld: pl ? (pl.a > 0.02 ? 'L' + pl.i : 'I' + pl.i) : 'X', coast };
+landPolys.forEach((rings, pi) => {
+  const buckets = new Map();
+  for (const ring of rings) for (let i = 0; i < ring.length - 1; i++) {
+    const [x1, y1] = ring[i], [x2, y2] = ring[i + 1]; if (y1 === y2) continue;
+    const r0 = Math.max(0, Math.ceil((Math.min(y1, y2) - LAT0) / RES - .5)), r1 = Math.min(ROWS - 1, Math.floor((Math.max(y1, y2) - LAT0) / RES - .5));
+    for (let r = r0; r <= r1; r++) { let b = buckets.get(r); if (!b) buckets.set(r, b = []); b.push(x1, y1, x2, y2); }
+  }
+  for (const [r, e] of buckets) {
+    const y = LAT0 + (r + .5) * RES, xs = [];
+    for (let i = 0; i < e.length; i += 4) { const [x1, y1, x2, y2] = [e[i], e[i + 1], e[i + 2], e[i + 3]];
+      if ((y1 <= y && y2 > y) || (y2 <= y && y1 > y)) xs.push(x1 + (y - y1) / (y2 - y1) * (x2 - x1)); }
+    xs.sort((a, b) => a - b);
+    for (let i = 0; i + 1 < xs.length; i += 2) {
+      const c0 = Math.max(0, Math.ceil((xs[i] + 180) / RES - .5)), c1 = Math.min(COLS - 1, Math.floor((xs[i + 1] + 180) / RES - .5));
+      for (let c = c0; c <= c1; c++) grid[r * COLS + c] = pi + 1;
+    }
+  }
+});
+const cellAt = (lo, la) => { const r = Math.floor((la - LAT0) / RES), c = Math.floor((lo + 180) / RES); return r < 0 || r >= ROWS ? 0 : grid[r * COLS + ((c % COLS) + COLS) % COLS]; };
+function geo(lo, la) { // ld = wyspa/kontynent, port = woda w promieniu ~3 komórek (~12 km)
+  let v = cellAt(lo, la), coast = false;
+  const R = 3, dl = RES / Math.max(.2, Math.cos(la * Math.PI / 180));
+  for (let i = -R; i <= R; i++) for (let j = -R; j <= R; j++) {
+    if (i * i + j * j > R * R) continue;
+    const w = cellAt(lo + j * dl, la + i * RES);
+    if (!w) coast = true; else if (!v) v = w;
+  }
+  return { ld: v ? 'L' + (v - 1) : 'X', coast };
 }
 const kmD = (a, b) => d3.geoDistance(a, b) * 6371;
 const slug = s => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/ł/g, 'l').replace(/[^a-z0-9]+/g, '');
 
+// id z wersji 0.6 (żeby stare zapisy działały)
+const OLD = new Map();
+try { const t = fs.readFileSync(process.env.OLD || here + 'places_v06.js', 'utf8'); for (const p of eval(t.slice(t.indexOf('= [') + 2, t.lastIndexOf(']') + 1)))
+  OLD.set(p[2] + '|' + (+p[4]).toFixed(2) + '|' + (+p[5]).toFixed(2), p[0]); } catch (e) { console.log('brak starych id'); }
+
 const places = [], ids = new Set();
-for (const [id, c, n, t, la, lo, port, ld] of BASE) {
+for (const [id, c, n, t, la, lo, port] of BASE) {
   const g = geo(lo, la);
   places.push({ id, c, n, t, la, lo, port: port ? 1 : 0, ld: c + ':' + g.ld, pop: 0, f: 1 }); ids.add(id);
 }
-const hash = x => { x = (x ^ 61) ^ (x >>> 16); x = x + (x << 3); x ^= x >>> 4; x = Math.imul(x, 0x27d4eb2d); return (x ^ (x >>> 15)) >>> 0; };
+const OKF = /^PPL(A\d?|C)?$/;
 for (const [cid, cf] of Object.entries(CFG)) {
-  const pool = CITIES.map(x => ({ x, lo: x.loc.coordinates[0], la: x.loc.coordinates[1] })).filter(o => contOf(o.x.country, o.lo, o.la) === cid);
-  const mine = places.filter(p => p.c === cid);
-  const ok = (o, km) => mine.every(p => kmD([p.lo, p.la], [o.lo, o.la]) >= km);
-  const add = (o, t) => {
-    const g = geo(o.lo, o.la); if (g.ld === 'X') return false;
-    let n = PL[o.x.name] || o.x.name, id = slug(n) || 'p' + o.x.cityId; if (ids.has(id)) id += o.x.country.toLowerCase(); if (ids.has(id)) id += o.x.cityId;
-    const p = { id, c: cid, n, t, la: +o.la.toFixed(3), lo: +o.lo.toFixed(3), port: g.coast ? 1 : 0, ld: cid + ':' + g.ld, pop: o.x.population, f: 0 };
-    ids.add(id); places.push(p); mine.push(p); return true;
-  };
-  // miejsca bazowe: uzupełnij ludność
-  for (const p of mine) { const m = pool.filter(o => kmD([p.lo, p.la], [o.lo, o.la]) < 15).sort((a, b) => b.x.population - a.x.population)[0]; if (m) p.pop = m.x.population; }
+  const pool = CITIES.map(x => ({ x, lo: x.loc.coordinates[0], la: x.loc.coordinates[1] }))
+    .filter(o => OKF.test(o.x.featureCode) && contOf(o.x.country, o.lo, o.la) === cid).sort((a, b) => b.x.population - a.x.population);
+  const near = new Map(), K = .05, key = (lo, la) => Math.floor(lo / K) + ',' + Math.floor(la / K);
+  const put = (p, km) => { const k = key(p.lo, p.la); (near.get(k) || near.set(k, []).get(k)).push([p, km]); };
+  const tooClose = o => { const cx = Math.floor(o.lo / K), cy = Math.floor(o.la / K);
+    for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) for (const [p, km] of near.get((cx + i) + ',' + (cy + j)) || [])
+      if (kmD([p.lo, p.la], [o.lo, o.la]) < km) return p; return null; };
+  for (const p of places.filter(p => p.c === cid)) put(p, 3);
   let n = 0;
-  for (const o of pool.filter(o => o.x.population >= cf.cityPop).sort((a, b) => b.x.population - a.x.population)) {
-    if (n >= cf.nCity) break; if (ok(o, cf.cityKm) && add(o, 'm')) n++;
+  for (const o of pool) {
+    const hit = tooClose(o);
+    if (hit) { if (hit.f && !hit.pop) hit.pop = o.x.population; continue; }
+    const g = geo(o.lo, o.la); if (g.ld === 'X') continue;
+    const nm = PL[o.x.name] || o.x.name, la = +o.la.toFixed(3), lo = +o.lo.toFixed(3);
+    let id = OLD.get(nm + '|' + la.toFixed(2) + '|' + lo.toFixed(2)) || 'g' + o.x.cityId;
+    if (ids.has(id)) id = 'g' + o.x.cityId;
+    if (ids.has(id)) continue;
+    const p = { id, c: cid, n: nm, t: o.x.population >= 10000 ? 'm' : 'w', la, lo, port: g.coast ? 1 : 0, ld: cid + ':' + g.ld, pop: o.x.population, f: 0 };
+    ids.add(id); places.push(p); put(p, 2); n++;
   }
-  n = 0;
-  for (const o of pool.filter(o => o.x.population >= 800 && o.x.population <= 8000 && /^PPL$/.test(o.x.featureCode)).sort((a, b) => hash(a.x.cityId) - hash(b.x.cityId))) {
-    if (n >= cf.nVil) break; if (ok(o, cf.vilKm) && add(o, 'w')) n++;
-  }
+}
+
+// miejsca z 0.6, które odpadły przy deduplikacji — zostają (zapisy graczy)
+const OLDP = (() => { try { const t = fs.readFileSync(process.env.OLD || here + 'places_v06.js', 'utf8'); return eval(t.slice(t.indexOf('= [') + 2, t.lastIndexOf(']') + 1)); } catch (e) { return []; } })();
+for (const [id, c, n, t, la, lo, port, , pop] of OLDP) if (!ids.has(id)) {
+  const g = geo(lo, la); ids.add(id);
+  places.push({ id, c, n, t, la, lo, port: port ? 1 : 0, ld: c + ':' + (g.ld === 'X' ? 'L0' : g.ld), pop: pop || 0, f: 0 });
 }
 
 // --- mapy ---
@@ -111,7 +143,6 @@ for (const [cid, c] of Object.entries(CFG)) {
   m.w = W; m.h = H; m.pts = {}; m.box = c.b;
   m.proj = { type: cid === 'eu' || cid === 'na' ? 'geoConicConformal' : 'geoMercator', rotate: proj.rotate(), scale: proj.scale(), translate: proj.translate(),
     parallels: proj.parallels ? proj.parallels() : null };
-  for (const l of places.filter(l => l.c === cid)) m.pts[l.id] = proj([l.lo, l.la]).map(r1);
   out[cid] = m;
 }
 {
@@ -124,7 +155,12 @@ for (const [cid, c] of Object.entries(CFG)) {
   out.world = m;
 }
 fs.writeFileSync(WWW + 'maps.js', '// Wygenerowane przez tools/build-maps.mjs — mapy: Natural Earth (domena publiczna)\nwindow.XYX_MAPS = ' + JSON.stringify(out) + ';\n');
-fs.writeFileSync(WWW + 'places.js', '// Wygenerowane przez tools/build-maps.mjs — miejscowości: GeoNames (CC BY 4.0)\n// [id, kontynent, nazwa, typ m/w, lat, lon, port, ląd, ludność, polecane]\nwindow.XYX_PLACES = [\n' +
-  places.map(p => JSON.stringify([p.id, p.c, p.n, p.t, p.la, p.lo, p.port, p.ld, p.pop, p.f])).join(',\n') + '\n];\n');
+const P = {};
+for (const cid of Object.keys(CFG)) {
+  const ls = places.filter(p => p.c === cid), ldt = [...new Set(ls.map(p => p.ld))];
+  P[cid] = { id: ls.map(p => p.id).join('|'), n: ls.map(p => p.n.replace(/\|/g, '/')).join('|'), t: ls.map(p => p.t).join(''), p: ls.map(p => p.port).join(''),
+    f: ls.map(p => p.f).join(''), ldt, ld: ls.map(p => ldt.indexOf(p.ld)), la: ls.map(p => Math.round(p.la * 1000)), lo: ls.map(p => Math.round(p.lo * 1000)), pop: ls.map(p => p.pop) };
+}
+fs.writeFileSync(WWW + 'places.js', '// Wygenerowane przez tools/build-maps.mjs — miejscowości: GeoNames (CC BY 4.0), format kolumnowy\nwindow.XYX_PLACES = ' + JSON.stringify(P) + ';\n');
 const cnt = {}; for (const p of places) { const k = p.c + p.t; cnt[k] = (cnt[k] || 0) + 1; }
 console.log(places.length, cnt, 'ports', places.filter(p => p.port).length);

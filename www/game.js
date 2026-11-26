@@ -43,9 +43,14 @@ const LOCS_BASE = [
   ['brisbane', 'au', 'Brisbane', 'm', -27.47, 153.03, 1], ['kalgoorlie', 'au', 'Kalgoorlie', 'w', -30.75, 121.47], ['dubbo', 'au', 'Dubbo', 'w', -32.25, 148.60],
 ];
 // pełna lista miejscowości generowana przez tools/build-maps.mjs (www/places.js); LOCS_BASE = polecane miejsca startowe
-const LOCS = (window.XYX_PLACES || LOCS_BASE).map(([id, c, n, t, la, lo, port, ld, pop, f]) =>
-  ({ id, c, n, t, la, lo, port: !!port, ld: ld || c, pop: pop || 0, f: window.XYX_PLACES ? !!f : true }));
-const LOC = Object.fromEntries(LOCS.map(l => [l.id, l]));
+const LOCS = [];
+if (window.XYX_PLACES) for (const [c, d] of Object.entries(window.XYX_PLACES)) { // format kolumnowy z places.js
+  const id = d.id.split('|'), n = d.n.split('|');
+  for (let i = 0; i < id.length; i++) LOCS.push({ id: id[i], c, n: n[i], t: d.t[i], la: d.la[i] / 1000, lo: d.lo[i] / 1000, port: d.p[i] === '1',
+    ld: d.ldt[d.ld[i]], pop: d.pop[i], f: d.f[i] === '1' });
+} else for (const [id, c, n, t, la, lo, port, ld] of LOCS_BASE) LOCS.push({ id, c, n, t, la, lo, port: !!port, ld: ld || c, pop: 0, f: true });
+const LOC = {};
+for (const l of LOCS) LOC[l.id] = l;
 const CAP = { eu: 'hamburg', na: 'nowyjork', sa: 'rio', af: 'lagos', as: 'szanghaj', au: 'sydney' };
 const TYPE = {
   m: { n: 'Miasto', slots: 6, step: 2, maxX: 5, land: 6000, xCost: 15000, raw: 1, fac: 1.15, sell: 1.05,
@@ -460,6 +465,14 @@ function vFirma() {
   return h;
 }
 const MAPS = window.XYX_MAPS;
+const BYC = {}; // miejscowości kontynentu posortowane wg ludności (kolejność rysowania)
+function initPts() {
+  for (const cid of Object.keys(CN)) {
+    const pr = projOf(cid), pts = MAPS[cid].pts = MAPS[cid].pts || {};
+    BYC[cid] = LOCS.filter(l => l.c === cid).sort((a, b) => b.pop - a.pop);
+    for (const l of BYC[cid]) { const p = pr([l.lo, l.la]); l.x = p[0]; l.y = p[1]; pts[l.id] = p; }
+  }
+}
 // podkład mapy: morze, siatka, cień lądu, ląd, granice
 function mapBase(m, id) {
   return `<defs><radialGradient id="sea${id}" cx="50%" cy="35%" r="80%"><stop offset="0" stop-color="#173047"/><stop offset="1" stop-color="#0b131b"/></radialGradient>
@@ -494,24 +507,24 @@ function mapSvg() {
   return `<div class="map"><svg viewBox="0 0 ${m.w} ${m.h}">${mapBase(m, 'w')}${lines}${dots}</svg></div>`;
 }
 // mapa kontynentu z miejscowościami i jadącymi pojazdami; zoom/przesuwanie: ui.z[cid]
+const ZMAX = 60;
 function zOf(cid) {
   if (ui.z[cid]) return ui.z[cid];
   ui.z[cid] = { k: 1, x: 0, y: 0 };
   const p = MAPS[cid] && MAPS[cid].pts[ui.bl];
-  if (p && LOC[ui.bl] && LOC[ui.bl].c === cid && cid === 'eu') zoomAt(cid, 3, p[0], p[1]);
+  if (p && LOC[ui.bl] && LOC[ui.bl].c === cid) zoomAt(cid, cid === 'eu' ? 6 : 3, p[0], p[1]);
   return ui.z[cid];
 }
 function clampZ(cid) {
   const z = zOf(cid), m = MAPS[cid];
-  z.k = clamp(z.k, 1, 12); z.x = clamp(z.x, 0, m.w - m.w / z.k); z.y = clamp(z.y, 0, m.h - m.h / z.k);
+  z.k = clamp(z.k, 1, ZMAX); z.x = clamp(z.x, 0, m.w - m.w / z.k); z.y = clamp(z.y, 0, m.h - m.h / z.k);
 }
 function zoomAt(cid, k, ux, uy) { // ux,uy: punkt mapy, który ma zostać w miejscu (środek widoku)
   const z = zOf(cid), m = MAPS[cid];
-  z.k = clamp(k, 1, 12); z.x = ux - m.w / z.k / 2; z.y = uy - m.h / z.k / 2; clampZ(cid);
+  z.k = clamp(k, 1, ZMAX); z.x = ux - m.w / z.k / 2; z.y = uy - m.h / z.k / 2; clampZ(cid);
 }
 function locMap(cid, sel) {
-  const m = MAPS[cid], z = zOf(cid), u = 1 / z.k, P = l => m.pts[l.id];
-  const ls = LOCS.filter(l => l.c === cid);
+  const m = MAPS[cid], z = zOf(cid), u = 1 / z.k, P = l => [l.x, l.y];
   const own = l => { const L = S.L[l.id]; return !!(L && (L.bld.length || L.gar || Object.keys(L.inv).length)); };
   let g = '';
   for (const v of S.veh) {
@@ -520,29 +533,39 @@ function locMap(cid, sel) {
     g += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="#f5c542" stroke-width="2" stroke-dasharray="5 4" vector-effect="non-scaling-stroke"/>
       <rect x="${x1 + (x2 - x1) * p - 11 * u}" y="${y1 + (y2 - y1) * p - 7 * u}" width="${22 * u}" height="${14 * u}" rx="${3 * u}" fill="#f5c542" stroke="#0b131b" stroke-width="1.5" vector-effect="non-scaling-stroke"/>`;
   }
-  // etykiety: najpierw wybrana i Twoje, potem miasta, potem wsie; nachodzące się chowamy
+  // co rysować: widok + margines (płynne przesuwanie), siatka przerzedzająca, najpierw ważne miejsca
+  const vw = m.w / z.k, vh = m.h / z.k, x0 = z.x - vw * .5, x1 = z.x + vw * 1.5, y0 = z.y - vh * .5, y1 = z.y + vh * 1.5;
+  const cell = 26 * u, taken = new Set(), ls = [];
+  const take = l => { if (l.x < x0 || l.x > x1 || l.y < y0 || l.y > y1) return; const k = Math.floor(l.x / cell) + ',' + Math.floor(l.y / cell);
+    if (taken.has(k)) return false; taken.add(k); ls.push(l); };
+  const special = [LOC[sel], ...Object.keys(S.L).map(id => LOC[id]), ...LOCS.filter(l => l.u)].filter(l => l && l.c === cid);
+  const seen = new Set();
+  for (const l of special) if (!seen.has(l.id)) { seen.add(l.id); if (l.x >= x0 && l.x <= x1 && l.y >= y0 && l.y <= y1) { ls.push(l); taken.add(Math.floor(l.x / cell) + ',' + Math.floor(l.y / cell)); } }
+  for (const l of BYC[cid]) { if (ls.length > 900) break; if (!seen.has(l.id)) take(l); }
+  // etykiety (tylko w widoku), nachodzące się chowamy
   const fs = 28 * u, boxes = [], lab = {};
   const hit = b => boxes.some(o => b[0] < o[2] && b[2] > o[0] && b[1] < o[3] && b[3] > o[1]);
-  const order = [...ls].sort((a, b) => (b.id === sel) - (a.id === sel) || own(b) - own(a) || !!b.u - !!a.u || (a.t === 'm' ? -1 : 1) - (b.t === 'm' ? -1 : 1) || b.pop - a.pop);
-  for (const l of ls) { const [x, y] = P(l), q = (l.t === 'm' ? 8 : 6) * u; boxes.push([x - q, y - q, x + q, y + q]); }
-  for (const l of order) {
-    const [x, y] = P(l), w = l.n.length * fs * .56, d = 16 * u;
+  for (const l of ls) { const q = (l.t === 'm' ? 8 : 6) * u; boxes.push([l.x - q, l.y - q, l.x + q, l.y + q]); }
+  let nl = 0;
+  for (const l of ls) {
+    if (nl > 140 || l.x < z.x || l.x > z.x + vw || l.y < z.y || l.y > z.y + vh) continue;
+    const { x, y } = l, w = l.n.length * fs * .56, d = 16 * u;
     const opts = [[x, y + d + fs * .8, 'middle', x - w / 2, y + d, x + w / 2, y + d + fs], [x, y - d - fs * .2, 'middle', x - w / 2, y - d - fs, x + w / 2, y - d],
       [x + d, y + fs * .35, 'start', x + d, y - fs / 2, x + d + w, y + fs / 2], [x - d, y + fs * .35, 'end', x - d - w, y - fs / 2, x - d, y + fs / 2]];
     const o = opts.find(o => !hit(o.slice(3))) || (l.id === sel ? opts[0] : null);
-    if (o) { boxes.push(o.slice(3)); lab[l.id] = o; }
+    if (o) { boxes.push(o.slice(3)); lab[l.id] = o; nl++; }
   }
   for (const l of ls) {
-    const [x, y] = P(l), L = S.L[l.id], mine = own(l), on = l.id === sel, lb = lab[l.id], r = ((l.t === 'm' ? 8 : 5.5) + (mine || on ? 3 : 0)) * u;
+    const { x, y } = l, L = S.L[l.id], mine = own(l), on = l.id === sel, lb = lab[l.id], r = ((l.t === 'm' ? 8 : 5.5) + (mine || on ? 3 : 0)) * u;
     const fill = mine ? S.color : (l.t === 'm' ? '#56677a' : '#4b6a4e');
     const shape = l.t === 'm' ? `<rect x="${x - r}" y="${y - r}" width="${2 * r}" height="${2 * r}" rx="${3 * u}"` : `<circle cx="${x}" cy="${y}" r="${r}"`;
-    g += `<g data-a="bl" data-l="${l.id}" data-from-map="1" style="cursor:pointer"><circle cx="${x}" cy="${y}" r="${16 * u}" fill="transparent"/>
+    g += `<g data-a="bl" data-l="${l.id}" data-from-map="1"><circle cx="${x}" cy="${y}" r="${14 * u}" fill="transparent"/>
       ${on ? `<circle cx="${x}" cy="${y}" r="${19 * u}" fill="none" stroke="#e0823f" stroke-width="2.5" vector-effect="non-scaling-stroke"/>` : ''}
-      ${shape} fill="${fill}" stroke="${mine ? '#fff' : '#0b131b'}" stroke-width="1.5" vector-effect="non-scaling-stroke"/>
+      ${shape} fill="${fill}" stroke="${mine ? '#fff' : '#0b131b'}" stroke-width="1.2" vector-effect="non-scaling-stroke"/>
       ${L && L.port ? `<rect x="${x + 7 * u}" y="${y - 17 * u}" width="${10 * u}" height="${10 * u}" rx="${2 * u}" fill="#4aa3ff" stroke="#0b131b" stroke-width="1" vector-effect="non-scaling-stroke"/>` : ''}
       ${lb ? `<text x="${lb[0]}" y="${lb[1]}" text-anchor="${lb[2]}" font-size="${fs}" font-weight="${on || mine ? 700 : 500}" fill="${on ? '#fff' : mine ? '#eef0f3' : '#b4bcc6'}" class="lbl" style="stroke-width:${7 * u}px">${l.n}</text>` : ''}</g>`;
   }
-  return `<div class="map lmap${ui.place ? ' placing' : ''}" data-cid="${cid}" style="--ar:${m.w}/${m.h}"><svg viewBox="${z.x} ${z.y} ${m.w / z.k} ${m.h / z.k}" preserveAspectRatio="xMidYMid meet" class="${z.k > 1 ? 'zoomed' : ''}">${mapBase(m, cid)}${g}</svg>
+  return `<div class="map lmap${ui.place ? ' placing' : ''}" data-cid="${cid}" style="--ar:${m.w}/${m.h}"><svg viewBox="${z.x} ${z.y} ${vw} ${vh}" preserveAspectRatio="xMidYMid meet" class="${z.k > 1 ? 'zoomed' : ''}">${mapBase(m, cid)}${g}</svg>
     <div class="zbtn"><button data-a="zoom" data-z="1" aria-label="Przybliż">+</button><button data-a="zoom" data-z="-1" aria-label="Oddal">−</button>${z.k > 1 ? '<button data-a="zoom" data-z="0" aria-label="Cała mapa">⤢</button>' : ''}</div></div>`;
 }
 // gesty na mapie kontynentu: przeciąganie, szczypanie, kółko myszy
@@ -570,7 +593,7 @@ document.addEventListener('pointermove', e => {
     const d0 = Math.hypot(prevPts[0].x - prevPts[1].x, prevPts[0].y - prevPts[1].y), d1 = Math.hypot(cur[0].x - cur[1].x, cur[0].y - cur[1].y);
     const mx = (cur[0].x + cur[1].x) / 2 - r.left, my = (cur[0].y + cur[1].y) / 2 - r.top;
     const ux = z.x + mx * k, uy = z.y + my * k;
-    z.k = clamp(z.k * (d1 / (d0 || d1)), 1, 12);
+    z.k = clamp(z.k * (d1 / (d0 || d1)), 1, ZMAX);
     const k2 = Math.max(m.w / z.k / r.width, m.h / z.k / r.height);
     z.x = ux - mx * k2; z.y = uy - my * k2; gs.moved = true;
   }
@@ -588,7 +611,7 @@ document.addEventListener('wheel', e => {
   e.preventDefault();
   const cid = svg.parentNode.dataset.cid, z = zOf(cid), { r, k } = upp(svg, cid);
   const ux = z.x + (e.clientX - r.left) * k, uy = z.y + (e.clientY - r.top) * k;
-  z.k = clamp(z.k * (e.deltaY < 0 ? 1.25 : .8), 1, 12);
+  z.k = clamp(z.k * (e.deltaY < 0 ? 1.25 : .8), 1, ZMAX);
   const m = MAPS[cid], k2 = Math.max(m.w / z.k / r.width, m.h / z.k / r.height);
   z.x = ux - (e.clientX - r.left) * k2; z.y = uy - (e.clientY - r.top) * k2; clampZ(cid);
   clearTimeout(gs.wt); applyVB(svg, cid); gs.wt = setTimeout(() => render(true), 150);
@@ -598,8 +621,9 @@ function locRes(cid, sel) {
   const q = norm((ui.locQ || '').trim());
   let list;
   if (q) {
-    list = LOCS.filter(l => l.c === cid && norm(l.n).includes(q))
-      .sort((a, b) => (norm(b.n).startsWith(q) - norm(a.n).startsWith(q)) || b.pop - a.pop).slice(0, 16);
+    const nn = l => l.nn || (l.nn = norm(l.n)), st = [], inc = [];
+    for (const l of BYC[cid]) { const v = nn(l); if (v.startsWith(q)) { if (st.length < 16) st.push(l); } else if (inc.length < 16 && v.includes(q)) inc.push(l); }
+    list = [...st, ...inc].slice(0, 16);
     if (!list.length) return '<div class="mut small" style="padding:4px 4px 10px">Brak wyników. Możesz założyć własną miejscowość (+ Własna).</div>';
   } else {
     const ids = new Set([sel, ...Object.keys(S.L).filter(id => LOC[id].c === cid), ...LOCS.filter(l => l.c === cid && l.u).map(l => l.id),
@@ -622,7 +646,7 @@ function registerCustom(s) {
   for (const c of s.custom || []) {
     const l = { ...c, n: String(c.n).replace(/[<>&"'`\\]/g, ''), port: !!c.port, pop: 0, f: false, u: true }, pr = projOf(l.c);
     if (!pr) continue;
-    LOCS.push(l); LOC[l.id] = l; MAPS[l.c].pts[l.id] = pr([l.lo, l.la]).map(v => Math.round(v * 10) / 10);
+    const p = pr([l.lo, l.la]); l.x = p[0]; l.y = p[1]; LOCS.push(l); LOC[l.id] = l; MAPS[l.c].pts[l.id] = p;
   }
 }
 function placeAt(e, svg) {
@@ -657,15 +681,15 @@ function vBudowa() {
   let h = contChips(cid);
   if (!S.c[cid]) {
     return h + `<div class="card"><div class="bname">${c.n}</div>
-      <div class="mut" style="margin:4px 0 8px">Nie masz tu oddziału. Bonusy surowców: ${bonTxt(c)}. Miejscowości: ${LOCS.filter(l => l.c === cid).length}, m.in. ${LOCS.filter(l => l.c === cid).sort((a, b) => b.pop - a.pop).slice(0, 6).map(l => l.n).join(', ')}.</div>
+      <div class="mut" style="margin:4px 0 8px">Nie masz tu oddziału. Bonusy surowców: ${bonTxt(c)}. Miejscowości: ${BYC[cid].length.toLocaleString('pl-PL')}, m.in. ${BYC[cid].slice(0, 6).map(l => l.n).join(', ')}.</div>
       <button class="btn p" data-a="branch" data-c="${cid}" ${S.cash < BRANCH_COST ? 'disabled' : ''}>Otwórz oddział — ${money(BRANCH_COST)}</button></div>`;
   }
   if (LOC[ui.bl].c !== cid) ui.bl = Object.keys(S.L).find(l => LOC[l].c === cid) || CAP[cid];
   const lid = ui.bl, l = LOC[lid], t = TYPE[l.t], L = S.L[lid] || newLoc(), fr = slots(L, lid) - used(L);
-  const nC = LOCS.filter(x => x.c === cid).length;
+  const nC = BYC[cid].length;
   h += (ui.place ? `<div class="placebar"><span class="grow">Dotknij mapy w miejscu, gdzie ma powstać nowa miejscowość.</span><button class="btn s" data-a="placeOff">Anuluj</button></div>` : '')
     + locMap(cid, lid)
-    + `<div class="lsearch"><input id="locQ" data-q="1" type="search" placeholder="Szukaj wśród ${nC} miejscowości…" value="${esc(ui.locQ || '')}" autocomplete="off">
+    + `<div class="lsearch"><input id="locQ" data-q="1" type="search" placeholder="Szukaj wśród ${nC.toLocaleString('pl-PL')} miejscowości…" value="${esc(ui.locQ || '')}" autocomplete="off">
        ${ui.place ? '' : `<button class="btn s" data-a="placeMode">+ Własna</button>`}</div><div id="locRes">${locRes(cid, lid)}</div>`;
   h += `<div class="card"><div class="row"><div class="grow"><span class="bname">${esc(l.n)}</span> ${tag(l)}${l.port ? ' <span class="ltag p">Wybrzeże</span>' : ''}${l.u ? ' <span class="ltag u">Twoja osada</span>' : ''}
       <div class="flow">${l.pop ? `Ludność: ${popTxt(l.pop)} · ` : ''}${t.d}</div></div></div>
@@ -743,6 +767,13 @@ function sendForm(kind, u, dests, cap, hrsF, feeF) {
     ${f.g ? `<label class="f">Ilość (max ${maxQ})</label><input type="number" inputmode="numeric" data-in="${kind}" data-s="${u.id}" data-k="q" value="${q}" min="0" max="${maxQ}">` : ''}
     <div class="btns"><button class="btn p" data-a="${kind === 'sf' ? 'send' : 'drive'}" data-id="${u.id}" ${S.cash < fee ? 'disabled' : ''}>Wyślij · ${hrs} h · ${money(fee)}</button></div>`;
 }
+const NEAR = {};
+function vehDests(at) { // Twoje miejscowości na tym samym lądzie + 25 najbliższych
+  const a = LOC[at];
+  if (!NEAR[at]) NEAR[at] = BYC[a.c].filter(l => l.ld === a.ld && l.id !== at).map(l => [l.id, km(at, l.id)]).sort((x, y) => x[1] - y[1]).slice(0, 25).map(x => x[0]);
+  const own = Object.keys(S.L).filter(id => id !== at && LOC[id].ld === a.ld).sort((x, y) => km(at, x) - km(at, y));
+  return [...new Set([...own, ...NEAR[at]])];
+}
 function vLogistyka() {
   let h = '';
   // --- garaże i pojazdy ---
@@ -767,7 +798,7 @@ function vLogistyka() {
         <div class="flow">${LOC[v.from].n} → ${LOC[v.to].n}${v.q ? ` · ${qty(v.q)} ${G[v.g].n}` : ' · pusty'}</div><div class="bar y"><i style="width:${p * 100}%"></i></div></div>`;
       continue;
     }
-    const dests = LOCS.filter(l => l.ld === LOC[v.at].ld && l.id !== v.at).map(l => l.id).sort((a, b) => (S.L[b] ? 1 : 0) - (S.L[a] ? 1 : 0) || km(v.at, a) - km(v.at, b)).slice(0, 30);
+    const dests = vehDests(v.at);
     h += `<div class="card"><div class="row"><b class="grow">${k.n} #${v.id}</b><span class="mut small">stoi w: ${LOC[v.at].n}</span></div>
       ${sendForm('vf', v, dests, k.cap, to => vehHours(S, v.k, v.at, to), to => vehFee(v.k, v.at, to))}</div>`;
   }
@@ -1009,6 +1040,7 @@ function openUrl(url) {
 }
 
 // ================== PĘTLA ==================
+initPts();
 S = load();
 registerCustom(S);
 ui.bc = S.hq; ui.bl = ui.ml = S.hl;
