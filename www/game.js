@@ -760,20 +760,67 @@ function foundSheet() {
 }
 
 // ================== MAPA SZCZEGÓŁOWA (MapLibre + OpenFreeMap: drogi, zabudowa; wymaga internetu) ==================
-const MSTYLES = { fiord: 'Granatowa (jak nocna Google)', dark: 'Ciemna', liberty: 'Jasna (budynki 3D)' };
+const MSTYLES = { caros: 'Ciemna 3D (jak CAR OS)', fiord: 'Granatowa', dark: 'Ciemna płaska', liberty: 'Jasna 3D' };
+const styleUrl = k => 'https://tiles.openfreemap.org/styles/' + (k === 'caros' ? 'liberty' : k);
+// styl CAR OS: „Liberty” z OpenFreeMap przemalowany na ciemno + własne budynki 3D (port z CarMapStyle.kt)
+const CP = { bg: '#0B0E12', water: '#0C1A25', green: '#0E1914', building: '#171C23', aero: '#1A1F27', pier: '#151A21', land: '#10141A',
+  lWater: '#15344B', lBoundary: '#3A404A', lRail: '#262C34', lCasing: '#06080B', lMotorway: '#677180', lPrimary: '#535C69', lSecondary: '#434B56',
+  lPath: '#232931', lAero: '#2B313A', lRoad: '#333A44', text: '#C3C9D0', textPoi: '#8C96A3', textWater: '#4E7FA3', halo: '#0A0C0F', b0: '#1B212A', b1: '#232B36', b2: '#2C3644' };
+function applyCaros(map) {
+  const has = (id, ...k) => k.some(x => id.includes(x));
+  const L = map.getStyle().layers;
+  for (const ly of L) {
+    const id = ly.id.toLowerCase(), set = (p, v) => { try { map.setPaintProperty(ly.id, p, v); } catch (e) {} };
+    try {
+      if (ly.type === 'background') set('background-color', CP.bg);
+      else if (ly.type === 'fill') {
+        if (ly.paint && ly.paint['fill-pattern']) { map.setLayoutProperty(ly.id, 'visibility', 'none'); continue; }
+        const c = has(id, 'water', 'ocean', 'lake', 'river') ? CP.water : has(id, 'park', 'wood', 'forest', 'grass', 'wetland', 'landcover', 'scrub', 'farmland', 'meadow') ? CP.green
+          : has(id, 'building') ? CP.building : has(id, 'aeroway', 'runway') ? CP.aero : has(id, 'pier', 'bridge') ? CP.pier : CP.land;
+        set('fill-color', c); set('fill-outline-color', c);
+      } else if (ly.type === 'line') {
+        const c = has(id, 'waterway', 'water', 'river', 'stream', 'canal') ? CP.lWater : has(id, 'boundary', 'admin') ? CP.lBoundary : has(id, 'rail', 'transit') ? CP.lRail
+          : has(id, 'casing') ? CP.lCasing : has(id, 'motorway', 'trunk') ? CP.lMotorway : has(id, 'primary') ? CP.lPrimary : has(id, 'secondary', 'tertiary') ? CP.lSecondary
+          : has(id, 'path', 'footway', 'cycle', 'track', 'pedestrian', 'steps') ? CP.lPath : has(id, 'aeroway', 'runway', 'taxiway') ? CP.lAero : CP.lRoad;
+        set('line-color', c);
+      } else if (ly.type === 'symbol') {
+        const poi = has(id, 'poi');
+        set('text-color', has(id, 'water') ? CP.textWater : poi ? CP.textPoi : CP.text); set('text-halo-color', CP.halo); set('text-halo-width', 1.4);
+        set('icon-opacity', poi ? .55 : .85);
+      } else if (ly.type === 'fill-extrusion' || ly.type === 'raster' || ly.type === 'hillshade') map.setLayoutProperty(ly.id, 'visibility', 'none');
+    } catch (e) {}
+  }
+  const src = Object.keys(map.getStyle().sources).find(k => k === 'openmaptiles') || Object.keys(map.getStyle().sources)[0];
+  const firstSym = (L.find(l => l.type === 'symbol') || {}).id;
+  if (src && !map.getLayer('xy-bld3d')) try {
+    map.addLayer({ id: 'xy-bld3d', type: 'fill-extrusion', source: src, 'source-layer': 'building', minzoom: 14,
+      paint: { 'fill-extrusion-color': ['interpolate', ['linear'], ['coalesce', ['get', 'render_height'], 6], 0, CP.b0, 30, CP.b1, 120, CP.b2],
+        'fill-extrusion-height': ['interpolate', ['linear'], ['zoom'], 14, 0, 15.5, ['coalesce', ['get', 'render_height'], 6]],
+        'fill-extrusion-base': ['coalesce', ['get', 'render_min_height'], 0], 'fill-extrusion-opacity': .92, 'fill-extrusion-vertical-gradient': true } }, firstSym);
+  } catch (e) {}
+  try { map.setLight({ anchor: 'viewport', color: '#ffffff', intensity: .5, position: [1.15, 210, 30] }); } catch (e) {}
+}
+class TiltCtl { // przycisk 3D / 2D
+  onAdd(map) { this.m = map; const d = this.d = document.createElement('div'); d.className = 'maplibregl-ctrl maplibregl-ctrl-group';
+    d.innerHTML = '<button type="button" class="tiltbtn" aria-label="Widok 3D / 2D">2D</button>';
+    d.firstChild.onclick = () => { const p = map.getPitch() > 5 ? 0 : 55; map.easeTo({ pitch: p, duration: 600 }); };
+    map.on('pitchend', () => { d.firstChild.textContent = map.getPitch() > 5 ? '2D' : '3D'; }); return d; }
+  onRemove() { this.d.remove(); }
+}
 let LM = null;
 function lmapOn() { return (!S || S.mapMode !== 'svg') && !ui.noGL && !!window.maplibregl && navigator.onLine !== false; }
 function ensureLM() {
   if (LM) return LM;
   const el = document.createElement('div'); el.className = 'lmapL';
-  const sty = S && MSTYLES[S.mapStyle] ? S.mapStyle : 'fiord';
+  const sty = S && MSTYLES[S.mapStyle] ? S.mapStyle : 'caros';
   let map;
   try {
-    map = new maplibregl.Map({ container: el, style: 'https://tiles.openfreemap.org/styles/' + sty, center: [14.55, 53.43], zoom: 9,
-      attributionControl: { compact: true }, dragRotate: false, pitchWithRotate: false, maxPitch: 0 });
+    map = new maplibregl.Map({ container: el, style: styleUrl(sty), center: [14.55, 53.43], zoom: 9, pitch: 50, maxPitch: 70,
+      attributionControl: { compact: true }, dragRotate: false, pitchWithRotate: false });
   } catch (e) { ui.noGL = true; toast('Ten telefon nie obsługuje mapy szczegółowej — mapa prosta'); return null; }
   map.touchZoomRotate.disableRotation();
   map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-left');
+  map.addControl(new TiltCtl(), 'top-left');
   LM = { map, el, sty, cid: null, mk: [], ready: false, srcCid: null };
   map.on('style.load', () => { LM.ready = true; LM.srcCid = null; setupLayers(); drawLM(); });
   map.on('error', e => { if (!LM.ready && !LM.err) { LM.err = true; toast('Mapa szczegółowa się nie wczytała (internet?) — Ustawienia → Mapa'); } });
@@ -791,6 +838,7 @@ function ensureLM() {
 const PL_LAYERS = [['xy-big', 5e5, 1e12, 0], ['xy-mid', 1e5, 5e5, 4.5], ['xy-small', 1e4, 1e5, 6.5], ['xy-vil', 0, 1e4, 8.5]];
 function setupLayers() {
   const map = LM.map;
+  if ((S && S.mapStyle ? S.mapStyle : 'caros') === 'caros' || (!S && LM.sty === 'caros')) applyCaros(map);
   // polskie nazwy na podkładzie, gdzie są dostępne
   for (const ly of map.getStyle().layers) {
     if (ly.type !== 'symbol') continue;
@@ -815,7 +863,7 @@ function mountLM(cid, sel) {
   const l = LOC[sel];
   if (lm.cid !== cid) {
     lm.cid = cid;
-    if (l && l.c === cid) lm.map.jumpTo({ center: [l.lo, l.la], zoom: 9.5 });
+    if (l && l.c === cid) lm.map.jumpTo({ center: [l.lo, l.la], zoom: 10.5, pitch: 50 });
     else { const b = MAPS[cid].box; lm.map.fitBounds([b[0], b[1]], { animate: false }); }
   } else if (ui.fitB) lm.map.fitBounds(ui.fitB, { padding: 30, maxZoom: 11 });
   else if (ui.panTo && l) lm.map.easeTo({ center: [l.lo, l.la], zoom: Math.max(lm.map.getZoom(), 9.5) });
@@ -1097,7 +1145,7 @@ function settings() {
       ${USER ? '<button class="btn" data-a="logout">Wyloguj</button>' : `<button class="btn p" data-a="toLogin" ${FB ? '' : 'disabled'}>Załóż konto</button>`}</div></div>
     <h2>Mapa</h2><div class="card"><div class="row"><div class="grow">${S.mapMode === 'svg' ? 'Prosta (offline)' : 'Szczegółowa — drogi, miasta (internet)'}<div class="mut small">© OpenFreeMap, © OpenMapTiles, © OpenStreetMap</div></div>
       <button class="btn" data-a="mapMode">${S.mapMode === 'svg' ? 'Szczegółowa' : 'Prosta'}</button></div>
-      ${S.mapMode === 'svg' ? '' : `<div class="btns">${Object.entries(MSTYLES).map(([k, n]) => `<button class="toggle ${(S.mapStyle || 'fiord') === k ? 'on' : ''}" data-a="mapStyle" data-v="${k}">${n}</button>`).join('')}</div>`}</div>
+      ${S.mapMode === 'svg' ? '' : `<div class="btns">${Object.entries(MSTYLES).map(([k, n]) => `<button class="toggle ${(S.mapStyle || 'caros') === k ? 'on' : ''}" data-a="mapStyle" data-v="${k}">${n}</button>`).join('')}</div>`}</div>
     <h2>Aktualizacje</h2><div class="card"><div class="row"><div class="grow">Wersja: <b>${esc(VERSION)}</b><div class="mut small">Źródło: github.com/${REPO}</div></div><button class="btn" data-a="chkUpd">Sprawdź</button></div></div>
     <h2>Gra</h2><div class="card"><div class="mut small">1 godzina gry = ${HOUR_MS / 1000} s. Gra liczy się też offline (do 10 dni gry).</div>
     <div class="btns"><button class="btn" data-a="tutAgain">Powtórz samouczek</button><button class="btn" data-a="reset" style="${ui.resetArm ? 'background:var(--bad);color:#fff' : ''}">${ui.resetArm ? 'Na pewno? Kliknij ponownie' : 'Zacznij od nowa'}</button></div></div></div>`;
@@ -1115,7 +1163,7 @@ function act(a, d) {
       break;
     }
     case 'mapMode': S.mapMode = S.mapMode === 'svg' ? 'osm' : 'svg'; ui.noGL = false; $('modal').hidden = true; break;
-    case 'mapStyle': S.mapStyle = d.v; if (LM) { LM.ready = false; LM.map.setStyle('https://tiles.openfreemap.org/styles/' + d.v); } $('modal').hidden = true; break;
+    case 'mapStyle': S.mapStyle = d.v; if (LM) { LM.ready = false; LM.sty = d.v; LM.map.setStyle(styleUrl(d.v)); } $('modal').hidden = true; break;
     case 'auMode': au.mode = d.v; au.err = ''; au.info = ''; renderAuth(); return;
     case 'auGoogle': auGoogle(); return;
     case 'auShow': au.show = !au.show; renderAuth(); return;
