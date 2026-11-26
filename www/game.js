@@ -1017,6 +1017,7 @@ function act(a, d) {
     case 'mapMode': S.mapMode = S.mapMode === 'svg' ? 'osm' : 'svg'; ui.noGL = false; $('modal').hidden = true; break;
     case 'mapStyle': S.mapStyle = d.v; if (LM) { LM.ready = false; LM.map.setStyle('https://tiles.openfreemap.org/styles/' + d.v); } $('modal').hidden = true; break;
     case 'auMode': au.mode = d.v; au.err = ''; au.info = ''; renderAuth(); return;
+    case 'auGoogle': auGoogle(); return;
     case 'auShow': au.show = !au.show; renderAuth(); return;
     case 'auGuest': try { localStorage.setItem('xyx_guest', '1'); } catch (e) {} SAVE_KEY = SAVE; startGame(load(SAVE) || newState()); return;
     case 'logout': try { localStorage.removeItem('xyx_guest'); } catch (e) {} logout(); return;
@@ -1215,6 +1216,7 @@ function renderAuth() {
       <div class="warn au-msg">${esc(au.err)}</div>${au.info ? `<div class="pos small au-msg">${esc(au.info)}</div>` : ''}
       <button class="btn p au-go ${au.busy ? 'busy' : ''}" type="submit" ${au.busy ? 'disabled' : ''}>${au.busy ? '<span class="spin s"></span>' : rst ? 'Wyślij link' : reg ? 'Załóż konto' : 'Zaloguj się'}</button>
     </form>
+    ${rst ? '' : `<button class="btn au-google" data-a="auGoogle" ${au.busy ? 'disabled' : ''}><svg viewBox="0 0 48 48" width="20" height="20"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.4-.4-3.5z"/><path fill="#FF3D00" d="m6.3 14.7 6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-8l-6.5 5C9.5 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C37 39.2 44 34 44 24c0-1.3-.1-2.4-.4-3.5z"/></svg>Zaloguj przez Google</button>`}
     <div class="au-links">${rst ? '<button class="lnk" data-a="auMode" data-v="login">← Wróć do logowania</button>' : reg ? '' : '<button class="lnk" data-a="auMode" data-v="reset">Nie pamiętasz hasła?</button>'}</div>`
     : `<div class="card mut small">Konta online nie są jeszcze skonfigurowane (brak projektu Firebase). Możesz grać bez konta.</div>`}
     <div class="au-or"><span>albo</span></div>
@@ -1238,6 +1240,24 @@ async function auSubmit() {
     else if (au.mode === 'register') { au.justReg = true; await A.createUserWithEmailAndPassword(email, au.pass); }
     else await A.signInWithEmailAndPassword(email, au.pass);
   } catch (err) { au.err = AUTH_ERR[err.code] || ('Błąd: ' + (err.code || err.message)); au.justReg = false; }
+  au.busy = false; if (!S) renderAuth();
+}
+async function auGoogle() {
+  if (au.busy || !FB) return;
+  au.err = ''; au.info = ''; au.busy = true; au.justReg = true; renderAuth();
+  try {
+    const C = window.Capacitor, P = C && C.Plugins && C.Plugins.FirebaseAuthentication;
+    if (P && C.isNativePlatform && C.isNativePlatform()) { // Android: natywne okno Google → token → Firebase JS
+      const r = await P.signInWithGoogle({ skipNativeAuth: true });
+      const tok = r && r.credential && r.credential.idToken;
+      if (!tok) throw { code: 'google/no-token' };
+      await firebase.auth().signInWithCredential(firebase.auth.GoogleAuthProvider.credential(tok));
+    } else await firebase.auth().signInWithPopup(new firebase.auth.GoogleAuthProvider());
+  } catch (err) {
+    const m = String((err && (err.code || err.message)) || err);
+    au.err = /cancel|popup-closed|12501/i.test(m) ? '' : (AUTH_ERR[err.code] || 'Logowanie Google nie powiodło się: ' + m);
+    au.justReg = false;
+  }
   au.busy = false; if (!S) renderAuth();
 }
 async function onUser(user) {

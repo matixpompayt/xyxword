@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "961828726906",
+    "project_id": "xyxword-8f780",
+    "storage_bucket": "xyxword-8f780.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:961828726906:android:93e957506ce977fbcbb3c3",
+        "android_client_info": {
+          "package_name": "pl.matixpompayt.xyxword"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "961828726906-f1o3dbb8sfb2u1tsv35fn64unu7nvi14.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBZgcx8MJyrsGJleSexTRo3EVWQy-pUgCQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "961828726906-f1o3dbb8sfb2u1tsv35fn64unu7nvi14.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

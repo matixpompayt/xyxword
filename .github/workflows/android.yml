@@ -46,6 +46,8 @@ jobs:
         run: |
           npm install
           npx cap add android
+          cp android-config/google-services.json android/app/google-services.json
+          printf '\next {\n    rgcfaIncludeGoogle = true\n}\n' >> android/variables.gradle
           npx cap sync android
 
       - name: Klucz podpisu (keystore/xyxword.jks z repo)
