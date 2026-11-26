@@ -155,3 +155,61 @@ body.tuton main{padding-bottom:calc(250px + var(--safe-b))}
 .mk.on span{border-color:#e0823f;color:#fff}
 .mk.veh i{background:#f5c542;border-color:#0b131b;width:12px;height:12px;border-radius:3px}
 .mk.veh span{font-size:11px;color:#f5c542}
+/* ===== logowanie / rejestracja ===== */
+.auth{position:fixed;inset:0;z-index:50;overflow:auto;padding:calc(28px + var(--safe-t)) 20px calc(24px + var(--safe-b));
+  background:radial-gradient(120% 60% at 20% 0%,#24384a 0%,transparent 60%),radial-gradient(90% 60% at 100% 100%,#3a2716 0%,transparent 55%),var(--bg);
+  background-size:160% 160%;animation:drift 14s ease-in-out infinite alternate}
+.auth[hidden]{display:none}
+.au-in{max-width:420px;margin:0 auto;animation:rise .5s cubic-bezier(.2,.8,.2,1) both}
+.au-logo{display:flex;justify-content:center;margin-top:12px}
+.au-logo rect{transform-box:fill-box;transform-origin:bottom;animation:grow .7s cubic-bezier(.2,.9,.3,1.2) both}
+.au-logo .b2{animation-delay:.12s}.au-logo .b3{animation-delay:.24s}
+.auth h1{text-align:center;font-size:34px;margin:10px 0 4px;letter-spacing:.5px}
+.au-sub{text-align:center;margin:0 0 18px}
+.au-tabs{position:relative;display:grid;grid-template-columns:1fr 1fr;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:4px;margin-bottom:6px}
+.au-tabs button{position:relative;z-index:1;background:none;border:0;min-height:42px;font-weight:700;color:var(--mut);transition:color .25s}
+.au-tabs button.on{color:#1b1006}
+.au-tabs i{position:absolute;top:4px;bottom:4px;left:4px;width:calc(50% - 4px);border-radius:9px;background:var(--acc);animation:tabL .3s cubic-bezier(.2,.8,.2,1)}
+.au-tabs i.r{left:50%;animation-name:tabR}
+.au-form input{margin-bottom:2px}
+.pw{display:flex;gap:6px;align-items:center}.pw input{flex:1}
+.au-msg{min-height:18px;margin:6px 2px}
+.au-go{width:100%;min-height:50px;font-size:16px;margin-top:4px}
+.au-links{text-align:center;margin-top:8px}
+.au-or{display:flex;align-items:center;gap:10px;color:var(--mut);font-size:13px;margin:18px 0 12px}
+.au-or::before,.au-or::after{content:"";flex:1;height:1px;background:var(--line)}
+.au-guest{width:100%;min-height:48px}
+.au-note{text-align:center;margin-top:8px}
+.spin{width:34px;height:34px;border:3px solid var(--line);border-top-color:var(--acc);border-radius:50%;margin:22px auto 8px;animation:spin .8s linear infinite}
+.spin.s{width:20px;height:20px;border-width:2px;margin:0;display:inline-block;vertical-align:middle;border-color:rgba(27,16,6,.3);border-top-color:#1b1006}
+/* ===== animacje ===== */
+@keyframes rise{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+@keyframes grow{from{transform:scaleY(0)}to{transform:scaleY(1)}}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes drift{from{background-position:0% 0%}to{background-position:100% 100%}}
+@keyframes up{from{transform:translateY(100%)}to{transform:none}}
+@keyframes fade{from{opacity:0}to{opacity:1}}
+@keyframes pop{0%{transform:scale(.6)}60%{transform:scale(1.15)}100%{transform:scale(1)}}
+@keyframes slideIn{from{opacity:0;transform:translateX(28px)}to{opacity:1;transform:none}}
+@keyframes tabL{from{left:50%}to{left:4px}}
+@keyframes tabR{from{left:4px}to{left:50%}}
+@keyframes flashUp{0%{color:#9dffc6;transform:scale(1.06)}100%{color:var(--ok);transform:none}}
+@keyframes flashDn{0%{color:#ff9d9d}100%{color:var(--ok)}}
+#view.enter>*{animation:rise .42s cubic-bezier(.2,.8,.2,1) both;animation-delay:calc(var(--i,0)*40ms)}
+.btn,.chips button,.toggle,.wz-opt,nav button,.zbtn button,.au-tabs button,.sw button{transition:transform .12s ease,background-color .2s,border-color .2s,color .2s,opacity .2s}
+.btn:active:not(:disabled),.chips button:active,.toggle:active,.wz-opt:active,.zbtn button:active,.sw button:active{transform:scale(.95)}
+nav button:active{transform:scale(.9)}
+nav button.on svg{animation:pop .35s ease}
+nav button svg{transition:transform .2s}
+.modal:not([hidden]){animation:fade .2s ease}
+.modal .sheet{animation:up .32s cubic-bezier(.2,.8,.2,1)}
+.wz-in.step{animation:slideIn .35s cubic-bezier(.2,.8,.2,1)}
+.wiz{animation:fade .3s}
+.cashv{transform-origin:right center;display:inline-block}
+.cashv.up{animation:flashUp .7s ease}
+.cashv.down{animation:flashDn .7s ease}
+.tut:not([hidden]){animation:rise .35s cubic-bezier(.2,.8,.2,1)}
+.updbar{animation:rise .4s cubic-bezier(.2,.8,.2,1)}
+.seasonbar i{transition:width 1s ease}
+.wz-opt.on{animation:pop .3s ease}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}

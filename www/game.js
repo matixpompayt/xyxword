@@ -181,18 +181,17 @@ function migrate(s) {
   addNews(s, 'Aktualizacja: miasta i wsie! Twoje zakłady przeniesiono do stolic kontynentów.');
   return s;
 }
-function load() {
+let SAVE_KEY = SAVE; // gość: SAVE; konto: SAVE + '_' + uid
+function parseSave(raw) {
   try {
-    const raw = localStorage.getItem(SAVE);
-    if (raw) {
-      const s = JSON.parse(raw);
-      if (s && s.v === 2) { s.custom = s.custom || []; return s; }
-      if (s && s.v === 1) return migrate(s);
-    }
+    const s = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    if (s && s.v === 2) { s.custom = s.custom || []; return s; }
+    if (s && s.v === 1) return migrate(s);
   } catch (e) {}
-  return newState();
+  return null;
 }
-function save() { try { S.last = Date.now(); localStorage.setItem(SAVE, JSON.stringify(S)); } catch (e) {} }
+function load(key = SAVE_KEY) { try { return parseSave(localStorage.getItem(key)); } catch (e) { return null; } }
+function save() { if (!S) return; try { S.last = Date.now(); localStorage.setItem(SAVE_KEY, JSON.stringify(S)); } catch (e) {} cloudSave(false); }
 
 // ================== EKONOMIA ==================
 function priceAt(g, sat, d) { return G[g].p * d * clamp(Math.exp(-sat / SC(g)), .15, 3); }
@@ -396,7 +395,7 @@ function renderWiz() {
   const dots = [0, 1, 2, 3].map(i => `<i class="${i <= wz.step ? 'on' : ''}"></i>`).join('');
   let b = '';
   if (wz.step === 0) {
-    b = `<div class="wz-logo"><svg viewBox="0 0 64 64" width="72" height="72"><rect x="6" y="30" width="12" height="28" rx="2" fill="#e0823f"/><rect x="26" y="18" width="12" height="40" rx="2" fill="#4aa3ff"/><rect x="46" y="6" width="12" height="52" rx="2" fill="#3fcf7f"/></svg></div>
+    b = `<div class="wz-logo au-logo">${LOGO}</div>
       <h1>XyxWord</h1><p class="mut">Zbuduj imperium gospodarcze: od farmy na wsi do fabryk komputerów i samochodów w wielkich miastach. Rywalizuj z konkurencją w sezonowym rankingu.</p>
       <label class="f" for="wzCeo">Imię prezesa</label><input id="wzCeo" data-wz="ceo" maxlength="20" placeholder="np. Mati" value="${esc(wz.ceo)}">
       <label class="f" for="wzName">Nazwa firmy</label><input id="wzName" data-wz="name" maxlength="24" placeholder="np. Mati Holding" value="${esc(wz.name)}">
@@ -417,7 +416,8 @@ function renderWiz() {
       <table style="margin-top:8px"><tr><td>Siedziba</td><td class="n">${LOC[wz.hl].n} (${TYPE[LOC[wz.hl].t].n.toLowerCase()})</td></tr><tr><td>Kontynent</td><td class="n">${CN[wz.hq].n}</td></tr><tr><td>Trudność</td><td class="n">${DIFF[wz.diff].n}</td></tr><tr><td>Gotówka</td><td class="n">${money(DIFF[wz.diff].cash)}</td></tr></table></div>
       <button class="toggle ${wz.tut ? 'on' : ''}" data-a="wzSet" data-k="tut" data-v="${wz.tut ? 0 : 1}" style="width:100%;min-height:44px">Samouczek: ${wz.tut ? 'włączony' : 'wyłączony'}</button>`;
   }
-  el.innerHTML = `<div class="wz-in"><div class="wz-dots">${dots}</div>${b}
+  const anim = ui.wzLast !== wz.step; ui.wzLast = wz.step;
+  el.innerHTML = `<div class="wz-in ${anim ? 'step' : ''}"><div class="wz-dots">${dots}</div>${b}
     <div class="btns wz-nav">${wz.step ? '<button class="btn" data-a="wzBack">Wstecz</button>' : ''}<button class="btn p grow" data-a="wzNext">${wz.step === 3 ? 'Rozpocznij grę' : 'Dalej'}</button></div></div>`;
 }
 document.addEventListener('input', e => {
@@ -943,20 +943,40 @@ function vRanking() {
 }
 
 const VIEWS = { firma: vFirma, budowa: vBudowa, magazyn: vMagazyn, logistyka: vLogistyka, ranking: vRanking };
+const RM = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+function tweenCash() { // licznik gotówki płynnie dobija do wartości
+  const el = $('cash'), to = S.cash, from = ui.cashShown ?? to;
+  cancelAnimationFrame(ui.cashRaf);
+  if (RM || Math.abs(to - from) < 1) { ui.cashShown = to; el.textContent = money(to); return; }
+  el.classList.remove('up', 'down'); void el.offsetWidth; el.classList.add(to > from ? 'up' : 'down');
+  const t0 = performance.now(), step = t => {
+    const k = Math.min(1, (t - t0) / 650), e = 1 - (1 - k) ** 3;
+    ui.cashShown = from + (to - from) * e; el.textContent = money(ui.cashShown);
+    if (k < 1) ui.cashRaf = requestAnimationFrame(step);
+  };
+  ui.cashRaf = requestAnimationFrame(step);
+}
 function renderTop() {
   $('coName').textContent = S.name;
   document.documentElement.style.setProperty('--me', S.color);
   $('clock').textContent = tstr(S.hour) + ' · Sezon ' + S.season;
-  $('cash').textContent = money(S.cash);
+  tweenCash();
   $('cash').style.color = S.cash < 0 ? 'var(--bad)' : '';
   $('inc').textContent = (S.inc >= 0 ? '+' : '') + money(S.inc) + '/h';
   $('seasonFill').style.width = ((S.hour % SEASON_H) / SEASON_H * 100) + '%';
 }
 function render(force) {
+  if (!S) return;
   renderTop();
   const ae = document.activeElement;
   if (ui.gesture || (!force && ae && (ae.tagName === 'INPUT' || ae.tagName === 'SELECT'))) return;
-  $('view').innerHTML = VIEWS[ui.tab]();
+  const v = $('view');
+  v.innerHTML = VIEWS[ui.tab]();
+  if (ui.tab !== ui.animTab && !RM) { // wejście zakładki: karty wjeżdżają kaskadowo
+    ui.animTab = ui.tab; v.classList.remove('enter'); void v.offsetWidth;
+    [...v.children].forEach((c, i) => c.style.setProperty('--i', Math.min(i, 12)));
+    v.classList.add('enter'); clearTimeout(ui.animT); ui.animT = setTimeout(() => v.classList.remove('enter'), 1000);
+  }
   document.querySelectorAll('#nav button').forEach(b => b.classList.toggle('on', b.dataset.tab === ui.tab));
   renderUpd(); renderTut();
   if (ui.tab === 'budowa' && $('lmapSlot')) mountLM(ui.bc, ui.bl);
@@ -972,6 +992,9 @@ function settings() {
   $('modal').innerHTML = `<div class="sheet"><div class="row"><b class="grow" style="font-size:17px">Ustawienia</b><button class="btn s" data-a="close">Zamknij</button></div>
     <label class="f" for="ceo">Imię prezesa</label><input id="ceo" maxlength="20" value="${esc(S.ceo)}">
     <label class="f" for="nm">Nazwa firmy</label><div class="row"><input id="nm" maxlength="24" value="${esc(S.name)}"><button class="btn p" data-a="name">Zapisz</button></div>
+    <h2>Konto</h2><div class="card"><div class="row"><div class="grow">${USER ? `<b>${esc(USER.email)}</b><div class="mut small">Zapis w chmurze${cloudAt ? ': ' + new Date(cloudAt).toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit' }) : ' włączony'}</div>`
+      : '<b>Gość</b><div class="mut small">Gra zapisana tylko na tym telefonie</div>'}</div>
+      ${USER ? '<button class="btn" data-a="logout">Wyloguj</button>' : `<button class="btn p" data-a="toLogin" ${FB ? '' : 'disabled'}>Załóż konto</button>`}</div></div>
     <h2>Mapa</h2><div class="card"><div class="row"><div class="grow">${S.mapMode === 'svg' ? 'Prosta (offline)' : 'Szczegółowa — drogi, miasta (internet)'}<div class="mut small">© OpenFreeMap, © OpenMapTiles, © OpenStreetMap</div></div>
       <button class="btn" data-a="mapMode">${S.mapMode === 'svg' ? 'Szczegółowa' : 'Prosta'}</button></div>
       ${S.mapMode === 'svg' ? '' : `<div class="btns">${Object.entries(MSTYLES).map(([k, n]) => `<button class="toggle ${(S.mapStyle || 'fiord') === k ? 'on' : ''}" data-a="mapStyle" data-v="${k}">${n}</button>`).join('')}</div>`}</div>
@@ -993,6 +1016,11 @@ function act(a, d) {
     }
     case 'mapMode': S.mapMode = S.mapMode === 'svg' ? 'osm' : 'svg'; ui.noGL = false; $('modal').hidden = true; break;
     case 'mapStyle': S.mapStyle = d.v; if (LM) { LM.ready = false; LM.map.setStyle('https://tiles.openfreemap.org/styles/' + d.v); } $('modal').hidden = true; break;
+    case 'auMode': au.mode = d.v; au.err = ''; au.info = ''; renderAuth(); return;
+    case 'auShow': au.show = !au.show; renderAuth(); return;
+    case 'auGuest': try { localStorage.setItem('xyx_guest', '1'); } catch (e) {} SAVE_KEY = SAVE; startGame(load(SAVE) || newState()); return;
+    case 'logout': try { localStorage.removeItem('xyx_guest'); } catch (e) {} logout(); return;
+    case 'toLogin': try { localStorage.removeItem('xyx_guest'); } catch (e) {} save(); S = null; $('modal').hidden = true; $('wiz').hidden = true; au.mode = 'register'; renderAuth(); return;
     case 'placeMode': ui.place = true; toast('Dotknij mapy, gdzie ma powstać miejscowość'); break;
     case 'placeOff': ui.place = false; break;
     case 'npSet': ui.np.t = d.v; foundSheet(); return;
@@ -1141,23 +1169,122 @@ function openUrl(url) {
   else fallback();
 }
 
+// ================== KONTA (Firebase: logowanie, rejestracja, zapis w chmurze) ==================
+const FBC = window.XYX_FIREBASE;
+let FB = null, DB = null, USER = null, cloudT = 0, cloudAt = 0;
+if (FBC && window.firebase) {
+  try {
+    FB = firebase.initializeApp(FBC);
+    DB = firebase.firestore();
+    try { DB.settings({ experimentalAutoDetectLongPolling: true, merge: true }); } catch (e) {}
+  } catch (e) { FB = null; }
+}
+const au = { mode: 'login', email: '', pass: '', pass2: '', busy: false, err: '', info: '', show: false };
+const AUTH_ERR = {
+  'auth/invalid-email': 'Nieprawidłowy adres e-mail.', 'auth/missing-password': 'Wpisz hasło.',
+  'auth/weak-password': 'Hasło jest za słabe (min. 6 znaków).', 'auth/email-already-in-use': 'To konto już istnieje — zaloguj się.',
+  'auth/invalid-credential': 'Zły e-mail lub hasło.', 'auth/wrong-password': 'Złe hasło.', 'auth/user-not-found': 'Nie ma takiego konta.',
+  'auth/too-many-requests': 'Za dużo prób. Spróbuj za chwilę.', 'auth/network-request-failed': 'Brak połączenia z internetem.',
+  'auth/user-disabled': 'Konto zablokowane.',
+};
+function cloudSave(now) {
+  if (!USER || !DB || !S || !S.setup) return;
+  clearTimeout(cloudT);
+  const go = () => DB.collection('users').doc(USER.uid).set({ save: JSON.stringify(S), updated: Date.now(), name: S.name, ceo: S.ceo, worth: Math.round(worth()), email: USER.email }, { merge: true })
+    .then(() => { cloudAt = Date.now(); }).catch(() => {});
+  if (now) go(); else cloudT = setTimeout(go, 20000);
+}
+function renderAuth() {
+  const el = $('auth');
+  if (S) { el.hidden = true; return; }
+  el.hidden = false;
+  if (au.mode === 'wait') {
+    el.innerHTML = `<div class="au-in"><div class="au-logo">${LOGO}</div><h1>XyxWord</h1><div class="spin"></div><p class="mut" style="text-align:center">Łączenie z kontem…</p></div>`;
+    return;
+  }
+  const reg = au.mode === 'register', rst = au.mode === 'reset';
+  el.innerHTML = `<div class="au-in">
+    <div class="au-logo">${LOGO}</div><h1>XyxWord</h1>
+    <p class="mut au-sub">${rst ? 'Wyślemy Ci link do ustawienia nowego hasła.' : reg ? 'Załóż konto — gra zapisuje się w chmurze, zagrasz na każdym telefonie.' : 'Zaloguj się, żeby wrócić do swojego imperium.'}</p>
+    ${FB ? `${rst ? '' : `<div class="au-tabs"><button class="${!reg ? 'on' : ''}" data-a="auMode" data-v="login">Logowanie</button><button class="${reg ? 'on' : ''}" data-a="auMode" data-v="register">Rejestracja</button><i class="${reg ? 'r' : ''}"></i></div>`}
+    <form id="auForm" class="au-form" novalidate>
+      <label class="f" for="auEmail">E-mail</label><input id="auEmail" data-au="email" type="email" inputmode="email" autocomplete="email" value="${esc(au.email)}" placeholder="ty@przyklad.pl">
+      ${rst ? '' : `<label class="f" for="auPass">Hasło</label><div class="pw"><input id="auPass" data-au="pass" type="${au.show ? 'text' : 'password'}" autocomplete="${reg ? 'new-password' : 'current-password'}" value="${esc(au.pass)}" placeholder="min. 6 znaków">
+        <button type="button" class="lnk" data-a="auShow">${au.show ? 'Ukryj' : 'Pokaż'}</button></div>`}
+      ${reg ? `<label class="f" for="auPass2">Powtórz hasło</label><input id="auPass2" data-au="pass2" type="${au.show ? 'text' : 'password'}" autocomplete="new-password" value="${esc(au.pass2)}">` : ''}
+      <div class="warn au-msg">${esc(au.err)}</div>${au.info ? `<div class="pos small au-msg">${esc(au.info)}</div>` : ''}
+      <button class="btn p au-go ${au.busy ? 'busy' : ''}" type="submit" ${au.busy ? 'disabled' : ''}>${au.busy ? '<span class="spin s"></span>' : rst ? 'Wyślij link' : reg ? 'Załóż konto' : 'Zaloguj się'}</button>
+    </form>
+    <div class="au-links">${rst ? '<button class="lnk" data-a="auMode" data-v="login">← Wróć do logowania</button>' : reg ? '' : '<button class="lnk" data-a="auMode" data-v="reset">Nie pamiętasz hasła?</button>'}</div>`
+    : `<div class="card mut small">Konta online nie są jeszcze skonfigurowane (brak projektu Firebase). Możesz grać bez konta.</div>`}
+    <div class="au-or"><span>albo</span></div>
+    <button class="btn au-guest" data-a="auGuest">Graj bez konta</button>
+    <p class="mut small au-note">Bez konta gra zapisuje się tylko na tym telefonie.</p></div>`;
+}
+const LOGO = `<svg viewBox="0 0 64 64" width="76" height="76"><rect class="b1" x="6" y="30" width="12" height="28" rx="2" fill="#e0823f"/><rect class="b2" x="26" y="18" width="12" height="40" rx="2" fill="#4aa3ff"/><rect class="b3" x="46" y="6" width="12" height="52" rx="2" fill="#3fcf7f"/></svg>`;
+document.addEventListener('input', e => { const k = e.target.dataset.au; if (k) au[k] = e.target.value; });
+document.addEventListener('submit', e => {
+  if (e.target.id !== 'auForm') return;
+  e.preventDefault(); auSubmit();
+});
+async function auSubmit() {
+  if (au.busy || !FB) return;
+  au.err = ''; au.info = '';
+  const email = au.email.trim(), A = firebase.auth();
+  if (au.mode === 'register' && au.pass !== au.pass2) { au.err = 'Hasła nie są takie same.'; renderAuth(); return; }
+  au.busy = true; renderAuth();
+  try {
+    if (au.mode === 'reset') { await A.sendPasswordResetEmail(email); au.info = 'Link wysłany — sprawdź skrzynkę (też spam).'; au.mode = 'login'; }
+    else if (au.mode === 'register') { au.justReg = true; await A.createUserWithEmailAndPassword(email, au.pass); }
+    else await A.signInWithEmailAndPassword(email, au.pass);
+  } catch (err) { au.err = AUTH_ERR[err.code] || ('Błąd: ' + (err.code || err.message)); au.justReg = false; }
+  au.busy = false; if (!S) renderAuth();
+}
+async function onUser(user) {
+  USER = user;
+  if (!user) { if (!S) { au.mode = au.mode === 'wait' ? 'login' : au.mode; renderAuth(); } return; }
+  if (S && SAVE_KEY === SAVE + '_' + user.uid) return;
+  au.mode = 'wait'; renderAuth();
+  SAVE_KEY = SAVE + '_' + user.uid;
+  let local = load(), cloud = null;
+  try { const d = await DB.collection('users').doc(user.uid).get(); if (d.exists && d.data().save) cloud = parseSave(d.data().save); } catch (e) {}
+  let s = [local, cloud].filter(Boolean).sort((a, b) => (b.last || 0) - (a.last || 0))[0] || null;
+  if (!s && au.justReg) { // nowe konto: przenieś grę gościa, jeśli jest
+    const guest = load(SAVE);
+    if (guest && guest.setup) { s = guest; setTimeout(() => toast('Twoja dotychczasowa gra została przeniesiona na konto'), 600); }
+  }
+  au.justReg = false; au.pass = au.pass2 = '';
+  startGame(s || newState());
+  cloudSave(true);
+  toast(`Zalogowano: ${user.email}`);
+}
+function startGame(s) {
+  S = s; registerCustom(S); ui.z = {}; ui.animTab = null; ui.cashShown = null; ui.wzLast = null; if (LM) LM.cid = null;
+  ui.bc = S.hq; ui.bl = ui.ml = S.hl; ui.tab = 'firma';
+  if (S.setup) {
+    const off = Math.min(OFFLINE_MAX_H, Math.floor((Date.now() - (S.last || Date.now())) / HOUR_MS));
+    if (off > 0) {
+      const c0 = S.cash;
+      for (let i = 0; i < off; i++) hour(S);
+      setTimeout(() => toast(`Offline minęło ${off} h gry · ${S.cash - c0 >= 0 ? '+' : ''}${money(S.cash - c0)}`), 400);
+    }
+  }
+  acc = 0; prev = performance.now();
+  save(); renderAuth(); render(true); renderWiz();
+}
+function logout() {
+  if (USER) { save(); cloudSave(true); }
+  S = null; SAVE_KEY = SAVE; $('modal').hidden = true; $('wiz').hidden = true;
+  au.mode = 'login'; au.err = ''; au.info = '';
+  if (USER && FB) firebase.auth().signOut(); else renderAuth();
+}
+
 // ================== PĘTLA ==================
 initPts();
-S = load();
-registerCustom(S);
-ui.bc = S.hq; ui.bl = ui.ml = S.hl;
-if (S.setup) {
-  const off = Math.min(OFFLINE_MAX_H, Math.floor((Date.now() - (S.last || Date.now())) / HOUR_MS));
-  if (off > 0) {
-    const c0 = S.cash;
-    for (let i = 0; i < off; i++) hour(S);
-    setTimeout(() => toast(`Offline minęło ${off} h gry · ${S.cash - c0 >= 0 ? '+' : ''}${money(S.cash - c0)}`), 400);
-  }
-}
 let acc = 0, prev = performance.now(), n = 0;
 function loop() {
   const now = performance.now(); acc += Math.min(now - prev, 60000); prev = now;
-  if (!S.setup) { acc = 0; return; }
+  if (!S || !S.setup) { acc = 0; return; }
   let ran = false;
   while (acc >= HOUR_MS) { acc -= HOUR_MS; hour(S); ran = true; }
   if (ran) {
@@ -1167,7 +1294,8 @@ function loop() {
   }
 }
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden) save();
+  if (!S) return;
+  if (document.hidden) { save(); cloudSave(true); }
   else if (S.setup) { // po powrocie dolicz czas, który minął w tle
     const off = Math.min(OFFLINE_MAX_H, Math.floor((Date.now() - S.last) / HOUR_MS));
     for (let i = 0; i < off; i++) hour(S);
@@ -1175,7 +1303,9 @@ document.addEventListener('visibilitychange', () => {
   }
 });
 if (VERSION === 'dev') window.__xyx = { get S() { return S; }, get LM() { return LM; }, hour: n => { for (let i = 0; i < n; i++) hour(S); render(true); } };
-save(); render(true); renderWiz();
+if (FB) { au.mode = 'wait'; renderAuth(); firebase.auth().onAuthStateChanged(onUser); }
+else if (localStorage.getItem('xyx_guest') === '1') startGame(load(SAVE) || newState());
+else renderAuth();
 setInterval(loop, 500);
 setTimeout(() => checkUpdate(false), 2000);
 })();

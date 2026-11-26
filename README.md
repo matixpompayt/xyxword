@@ -26,3 +26,7 @@ Otwórz `www/index.html` w przeglądarce – gra działa bez instalacji.
 ## Mapy i miejscowości
 `www/maps.js` i `www/places.js` generuje `tools/build-maps.mjs` (mapy: Natural Earth, domena publiczna; miejscowości: GeoNames, CC BY 4.0).
 Polecane miejsca startowe to `LOCS_BASE` w `www/game.js`. Gracz może też założyć własną miejscowość w grze (Budowa → „+ Własna”).
+
+## Konta (Firebase)
+Logowanie e-mail/hasło i zapis gry w chmurze. Konfiguracja w `www/firebase-config.js` (obiekt `firebaseConfig` z konsoli Firebase),
+reguły bazy w `firestore.rules`. Bez konfiguracji gra działa w trybie „Graj bez konta”.
