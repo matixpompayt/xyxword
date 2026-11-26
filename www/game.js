@@ -654,9 +654,13 @@ function placeAt(e, svg) {
   const pt = svg.createSVGPoint(); pt.x = e.clientX; pt.y = e.clientY;
   const u = pt.matrixTransform(svg.getScreenCTM().inverse()), ll = pr.invert([u.x, u.y]);
   if (!ll) return;
-  const [lo, la] = ll;
+  placeAtLL(cid, ll[1], ll[0]);
+}
+function placeAtLL(cid, la, lo) {
+  const bx = MAPS[cid].box;
+  if (lo < bx[0][0] || lo > bx[1][0] || la < bx[0][1] || la > bx[1][1]) { toast('Poza obszarem tego kontynentu'); return; }
   let near = null, nd = 1e9;
-  for (const l of LOCS) if (l.c === cid) { const d = kmLL(la, lo, l.la, l.lo); if (d < nd) { nd = d; near = l; } }
+  for (const l of BYC[cid]) { const d = kmLL(la, lo, l.la, l.lo); if (d < nd) { nd = d; near = l; } }
   if (!near || nd > 400) { toast('Za daleko od innych miejscowości'); return; }
   if (nd < 6) { toast(`Za blisko: ${near.n}`); return; }
   const coastNear = LOCS.some(l => l.c === cid && l.port && !l.u && kmLL(la, lo, l.la, l.lo) < 25);
@@ -676,6 +680,74 @@ function foundSheet() {
     <div class="btns"><button class="btn p" data-a="npFound" ${S.cash < FOUND[p.t] ? 'disabled' : ''}>Załóż — ${money(FOUND[p.t])}</button></div></div>`;
 }
 
+// ================== MAPA SZCZEGÓŁOWA (OpenStreetMap / CARTO, wymaga internetu) ==================
+let LM = null;
+function lmapOn() { return S.mapMode !== 'svg' && !!window.L && navigator.onLine !== false; }
+function ensureLM() {
+  if (LM) return LM;
+  const el = document.createElement('div'); el.className = 'lmapL';
+  const map = L.map(el, { preferCanvas: true, minZoom: 2, maxZoom: 18, zoomSnap: .5, worldCopyJump: true, attributionControl: true });
+  map.attributionControl.setPrefix('');
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { subdomains: 'abcd', maxZoom: 19, attribution: '© OpenStreetMap · © CARTO' })
+    .on('tileerror', () => { if (!LM.err) { LM.err = true; toast('Brak internetu — mapa szczegółowa nie wczytuje się (Ustawienia → mapa prosta)'); } }).addTo(map);
+  LM = { map, el, rend: L.canvas({ padding: .5 }), dots: L.layerGroup().addTo(map), top: L.layerGroup().addTo(map), cid: null };
+  map.on('moveend zoomend', drawLM);
+  map.on('movestart zoomstart', () => { ui.gesture = true; });
+  map.on('moveend', () => { ui.gesture = false; });
+  el.addEventListener('pointerdown', () => { ui.gesture = true; });
+  const up = () => { if (!map._animatingZoom) setTimeout(() => { ui.gesture = false; }, 50); };
+  el.addEventListener('pointerup', up); el.addEventListener('pointercancel', up);
+  map.on('click', e => { if (ui.place) placeAtLL(LM.cid, e.latlng.lat, e.latlng.lng); });
+  return LM;
+}
+function mountLM(cid, sel) {
+  const slot = $('lmapSlot'), lm = ensureLM(); if (!slot) return;
+  slot.appendChild(lm.el); lm.map.invalidateSize({ pan: false });
+  lm.el.classList.toggle('placing', !!ui.place);
+  const l = LOC[sel];
+  if (lm.cid !== cid) {
+    lm.cid = cid;
+    if (l && l.c === cid) lm.map.setView([l.la, l.lo], 10, { animate: false });
+    else { const b = MAPS[cid].box; lm.map.fitBounds([[b[0][1], b[0][0]], [b[1][1], b[1][0]]], { animate: false }); }
+  } else if (ui.panTo && l) lm.map.setView([l.la, l.lo], Math.max(lm.map.getZoom(), 10));
+  ui.panTo = false;
+  drawLM();
+}
+const popR = l => l.t === 'm' ? clamp(4 + (Math.log10(Math.max(l.pop, 1e4)) - 4) * 3.2, 4, 13) : 3.2;
+function drawLM() {
+  const lm = LM; if (!lm || !lm.el.isConnected || !lm.cid) return;
+  const map = lm.map, cid = lm.cid, b = map.getBounds().pad(.15), cell = 20, taken = new Set(), seen = new Set(), list = [];
+  const ownSet = new Set(Object.keys(S.L).filter(id => { const L = S.L[id]; return L.bld.length || L.gar || Object.keys(L.inv).length; }));
+  const add = (l, force) => {
+    if (!l || seen.has(l.id) || !b.contains([l.la, l.lo])) return;
+    const p = map.latLngToContainerPoint([l.la, l.lo]), k = Math.floor(p.x / cell) + ',' + Math.floor(p.y / cell);
+    if (!force && taken.has(k)) return;
+    taken.add(k); seen.add(l.id); list.push([l, force]);
+  };
+  add(LOC[ui.bl], true);
+  for (const id of ownSet) add(LOC[id], true);
+  for (const l of LOCS) if (l.u) add(l, true);
+  for (const cc of Object.keys(BYC)) { if (!b.intersects(L.latLngBounds([[MAPS[cc].box[0][1], MAPS[cc].box[0][0]], [MAPS[cc].box[1][1], MAPS[cc].box[1][0]]]))) continue;
+    for (const l of BYC[cc]) { if (list.length > 900) break; add(l, false); } }
+  lm.dots.clearLayers(); lm.top.clearLayers();
+  for (const [l, force] of list.reverse()) {
+    const mine = ownSet.has(l.id), on = l.id === ui.bl, port = S.L[l.id] && S.L[l.id].port;
+    const mk = L.circleMarker([l.la, l.lo], { renderer: lm.rend, radius: popR(l) + (mine || on ? 2 : 0), weight: on ? 3 : mine ? 2 : 1,
+      color: on ? '#e0823f' : port ? '#4aa3ff' : mine ? '#fff' : 'rgba(10,16,22,.9)', fillColor: mine ? S.color : l.u ? '#ffc98a' : l.t === 'm' ? '#9fb3c8' : '#7fbf7f',
+      fillOpacity: mine || on ? 1 : .85, bubblingMouseEvents: false });
+    mk.on('click', () => { if (ui.place) return; act('bl', { l: l.id, fromMap: '1' }); });
+    if (mine || on || l.u) mk.bindTooltip(esc(l.n), { permanent: true, direction: 'top', offset: [0, -popR(l) - 2], className: 'lm-tip' + (on ? ' on' : '') });
+    mk.addTo(force ? lm.top : lm.dots);
+  }
+  for (const v of S.veh) {
+    if (v.st !== 'go') continue;
+    const a = LOC[v.from], c = LOC[v.to], p = clamp(1 - (v.eta - S.hour) / v.dur, 0, 1);
+    L.polyline([[a.la, a.lo], [c.la, c.lo]], { color: '#f5c542', weight: 2, dashArray: '6 5', interactive: false }).addTo(lm.top);
+    L.circleMarker([a.la + (c.la - a.la) * p, a.lo + (c.lo - a.lo) * p], { renderer: lm.rend, radius: 6, color: '#0b131b', weight: 2, fillColor: '#f5c542', fillOpacity: 1, interactive: false })
+      .bindTooltip(`${VEH[v.k].n} #${v.id}`, { direction: 'right', className: 'lm-tip' }).addTo(lm.top);
+  }
+}
+
 function vBudowa() {
   const cid = ui.bc, c = CN[cid];
   let h = contChips(cid);
@@ -688,7 +760,7 @@ function vBudowa() {
   const lid = ui.bl, l = LOC[lid], t = TYPE[l.t], L = S.L[lid] || newLoc(), fr = slots(L, lid) - used(L);
   const nC = BYC[cid].length;
   h += (ui.place ? `<div class="placebar"><span class="grow">Dotknij mapy w miejscu, gdzie ma powstać nowa miejscowość.</span><button class="btn s" data-a="placeOff">Anuluj</button></div>` : '')
-    + locMap(cid, lid)
+    + (lmapOn() ? '<div id="lmapSlot" class="lslot"></div>' : locMap(cid, lid))
     + `<div class="lsearch"><input id="locQ" data-q="1" type="search" placeholder="Szukaj wśród ${nC.toLocaleString('pl-PL')} miejscowości…" value="${esc(ui.locQ || '')}" autocomplete="off">
        ${ui.place ? '' : `<button class="btn s" data-a="placeMode">+ Własna</button>`}</div><div id="locRes">${locRes(cid, lid)}</div>`;
   h += `<div class="card"><div class="row"><div class="grow"><span class="bname">${esc(l.n)}</span> ${tag(l)}${l.port ? ' <span class="ltag p">Wybrzeże</span>' : ''}${l.u ? ' <span class="ltag u">Twoja osada</span>' : ''}
@@ -864,6 +936,7 @@ function render(force) {
   $('view').innerHTML = VIEWS[ui.tab]();
   document.querySelectorAll('#nav button').forEach(b => b.classList.toggle('on', b.dataset.tab === ui.tab));
   renderUpd(); renderTut();
+  if (ui.tab === 'budowa' && $('lmapSlot')) mountLM(ui.bc, ui.bl);
 }
 function renderUpd() {
   $('upd').innerHTML = ui.update ? `<div class="updbar"><div class="grow" style="flex:1"><b>Nowa wersja ${esc(ui.update.v)}</b><div class="mut small">Masz ${esc(VERSION)}</div></div><button class="btn p s" data-a="getUpd">Pobierz</button></div>` : '';
@@ -876,6 +949,8 @@ function settings() {
   $('modal').innerHTML = `<div class="sheet"><div class="row"><b class="grow" style="font-size:17px">Ustawienia</b><button class="btn s" data-a="close">Zamknij</button></div>
     <label class="f" for="ceo">Imię prezesa</label><input id="ceo" maxlength="20" value="${esc(S.ceo)}">
     <label class="f" for="nm">Nazwa firmy</label><div class="row"><input id="nm" maxlength="24" value="${esc(S.name)}"><button class="btn p" data-a="name">Zapisz</button></div>
+    <h2>Mapa</h2><div class="card"><div class="row"><div class="grow">${S.mapMode === 'svg' ? 'Prosta (offline)' : 'Szczegółowa — drogi, miasta (internet)'}<div class="mut small">Mapa szczegółowa: © OpenStreetMap, © CARTO</div></div>
+      <button class="btn" data-a="mapMode">${S.mapMode === 'svg' ? 'Szczegółowa' : 'Prosta'}</button></div></div>
     <h2>Aktualizacje</h2><div class="card"><div class="row"><div class="grow">Wersja: <b>${esc(VERSION)}</b><div class="mut small">Źródło: github.com/${REPO}</div></div><button class="btn" data-a="chkUpd">Sprawdź</button></div></div>
     <h2>Gra</h2><div class="card"><div class="mut small">1 godzina gry = ${HOUR_MS / 1000} s. Gra liczy się też offline (do 10 dni gry).</div>
     <div class="btns"><button class="btn" data-a="tutAgain">Powtórz samouczek</button><button class="btn" data-a="reset" style="${ui.resetArm ? 'background:var(--bad);color:#fff' : ''}">${ui.resetArm ? 'Na pewno? Kliknij ponownie' : 'Zacznij od nowa'}</button></div></div></div>`;
@@ -889,8 +964,10 @@ function act(a, d) {
     case 'bl': {
       ui.bl = d.l; ui.bc = LOC[d.l].c;
       const z = zOf(ui.bc); if (z.k > 1 && !d.fromMap) { const [x, y] = MAPS[ui.bc].pts[d.l]; zoomAt(ui.bc, z.k, x, y); }
+      if (!d.fromMap) ui.panTo = true;
       break;
     }
+    case 'mapMode': S.mapMode = S.mapMode === 'svg' ? 'osm' : 'svg'; $('modal').hidden = true; break;
     case 'placeMode': ui.place = true; toast('Dotknij mapy, gdzie ma powstać miejscowość'); break;
     case 'placeOff': ui.place = false; break;
     case 'npSet': ui.np.t = d.v; foundSheet(); return;
