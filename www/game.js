@@ -24,6 +24,13 @@ const CN = Object.fromEntries(CONT.map(c => [c.id, c]));
 const LOCS = [
   ['hamburg', 'eu', 'Hamburg', 'm', 53.55, 9.99, 1], ['berlin', 'eu', 'Berlin', 'm', 52.52, 13.40], ['warszawa', 'eu', 'Warszawa', 'm', 52.23, 21.01],
   ['szczecin', 'eu', 'Szczecin', 'm', 53.43, 14.55, 1], ['debno', 'eu', 'Dębno', 'w', 52.74, 14.70], ['oberstdorf', 'eu', 'Oberstdorf', 'w', 47.41, 10.28],
+  ['londyn', 'eu', 'Londyn', 'm', 51.51, -0.13, 1, 'gb'], ['paryz', 'eu', 'Paryż', 'm', 48.86, 2.35], ['rotterdam', 'eu', 'Rotterdam', 'm', 51.92, 4.48, 1],
+  ['madryt', 'eu', 'Madryt', 'm', 40.42, -3.70], ['barcelona', 'eu', 'Barcelona', 'm', 41.39, 2.17, 1], ['marsylia', 'eu', 'Marsylia', 'm', 43.30, 5.37, 1],
+  ['mediolan', 'eu', 'Mediolan', 'm', 45.46, 9.19], ['rzym', 'eu', 'Rzym', 'm', 41.90, 12.50], ['wieden', 'eu', 'Wiedeń', 'm', 48.21, 16.37],
+  ['praga', 'eu', 'Praga', 'm', 50.08, 14.44], ['gdansk', 'eu', 'Gdańsk', 'm', 54.35, 18.65, 1], ['sztokholm', 'eu', 'Sztokholm', 'm', 59.33, 18.07, 1],
+  ['oslo', 'eu', 'Oslo', 'm', 59.91, 10.75, 1], ['kijow', 'eu', 'Kijów', 'm', 50.45, 30.52],
+  ['kiruna', 'eu', 'Kiruna', 'w', 67.86, 20.23], ['mragowo', 'eu', 'Mrągowo', 'w', 53.86, 21.30], ['montalcino', 'eu', 'Montalcino', 'w', 43.06, 11.49],
+  ['ronda', 'eu', 'Ronda', 'w', 36.74, -5.17], ['bogatynia', 'eu', 'Bogatynia', 'w', 50.91, 14.96],
   ['nowyjork', 'na', 'Nowy Jork', 'm', 40.71, -74.0, 1], ['chicago', 'na', 'Chicago', 'm', 41.88, -87.63], ['houston', 'na', 'Houston', 'm', 29.76, -95.37, 1],
   ['losangeles', 'na', 'Los Angeles', 'm', 34.05, -118.24, 1], ['fargo', 'na', 'Fargo', 'w', 46.88, -96.79], ['elko', 'na', 'Elko', 'w', 40.83, -115.76],
   ['rio', 'sa', 'Rio de Janeiro', 'm', -22.91, -43.17, 1], ['saopaulo', 'sa', 'São Paulo', 'm', -23.55, -46.63], ['buenosaires', 'sa', 'Buenos Aires', 'm', -34.60, -58.38, 1],
@@ -113,7 +120,7 @@ const kmTxt = k => Math.round(k).toLocaleString('pl-PL') + ' km';
 const SC = g => 3000 / Math.sqrt(G[g].p);  // skala nasycenia rynku
 
 // ================== STAN ==================
-let S, ui = { tab: 'firma', bc: 'eu', bl: 'hamburg', ml: 'hamburg', buyG: 'zboze', buyQ: 100, sf: {}, vf: {}, resetArm: false, update: null };
+let S, ui = { tab: 'firma', bc: 'eu', bl: 'hamburg', ml: 'hamburg', buyG: 'zboze', buyQ: 100, sf: {}, vf: {}, z: {}, resetArm: false, update: null };
 
 const COLORS = ['#e0823f', '#3fcf7f', '#4aa3ff', '#c77dff', '#ff5d8f', '#f5c542'];
 const DIFF = [
@@ -441,64 +448,134 @@ function vFirma() {
   h += `<h2>Wiadomości</h2><div class="card">${S.news.slice(0, 10).map(n => `<div class="news"><span>D${Math.floor(n.h / 24) + 1}</span>${esc(n.t)}</div>`).join('')}</div>`;
   return h;
 }
+const MAPS = window.XYX_MAPS;
+// podkład mapy: morze, siatka, cień lądu, ląd, granice
+function mapBase(m, id) {
+  return `<defs><radialGradient id="sea${id}" cx="50%" cy="35%" r="80%"><stop offset="0" stop-color="#173047"/><stop offset="1" stop-color="#0b131b"/></radialGradient>
+    <linearGradient id="land${id}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2f4150"/><stop offset="1" stop-color="#23323e"/></linearGradient></defs>
+    <rect x="${-m.w}" y="${-m.h}" width="${m.w * 3}" height="${m.h * 3}" fill="url(#sea${id})"/>
+    <path d="${m.grat}" fill="none" stroke="#1c3448" stroke-width="1" vector-effect="non-scaling-stroke"/>
+    <path d="${m.land}" fill="#060b10" opacity=".55" transform="translate(3 5)"/>
+    <path d="${m.land}" fill="url(#land${id})" stroke="#4d6577" stroke-width=".8" vector-effect="non-scaling-stroke"/>
+    ${m.borders ? `<path d="${m.borders}" fill="none" stroke="#5b7487" stroke-width=".6" stroke-dasharray="2 2" opacity=".7" vector-effect="non-scaling-stroke"/>` : ''}`;
+}
 function mapSvg() {
-  let lines = '', ships = '', dots = '';
+  const m = MAPS.world, P = cid => m.pts[cid];
+  let lines = '', dots = '';
   for (const sh of S.ships) {
     if (sh.st !== 'sail') continue;
-    const [x1, y1] = POS[LOC[sh.from].c], [x2, y2] = POS[LOC[sh.to].c];
-    const p = clamp(1 - (sh.eta - S.hour) / sh.dur, 0, 1);
-    lines += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="#4aa3ff" stroke-width=".4" stroke-dasharray="1.2 1" opacity=".7"/>`;
-    ships += `<circle cx="${x1 + (x2 - x1) * p}" cy="${y1 + (y2 - y1) * p}" r="1.4" fill="#4aa3ff"/>`;
+    const a = LOC[sh.from].c, b = LOC[sh.to].c; if (a === b) continue;
+    const [x1, y1] = P(a), [x2, y2] = P(b), cx = (x1 + x2) / 2, cy = Math.min(y1, y2) - Math.abs(x2 - x1) * .18 - 20;
+    const t = clamp(1 - (sh.eta - S.hour) / sh.dur, 0, 1), bx = (1 - t) ** 2 * x1 + 2 * (1 - t) * t * cx + t * t * x2, by = (1 - t) ** 2 * y1 + 2 * (1 - t) * t * cy + t * t * y2;
+    lines += `<path d="M${x1} ${y1}Q${cx} ${cy} ${x2} ${y2}" fill="none" stroke="#4aa3ff" stroke-width="1.5" stroke-dasharray="5 4" opacity=".8" vector-effect="non-scaling-stroke"/><circle cx="${bx}" cy="${by}" r="7" fill="#4aa3ff" stroke="#0b131b" stroke-width="2"/>`;
   }
   for (const c of CONT) {
-    const [x, y] = POS[c.id], own = !!S.c[c.id];
+    const [x, y] = P(c.id), own = !!S.c[c.id];
     const ls = Object.keys(S.L).filter(l => LOC[l].c === c.id);
     const n = ls.reduce((a, l) => a + S.L[l].bld.length, 0), port = ls.some(l => S.L[l].port);
     dots += `<g data-a="goBuild" data-c="${c.id}" style="cursor:pointer">
-      <circle cx="${x}" cy="${y}" r="${own ? 4 + Math.min(n, 8) * .5 : 3}" fill="${own ? S.color : '#2d323b'}" stroke="${own ? '#fff' : '#4a525e'}" stroke-width=".5"/>
-      ${port ? `<rect x="${x + 3.5}" y="${y - 5.5}" width="3" height="3" rx=".6" fill="#4aa3ff"/>` : ''}
-      <text x="${x}" y="${y + 9}" text-anchor="middle" font-size="3.6" fill="${own ? '#eef0f3' : '#9aa3af'}">${c.n}</text>
-      ${own ? `<text x="${x}" y="${y + 1.3}" text-anchor="middle" font-size="3.4" font-weight="700" fill="#1b1006">${n}</text>` : ''}
-    </g>`;
+      ${own ? `<circle cx="${x}" cy="${y}" r="30" fill="${S.color}" opacity=".18"/>` : ''}
+      <circle cx="${x}" cy="${y}" r="${own ? 17 + Math.min(n, 10) : 11}" fill="${own ? S.color : '#3a4654'}" stroke="${own ? '#fff' : '#6b7787'}" stroke-width="2.5"/>
+      ${port ? `<rect x="${x + 14}" y="${y - 26}" width="12" height="12" rx="3" fill="#4aa3ff" stroke="#0b131b" stroke-width="2"/>` : ''}
+      ${own ? `<text x="${x}" y="${y + 6}" text-anchor="middle" font-size="18" font-weight="800" fill="#1b1006" class="nh">${n}</text>` : ''}
+      <text x="${x}" y="${y + (own ? 52 : 36)}" text-anchor="middle" font-size="24" font-weight="600" fill="${own ? '#eef0f3' : '#b4bcc6'}" class="lbl">${c.n}</text></g>`;
   }
-  const land = `<g fill="#1f2b35" opacity=".9">
-    <path d="M8 14q10-8 24-4 6 8 0 16-6 6-12 4-10-4-12-16Z"/><path d="M26 44q8-2 12 6 2 12-6 22-4-2-6-10-4-10 0-18Z"/>
-    <path d="M44 14q10-6 18 0-2 8-10 12-8 0-8-12Z"/><path d="M45 40q10-4 16 4 2 12-6 20-6 2-8-8-4-8-2-16Z"/>
-    <path d="M62 12q18-6 30 6-2 14-14 18-12 0-16-8-2-8 0-16Z"/><path d="M78 62q8-4 14 2 0 8-8 10-8 0-6-12Z"/></g>`;
-  return `<div class="map"><svg viewBox="0 0 100 80">${land}${lines}${dots}${ships}</svg></div>`;
+  return `<div class="map"><svg viewBox="0 0 ${m.w} ${m.h}">${mapBase(m, 'w')}${lines}${dots}</svg></div>`;
 }
-// mapa kontynentu z miejscowościami i jadącymi pojazdami
+// mapa kontynentu z miejscowościami i jadącymi pojazdami; zoom/przesuwanie: ui.z[cid]
+const zOf = cid => ui.z[cid] || (ui.z[cid] = { k: 1, x: 0, y: 0 });
+function clampZ(cid) {
+  const z = zOf(cid), m = MAPS[cid];
+  z.k = clamp(z.k, 1, 12); z.x = clamp(z.x, 0, m.w - m.w / z.k); z.y = clamp(z.y, 0, m.h - m.h / z.k);
+}
+function zoomAt(cid, k, ux, uy) { // ux,uy: punkt mapy, który ma zostać w miejscu (środek widoku)
+  const z = zOf(cid), m = MAPS[cid];
+  z.k = clamp(k, 1, 12); z.x = ux - m.w / z.k / 2; z.y = uy - m.h / z.k / 2; clampZ(cid);
+}
 function locMap(cid, sel) {
+  const m = MAPS[cid], z = zOf(cid), u = 1 / z.k, P = l => m.pts[l.id];
   const ls = LOCS.filter(l => l.c === cid);
-  const la = ls.map(l => l.la), lo = ls.map(l => l.lo);
-  const a0 = Math.min(...la), a1 = Math.max(...la), o0 = Math.min(...lo), o1 = Math.max(...lo);
-  const P = l => [10 + (l.lo - o0) / ((o1 - o0) || 1) * 80, 8 + (a1 - l.la) / ((a1 - a0) || 1) * 38];
+  const own = l => { const L = S.L[l.id]; return !!(L && (L.bld.length || L.gar || Object.keys(L.inv).length)); };
   let g = '';
   for (const v of S.veh) {
     if (v.st !== 'go' || LOC[v.to].c !== cid) continue;
     const [x1, y1] = P(LOC[v.from]), [x2, y2] = P(LOC[v.to]), p = clamp(1 - (v.eta - S.hour) / v.dur, 0, 1);
-    g += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="#f5c542" stroke-width=".35" stroke-dasharray="1 .8" opacity=".8"/>
-      <rect x="${x1 + (x2 - x1) * p - 1.2}" y="${y1 + (y2 - y1) * p - .8}" width="2.4" height="1.6" rx=".3" fill="#f5c542"/>`;
+    g += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="#f5c542" stroke-width="2" stroke-dasharray="5 4" vector-effect="non-scaling-stroke"/>
+      <rect x="${x1 + (x2 - x1) * p - 11 * u}" y="${y1 + (y2 - y1) * p - 7 * u}" width="${22 * u}" height="${14 * u}" rx="${3 * u}" fill="#f5c542" stroke="#0b131b" stroke-width="1.5" vector-effect="non-scaling-stroke"/>`;
   }
-  const boxes = ls.map(l => { const [x, y] = P(l); return [x - 2.5, y - 2.5, x + 2.5, y + 2.5]; }), lab = {};
+  // etykiety: najpierw wybrana i Twoje, potem miasta, potem wsie; nachodzące się chowamy
+  const fs = 28 * u, boxes = [], lab = {};
   const hit = b => boxes.some(o => b[0] < o[2] && b[2] > o[0] && b[1] < o[3] && b[3] > o[1]);
-  for (const l of ls) { // etykiety bez nachodzenia: pod, nad, w prawo, w lewo
-    const [x, y] = P(l), w = l.n.length * 1.55;
-    const opts = [[x, y + 5.6, 'middle', x - w / 2, y + 3.4, x + w / 2, y + 6.4], [x, y - 3.4, 'middle', x - w / 2, y - 5.6, x + w / 2, y - 2.6],
-      [x + 3.2, y + 1, 'start', x + 3.2, y - 1.2, x + 3.2 + w, y + 1.8], [x - 3.2, y + 1, 'end', x - 3.2 - w, y - 1.2, x - 3.2, y + 1.8]];
-    const o = opts.find(o => !hit(o.slice(3))) || opts[0];
-    boxes.push(o.slice(3)); lab[l.id] = o;
+  const order = [...ls].sort((a, b) => (b.id === sel) - (a.id === sel) || own(b) - own(a) || (a.t === 'm' ? -1 : 1) - (b.t === 'm' ? -1 : 1));
+  for (const l of ls) { const [x, y] = P(l); boxes.push([x - 12 * u, y - 12 * u, x + 12 * u, y + 12 * u]); }
+  for (const l of order) {
+    const [x, y] = P(l), w = l.n.length * fs * .56, d = 16 * u;
+    const opts = [[x, y + d + fs * .8, 'middle', x - w / 2, y + d, x + w / 2, y + d + fs], [x, y - d - fs * .2, 'middle', x - w / 2, y - d - fs, x + w / 2, y - d],
+      [x + d, y + fs * .35, 'start', x + d, y - fs / 2, x + d + w, y + fs / 2], [x - d, y + fs * .35, 'end', x - d - w, y - fs / 2, x - d, y + fs / 2]];
+    const o = opts.find(o => !hit(o.slice(3))) || (l.id === sel ? opts[0] : null);
+    if (o) { boxes.push(o.slice(3)); lab[l.id] = o; }
   }
   for (const l of ls) {
-    const [x, y] = P(l), L = S.L[l.id], own = L && (L.bld.length || L.gar), on = l.id === sel, lb = lab[l.id];
-    const shape = l.t === 'm' ? `<rect x="${x - 2.2}" y="${y - 2.2}" width="4.4" height="4.4" rx=".8"` : `<circle cx="${x}" cy="${y}" r="2"`;
-    g += `<g data-a="bl" data-l="${l.id}" style="cursor:pointer">${on ? `<circle cx="${x}" cy="${y}" r="4.2" fill="none" stroke="#e0823f" stroke-width=".6"/>` : ''}
-      ${shape} fill="${own ? S.color : '#2d323b'}" stroke="${own ? '#fff' : '#5a6270'}" stroke-width=".4"/>
-      ${L && L.port ? `<rect x="${x + 2.4}" y="${y - 4}" width="2" height="2" rx=".4" fill="#4aa3ff"/>` : ''}
-      <text x="${lb[0]}" y="${lb[1]}" text-anchor="${lb[2]}" font-size="2.8" fill="${on ? '#eef0f3' : '#9aa3af'}">${l.n}</text></g>`;
+    const [x, y] = P(l), L = S.L[l.id], mine = own(l), on = l.id === sel, lb = lab[l.id], r = (l.t === 'm' ? 11 : 9) * u;
+    const fill = mine ? S.color : (l.t === 'm' ? '#56677a' : '#4b6a4e');
+    const shape = l.t === 'm' ? `<rect x="${x - r}" y="${y - r}" width="${2 * r}" height="${2 * r}" rx="${3 * u}"` : `<circle cx="${x}" cy="${y}" r="${r}"`;
+    g += `<g data-a="bl" data-l="${l.id}" data-from-map="1" style="cursor:pointer"><circle cx="${x}" cy="${y}" r="${24 * u}" fill="transparent"/>
+      ${on ? `<circle cx="${x}" cy="${y}" r="${19 * u}" fill="none" stroke="#e0823f" stroke-width="2.5" vector-effect="non-scaling-stroke"/>` : ''}
+      ${shape} fill="${fill}" stroke="${mine ? '#fff' : '#0b131b'}" stroke-width="1.5" vector-effect="non-scaling-stroke"/>
+      ${L && L.port ? `<rect x="${x + 7 * u}" y="${y - 17 * u}" width="${10 * u}" height="${10 * u}" rx="${2 * u}" fill="#4aa3ff" stroke="#0b131b" stroke-width="1" vector-effect="non-scaling-stroke"/>` : ''}
+      ${lb ? `<text x="${lb[0]}" y="${lb[1]}" text-anchor="${lb[2]}" font-size="${fs}" font-weight="${on || mine ? 700 : 500}" fill="${on ? '#fff' : mine ? '#eef0f3' : '#b4bcc6'}" class="lbl" style="stroke-width:${7 * u}px">${l.n}</text>` : ''}</g>`;
   }
-  return `<div class="map"><svg viewBox="0 0 100 52">${g}</svg></div>`;
+  return `<div class="map lmap" data-cid="${cid}" style="--ar:${m.w}/${m.h}"><svg viewBox="${z.x} ${z.y} ${m.w / z.k} ${m.h / z.k}" preserveAspectRatio="xMidYMid meet" class="${z.k > 1 ? 'zoomed' : ''}">${mapBase(m, cid)}${g}</svg>
+    <div class="zbtn"><button data-a="zoom" data-z="1" aria-label="Przybliż">+</button><button data-a="zoom" data-z="-1" aria-label="Oddal">−</button>${z.k > 1 ? '<button data-a="zoom" data-z="0" aria-label="Cała mapa">⤢</button>' : ''}</div></div>`;
 }
+// gesty na mapie kontynentu: przeciąganie, szczypanie, kółko myszy
+const gs = { pts: new Map(), moved: false, block: false };
+function gsSvg(e) { return e.target.closest && e.target.closest('.lmap svg'); }
+function upp(svg, cid) { const r = svg.getBoundingClientRect(), m = MAPS[cid], z = zOf(cid); return { r, k: Math.max(m.w / z.k / r.width, m.h / z.k / r.height) }; }
+function applyVB(svg, cid) { const z = zOf(cid), m = MAPS[cid]; svg.setAttribute('viewBox', `${z.x} ${z.y} ${m.w / z.k} ${m.h / z.k}`); svg.classList.toggle('zoomed', z.k > 1); }
+document.addEventListener('pointerdown', e => {
+  const svg = gsSvg(e); if (!svg) return;
+  gs.svg = svg; gs.cid = svg.parentNode.dataset.cid; gs.pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (gs.pts.size === 1) { gs.moved = false; gs.travel = 0; }
+  ui.gesture = true;
+});
+document.addEventListener('pointermove', e => {
+  if (!gs.pts.has(e.pointerId)) return;
+  const prevPts = [...gs.pts.values()].map(p => ({ ...p }));
+  gs.pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  const cid = gs.cid, z = zOf(cid), m = MAPS[cid], { r, k } = upp(gs.svg, cid), cur = [...gs.pts.values()];
+  if (cur.length === 1) {
+    const dx = cur[0].x - prevPts[0].x, dy = cur[0].y - prevPts[0].y;
+    gs.travel += Math.abs(dx) + Math.abs(dy);
+    if (gs.travel > 8 && z.k > 1) { gs.moved = true; z.x -= dx * k; z.y -= dy * k; }
+    else if (gs.travel > 8) gs.moved = true;
+  } else if (cur.length === 2) {
+    const d0 = Math.hypot(prevPts[0].x - prevPts[1].x, prevPts[0].y - prevPts[1].y), d1 = Math.hypot(cur[0].x - cur[1].x, cur[0].y - cur[1].y);
+    const mx = (cur[0].x + cur[1].x) / 2 - r.left, my = (cur[0].y + cur[1].y) / 2 - r.top;
+    const ux = z.x + mx * k, uy = z.y + my * k;
+    z.k = clamp(z.k * (d1 / (d0 || d1)), 1, 12);
+    const k2 = Math.max(m.w / z.k / r.width, m.h / z.k / r.height);
+    z.x = ux - mx * k2; z.y = uy - my * k2; gs.moved = true;
+  }
+  clampZ(cid); applyVB(gs.svg, cid);
+});
+function gsEnd(e) {
+  if (!gs.pts.delete(e.pointerId) || gs.pts.size) return;
+  ui.gesture = false;
+  if (gs.moved) { gs.block = true; setTimeout(() => { gs.block = false; }, 60); render(true); }
+}
+document.addEventListener('pointerup', gsEnd);
+document.addEventListener('pointercancel', gsEnd);
+document.addEventListener('wheel', e => {
+  const svg = gsSvg(e); if (!svg) return;
+  e.preventDefault();
+  const cid = svg.parentNode.dataset.cid, z = zOf(cid), { r, k } = upp(svg, cid);
+  const ux = z.x + (e.clientX - r.left) * k, uy = z.y + (e.clientY - r.top) * k;
+  z.k = clamp(z.k * (e.deltaY < 0 ? 1.25 : .8), 1, 12);
+  const m = MAPS[cid], k2 = Math.max(m.w / z.k / r.width, m.h / z.k / r.height);
+  z.x = ux - (e.clientX - r.left) * k2; z.y = uy - (e.clientY - r.top) * k2; clampZ(cid);
+  clearTimeout(gs.wt); applyVB(svg, cid); gs.wt = setTimeout(() => render(true), 150);
+}, { passive: false });
 
 function vBudowa() {
   const cid = ui.bc, c = CN[cid];
@@ -669,7 +746,7 @@ function renderTop() {
 function render(force) {
   renderTop();
   const ae = document.activeElement;
-  if (!force && ae && (ae.tagName === 'INPUT' || ae.tagName === 'SELECT')) return;
+  if (ui.gesture || (!force && ae && (ae.tagName === 'INPUT' || ae.tagName === 'SELECT'))) return;
   $('view').innerHTML = VIEWS[ui.tab]();
   document.querySelectorAll('#nav button').forEach(b => b.classList.toggle('on', b.dataset.tab === ui.tab));
   renderUpd(); renderTut();
@@ -695,7 +772,17 @@ function act(a, d) {
   switch (a) {
     case 'tab': ui.tab = d.t; window.scrollTo(0, 0); break;
     case 'bc': ui.bc = d.c; break;
-    case 'bl': ui.bl = d.l; ui.bc = LOC[d.l].c; break;
+    case 'bl': {
+      ui.bl = d.l; ui.bc = LOC[d.l].c;
+      const z = zOf(ui.bc); if (z.k > 1 && !d.fromMap) { const [x, y] = MAPS[ui.bc].pts[d.l]; zoomAt(ui.bc, z.k, x, y); }
+      break;
+    }
+    case 'zoom': {
+      const cid = ui.bc, z = zOf(cid), m = MAPS[cid];
+      if (+d.z === 0) { z.k = 1; z.x = z.y = 0; break; }
+      const [sx, sy] = z.k === 1 && +d.z > 0 && MAPS[cid].pts[ui.bl] ? MAPS[cid].pts[ui.bl] : [z.x + m.w / z.k / 2, z.y + m.h / z.k / 2];
+      zoomAt(cid, z.k * (+d.z > 0 ? 2 : .5), sx, sy); break;
+    }
     case 'ml': ui.ml = d.l; break;
     case 'goBuild': ui.bc = d.c; ui.tab = 'budowa'; break;
     case 'branch':
@@ -781,6 +868,7 @@ function act(a, d) {
   save(); render(true);
 }
 document.addEventListener('click', e => {
+  if (gs.block && e.target.closest('.lmap')) return;
   const t = e.target.closest('[data-a],[data-tab]');
   if (!t) { if (e.target.id === 'modal') $('modal').hidden = true; return; }
   if (t.dataset.tab) { ui.tab = t.dataset.tab; window.scrollTo(0, 0); render(true); return; }

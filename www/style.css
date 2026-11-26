@@ -122,3 +122,13 @@ body.tuton main{padding-bottom:calc(250px + var(--safe-b))}
 .chips button small{display:block;font-size:10px;line-height:1;color:var(--mut);margin-top:1px}
 .chips button:has(small){padding-top:4px;padding-bottom:4px;line-height:1.15}
 .bar.y i{background:#f5c542}
+/* mapy */
+.map{background:#0b131b}
+.map svg{display:block;width:100%;height:auto}
+.map text{font-family:system-ui,-apple-system,Roboto,sans-serif}
+.map text.lbl{paint-order:stroke;stroke:rgba(6,11,16,.9);stroke-width:6px;stroke-linejoin:round}
+.lmap{position:relative}
+.lmap svg{aspect-ratio:var(--ar);max-height:62vh;margin:0 auto;touch-action:pan-y}
+.lmap svg.zoomed{touch-action:none}
+.zbtn{position:absolute;right:8px;top:8px;display:flex;flex-direction:column;gap:6px}
+.zbtn button{width:40px;height:40px;border-radius:10px;border:1px solid #3a4d5c;background:rgba(18,24,31,.85);color:var(--ink);font-size:20px;font-weight:700;line-height:1}
