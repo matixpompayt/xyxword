@@ -66,6 +66,7 @@ const TIERS = [ // zamożność państwa: licencja, podatek od sprzedaży, mnoż
 const tierOf = cc => HI.has(cc) ? 0 : MID.has(cc) ? 1 : 2;
 const DUTY = .06; // cło od wartości towaru przy przekraczaniu granicy (poza UE)
 const RAW = ['zboze', 'drewno', 'wegiel', 'ruda', 'ropa', 'krzem', 'miedz'];
+const RAW2 = ['ziemniaki', 'buraki', 'rzepak', 'owoce', 'winogrona', 'chmiel', 'bawelna', 'kakao', 'kauczuk', 'gaz', 'boksyt', 'kamien', 'zloto'];
 const hashS = t => { let h = 2166136261; for (const ch of t) { h ^= ch.charCodeAt(0); h = Math.imul(h, 16777619); } return h >>> 0; };
 const CR_FIX = {
   PL: { wegiel: 1.5, zboze: 1.3, miedz: 1.3 }, DE: { wegiel: 1.2, zboze: 1.1, drewno: 1.1 }, FR: { zboze: 1.5, drewno: 1.1 }, UA: { zboze: 1.6, ruda: 1.3 },
@@ -75,12 +76,23 @@ const CR_FIX = {
   NG: { ropa: 1.7 }, ZA: { wegiel: 1.4, ruda: 1.4 }, CD: { miedz: 1.8 }, ZM: { miedz: 1.8 }, EG: { ropa: 1.2 }, DZ: { ropa: 1.5 }, LY: { ropa: 1.6 },
   CN: { wegiel: 1.7, krzem: 1.6, ruda: 1.2 }, IN: { wegiel: 1.3, zboze: 1.3 }, JP: { krzem: 1.4 }, KR: { krzem: 1.5 }, KZ: { ropa: 1.4, ruda: 1.3 },
   AU: { ruda: 1.9, wegiel: 1.5, miedz: 1.2 } };
+// bonusy nowych surowców — dopisywane do państw
+const CR_ADD = {
+  PL: { ziemniaki: 1.4, buraki: 1.3, rzepak: 1.3, owoce: 1.3, chmiel: 1.2 }, DE: { buraki: 1.3, rzepak: 1.3, chmiel: 1.5, ziemniaki: 1.3 }, CZ: { chmiel: 1.6 },
+  FR: { winogrona: 1.7, buraki: 1.3, rzepak: 1.2 }, IT: { winogrona: 1.6, owoce: 1.3 }, ES: { winogrona: 1.4, owoce: 1.5 }, PT: { winogrona: 1.4 }, GR: { owoce: 1.3 },
+  UA: { buraki: 1.4, rzepak: 1.3 }, BY: { ziemniaki: 1.5 }, RU: { gaz: 1.8, zloto: 1.4 }, NO: { gaz: 1.6 }, NL: { gaz: 1.3 }, TR: { owoce: 1.4, bawelna: 1.3 },
+  US: { bawelna: 1.4, gaz: 1.5, zloto: 1.2 }, CA: { rzepak: 1.6 }, BR: { kakao: 1.3, kauczuk: 1.3, owoce: 1.3 }, CL: { winogrona: 1.3 }, AR: { winogrona: 1.3 },
+  CI: { kakao: 2 }, GH: { kakao: 1.8, zloto: 1.5 }, CM: { kakao: 1.5 }, NG: { kakao: 1.4, gaz: 1.4 }, ZA: { zloto: 1.8, winogrona: 1.2 }, GN: { boksyt: 2 },
+  EG: { bawelna: 1.5 }, UZ: { bawelna: 1.8 }, TM: { bawelna: 1.5, gaz: 1.6 }, IN: { bawelna: 1.5 }, CN: { bawelna: 1.3, boksyt: 1.4, zloto: 1.3 },
+  TH: { kauczuk: 1.9 }, MY: { kauczuk: 1.7 }, VN: { kauczuk: 1.5 }, LR: { kauczuk: 1.6 }, AU: { boksyt: 1.9, zloto: 1.6 }, PE: { zloto: 1.5 }, DZ: { gaz: 1.6 }, KZ: { gaz: 1.3 } };
 const CRC = {};
 function cRes(cc) { // bonusy surowców państwa (stałe lub wyliczone z kodu państwa)
   if (CRC[cc]) return CRC[cc];
-  if (CR_FIX[cc]) return CRC[cc] = CR_FIX[cc];
-  const h = hashS(cc || 'XX'), r = {}, a = RAW[h % 7], b = RAW[(h >>> 3) % 7], c = RAW[(h >>> 7) % 7];
-  r[a] = 1.2 + ((h >>> 11) % 4) / 10; if (b !== a) r[b] = 1.2 + ((h >>> 14) % 3) / 10; if (c !== a && c !== b) r[c] = .7;
+  const h = hashS(cc || 'XX'); let r = {};
+  if (CR_FIX[cc]) r = { ...CR_FIX[cc] };
+  else { const a = RAW[h % 7], b = RAW[(h >>> 3) % 7], c = RAW[(h >>> 7) % 7];
+    r[a] = 1.2 + ((h >>> 11) % 4) / 10; if (b !== a) r[b] = 1.2 + ((h >>> 14) % 3) / 10; if (c !== a && c !== b) r[c] = .7; }
+  if (CR_ADD[cc]) Object.assign(r, CR_ADD[cc]); else r[RAW2[(h >>> 17) % RAW2.length]] = 1.3;
   return CRC[cc] = r;
 }
 const RG_FIX = { 'śląskie': { wegiel: 1.6 }, 'dolnośląskie': { miedz: 1.6 }, 'wielkopolskie': { zboze: 1.4 }, 'lubelskie': { zboze: 1.4 }, 'podlaskie': { zboze: 1.3 },
@@ -150,33 +162,136 @@ const VEH = {
 const POS = { eu: [52, 24], na: [21, 26], sa: [31, 62], af: [53, 54], as: [77, 30], au: [86, 68] };
 
 const G = {
-  zboze: { n: 'Zboże', p: 4 }, drewno: { n: 'Drewno', p: 6 }, wegiel: { n: 'Węgiel', p: 8 },
-  ruda: { n: 'Ruda żelaza', p: 10 }, ropa: { n: 'Ropa', p: 14 }, krzem: { n: 'Krzem', p: 12 }, miedz: { n: 'Miedź', p: 16 },
-  maka: { n: 'Mąka', p: 14 }, deski: { n: 'Deski', p: 18 }, stal: { n: 'Stal', p: 60 },
-  plastik: { n: 'Plastik', p: 40 }, chipy: { n: 'Chipy', p: 150 },
+  // surowce roślinne / zwierzęce
+  zboze: { n: 'Zboże', p: 4 }, ziemniaki: { n: 'Ziemniaki', p: 3 }, buraki: { n: 'Buraki cukrowe', p: 3.5 }, rzepak: { n: 'Rzepak', p: 6 },
+  owoce: { n: 'Owoce', p: 6 }, winogrona: { n: 'Winogrona', p: 8 }, chmiel: { n: 'Chmiel', p: 9 }, bawelna: { n: 'Bawełna', p: 7 }, kakao: { n: 'Kakao', p: 12 },
+  drewno: { n: 'Drewno', p: 6 }, kauczuk: { n: 'Kauczuk', p: 13 },
+  wegiel: { n: 'Węgiel', p: 8 }, ruda: { n: 'Ruda żelaza', p: 10 }, ropa: { n: 'Ropa', p: 14 }, gaz: { n: 'Gaz ziemny', p: 9 }, krzem: { n: 'Krzem', p: 12 },
+  miedz: { n: 'Miedź', p: 16 }, boksyt: { n: 'Boksyt', p: 11 }, kamien: { n: 'Kamień', p: 5 }, zloto: { n: 'Złoto', p: 400 },
+  // przetworzone
+  maka: { n: 'Mąka', p: 14 }, deski: { n: 'Deski', p: 18 }, sklejka: { n: 'Sklejka', p: 22 }, stal: { n: 'Stal', p: 60 }, aluminium: { n: 'Aluminium', p: 70 },
+  kable: { n: 'Kable', p: 70 }, plastik: { n: 'Plastik', p: 40 }, paliwo: { n: 'Paliwo', p: 30 }, nawozy: { n: 'Nawozy', p: 26 }, farby: { n: 'Farby', p: 55 },
+  chipy: { n: 'Chipy', p: 150 }, celuloza: { n: 'Celuloza', p: 16 }, papier: { n: 'Papier', p: 40 }, przedza: { n: 'Przędza', p: 20 }, tkanina: { n: 'Tkanina', p: 60 },
+  pasza: { n: 'Pasza', p: 9 }, bydlo: { n: 'Bydło', p: 90 }, mleko: { n: 'Mleko', p: 9 }, swinie: { n: 'Świnie', p: 45 }, drob: { n: 'Drób', p: 16 }, jaja: { n: 'Jaja', p: 3.5 },
+  mieso: { n: 'Mięso', p: 80 }, skory: { n: 'Skóry', p: 20 }, skora: { n: 'Skóra wyprawiona', p: 65 }, cukier: { n: 'Cukier', p: 22 }, olej: { n: 'Olej', p: 40 },
+  // produkty
   chleb: { n: 'Chleb', p: 38 }, meble: { n: 'Meble', p: 95 }, komputery: { n: 'Komputery', p: 1800 }, auta: { n: 'Samochody', p: 9000 },
+  opony: { n: 'Opony', p: 100 }, opakowania: { n: 'Opakowania', p: 30 }, zabawki: { n: 'Zabawki', p: 120 }, leki: { n: 'Leki', p: 300 },
+  kartony: { n: 'Kartony', p: 60 }, ksiazki: { n: 'Książki', p: 160 }, ubrania: { n: 'Ubrania', p: 140 }, buty: { n: 'Buty', p: 200 }, bizuteria: { n: 'Biżuteria', p: 550 },
+  wedliny: { n: 'Wędliny', p: 170 }, filety: { n: 'Filety drobiowe', p: 45 }, ser: { n: 'Ser', p: 70 }, soki: { n: 'Soki', p: 28 },
+  piwo: { n: 'Piwo', p: 16 }, wino: { n: 'Wino', p: 60 }, wodka: { n: 'Wódka', p: 60 }, czekolada: { n: 'Czekolada', p: 80 }, ciastka: { n: 'Ciastka', p: 60 }, lody: { n: 'Lody', p: 50 },
+  telefony: { n: 'Telefony', p: 900 }, telewizory: { n: 'Telewizory', p: 700 }, agd: { n: 'Sprzęt AGD', p: 560 }, rowery: { n: 'Rowery', p: 350 }, traktory: { n: 'Traktory', p: 9000 },
 };
 const GK = Object.keys(G);
 
 // t: 0 surowce, 1 przetwórstwo, 2 produkty końcowe
+// działy przemysłu (jak w Economy World)
+const DEP = [
+  { id: 'uprawa', n: 'Uprawa roślin', i: '🌾' }, { id: 'wydob', n: 'Przemysł wydobywczy', i: '⛏️' }, { id: 'lesn', n: 'Leśnictwo', i: '🌲' },
+  { id: 'drzew', n: 'Przemysł drzewny', i: '🪵' }, { id: 'metal', n: 'Przemysł metalurgiczny', i: '🔩' }, { id: 'plast', n: 'Przemysł plastikowy', i: '🧴' },
+  { id: 'chem', n: 'Przemysł chemiczny', i: '⚗️' }, { id: 'papier', n: 'Przemysł celulozowo-papierniczy', i: '📦' }, { id: 'tekst', n: 'Przemysł tekstyliów', i: '🧵' },
+  { id: 'odziez', n: 'Przemysł odzieżowy', i: '👕' }, { id: 'pasza', n: 'Przemysł paszowy', i: '🌽' }, { id: 'hodowla', n: 'Hodowla zwierząt', i: '🐄' },
+  { id: 'mieso', n: 'Branża mięsna', i: '🥩' }, { id: 'spoz', n: 'Branża spożywcza', i: '🍞' }, { id: 'alko', n: 'Branża alkoholowa', i: '🍺' },
+  { id: 'slod', n: 'Branża słodyczy', i: '🍫' }, { id: 'elektr', n: 'Przemysł elektroniczny', i: '💻' }, { id: 'mech', n: 'Przemysł mechaniczny', i: '🚗' },
+];
 const B = {
-  farma:     { n: 'Farma',              t: 0, cost: 2000,   out: { zboze: 10 } },
-  las:       { n: 'Wyrąb lasu',         t: 0, cost: 3000,   out: { drewno: 8 } },
-  kop_weg:   { n: 'Kopalnia węgla',     t: 0, cost: 5000,   out: { wegiel: 7 } },
-  kop_rud:   { n: 'Kopalnia rudy',      t: 0, cost: 7000,   out: { ruda: 6 } },
-  szyb:      { n: 'Szyb naftowy',       t: 0, cost: 12000,  out: { ropa: 5 } },
-  kop_krz:   { n: 'Kopalnia krzemu',    t: 0, cost: 10000,  out: { krzem: 5 } },
-  kop_mie:   { n: 'Kopalnia miedzi',    t: 0, cost: 12000,  out: { miedz: 4 } },
-  mlyn:      { n: 'Młyn',               t: 1, cost: 7000,   in: { zboze: 10 }, out: { maka: 8 } },
-  tartak:    { n: 'Tartak',             t: 1, cost: 8000,   in: { drewno: 8 }, out: { deski: 6 } },
-  huta:      { n: 'Huta stali',         t: 1, cost: 15000,  in: { ruda: 6, wegiel: 6 }, out: { stal: 4 } },
-  rafineria: { n: 'Rafineria',          t: 1, cost: 14000,  in: { ropa: 5 }, out: { plastik: 4 } },
-  fab_chip:  { n: 'Fabryka chipów',     t: 1, cost: 30000,  in: { krzem: 4, miedz: 3 }, out: { chipy: 2 } },
-  piekarnia: { n: 'Piekarnia',          t: 2, cost: 12000,  in: { maka: 8 }, out: { chleb: 6 } },
-  meblarnia: { n: 'Fabryka mebli',      t: 2, cost: 20000,  in: { deski: 6 }, out: { meble: 2 } },
-  fab_pc:    { n: 'Fabryka komputerów', t: 2, cost: 50000,  in: { chipy: 2, plastik: 2 }, out: { komputery: .5 } },
-  fab_aut:   { n: 'Fabryka samochodów', t: 2, cost: 120000, in: { stal: 4, plastik: 3, chipy: 2 }, out: { auta: .2 } },
+  // Uprawa roślin
+  farma:     { n: 'Farma zboża',          d: 'uprawa', t: 0, cost: 2000,  out: { zboze: 10 } },
+  pole_ziem: { n: 'Pole ziemniaków',      d: 'uprawa', t: 0, cost: 1800,  out: { ziemniaki: 12 } },
+  pole_bur:  { n: 'Plantacja buraków',    d: 'uprawa', t: 0, cost: 2000,  out: { buraki: 12 } },
+  pole_rzep: { n: 'Pole rzepaku',         d: 'uprawa', t: 0, cost: 2600,  out: { rzepak: 8 } },
+  sad:       { n: 'Sad',                  d: 'uprawa', t: 0, cost: 3000,  out: { owoce: 9 } },
+  winnica:   { n: 'Winnica',              d: 'uprawa', t: 0, cost: 4500,  out: { winogrona: 7 } },
+  chmielnik: { n: 'Chmielnik',            d: 'uprawa', t: 0, cost: 4000,  out: { chmiel: 6 } },
+  pl_baw:    { n: 'Plantacja bawełny',    d: 'uprawa', t: 0, cost: 4000,  out: { bawelna: 8 } },
+  pl_kak:    { n: 'Plantacja kakao',      d: 'uprawa', t: 0, cost: 6000,  out: { kakao: 6 } },
+  // Wydobycie
+  kamien:    { n: 'Kamieniołom',          d: 'wydob', t: 0, cost: 2500,  out: { kamien: 10 } },
+  kop_weg:   { n: 'Kopalnia węgla',       d: 'wydob', t: 0, cost: 5000,  out: { wegiel: 7 } },
+  kop_rud:   { n: 'Kopalnia rudy',        d: 'wydob', t: 0, cost: 7000,  out: { ruda: 6 } },
+  szyb:      { n: 'Szyb naftowy',         d: 'wydob', t: 0, cost: 12000, out: { ropa: 5 } },
+  szyb_gaz:  { n: 'Odwiert gazu',         d: 'wydob', t: 0, cost: 9000,  out: { gaz: 7 } },
+  kop_krz:   { n: 'Kopalnia krzemu',      d: 'wydob', t: 0, cost: 10000, out: { krzem: 5 } },
+  kop_mie:   { n: 'Kopalnia miedzi',      d: 'wydob', t: 0, cost: 12000, out: { miedz: 4 } },
+  kop_bok:   { n: 'Kopalnia boksytu',     d: 'wydob', t: 0, cost: 10000, out: { boksyt: 6 } },
+  kop_zlo:   { n: 'Kopalnia złota',       d: 'wydob', t: 0, cost: 30000, out: { zloto: .25 } },
+  // Leśnictwo
+  las:       { n: 'Wyrąb lasu',           d: 'lesn', t: 0, cost: 3000,  out: { drewno: 8 } },
+  pl_kau:    { n: 'Plantacja kauczuku',   d: 'lesn', t: 0, cost: 6000,  out: { kauczuk: 6 } },
+  // Drzewny
+  tartak:    { n: 'Tartak',               d: 'drzew', t: 1, cost: 8000,  in: { drewno: 8 }, out: { deski: 6 } },
+  sklejka:   { n: 'Wytwórnia sklejki',    d: 'drzew', t: 1, cost: 9000,  in: { drewno: 8 }, out: { sklejka: 5 } },
+  meblarnia: { n: 'Fabryka mebli',        d: 'drzew', t: 2, cost: 20000, in: { deski: 6 }, out: { meble: 2 } },
+  // Metalurgia
+  huta:      { n: 'Huta stali',           d: 'metal', t: 1, cost: 15000, in: { ruda: 6, wegiel: 6 }, out: { stal: 4 } },
+  huta_al:   { n: 'Huta aluminium',       d: 'metal', t: 1, cost: 16000, in: { boksyt: 6, wegiel: 3 }, out: { aluminium: 3 } },
+  kablownia: { n: 'Fabryka kabli',        d: 'metal', t: 1, cost: 14000, in: { miedz: 4, plastik: 1 }, out: { kable: 3 } },
+  // Plastikowy
+  rafineria: { n: 'Rafineria (plastik)',  d: 'plast', t: 1, cost: 14000, in: { ropa: 5 }, out: { plastik: 4 } },
+  opakow:    { n: 'Fabryka opakowań',     d: 'plast', t: 2, cost: 12000, in: { plastik: 3 }, out: { opakowania: 6 } },
+  zabawki:   { n: 'Fabryka zabawek',      d: 'plast', t: 2, cost: 18000, in: { plastik: 3, farby: 1 }, out: { zabawki: 2.5 } },
+  opony:     { n: 'Fabryka opon',         d: 'plast', t: 2, cost: 20000, in: { kauczuk: 5, stal: 1 }, out: { opony: 2.5 } },
+  // Chemia
+  raf_pal:   { n: 'Rafineria paliw',      d: 'chem', t: 1, cost: 13000, in: { ropa: 5 }, out: { paliwo: 5 } },
+  nawozy:    { n: 'Zakłady azotowe',      d: 'chem', t: 1, cost: 12000, in: { gaz: 6 }, out: { nawozy: 5 } },
+  farby:     { n: 'Fabryka farb',         d: 'chem', t: 1, cost: 13000, in: { ropa: 2, kamien: 3 }, out: { farby: 2 } },
+  leki:      { n: 'Fabryka leków',        d: 'chem', t: 2, cost: 40000, in: { gaz: 3, owoce: 4, opakowania: 1 }, out: { leki: 1 } },
+  // Celulozowo-papierniczy
+  celuloza:  { n: 'Celulozownia',         d: 'papier', t: 1, cost: 9000,  in: { drewno: 7 }, out: { celuloza: 5 } },
+  papiernia: { n: 'Papiernia',            d: 'papier', t: 1, cost: 11000, in: { celuloza: 5 }, out: { papier: 4 } },
+  kartonow:  { n: 'Kartonownia',          d: 'papier', t: 2, cost: 12000, in: { papier: 4 }, out: { kartony: 4 } },
+  drukarnia: { n: 'Drukarnia',            d: 'papier', t: 2, cost: 18000, in: { papier: 4, farby: 1 }, out: { ksiazki: 2 } },
+  // Tekstylia
+  przedz:    { n: 'Przędzalnia',          d: 'tekst', t: 1, cost: 9000,  in: { bawelna: 8 }, out: { przedza: 5 } },
+  tkalnia:   { n: 'Tkalnia',              d: 'tekst', t: 1, cost: 12000, in: { przedza: 5 }, out: { tkanina: 3 } },
+  garbarnia: { n: 'Garbarnia',            d: 'tekst', t: 1, cost: 11000, in: { skory: 4 }, out: { skora: 2.5 } },
+  // Odzież
+  szwalnia:  { n: 'Szwalnia',             d: 'odziez', t: 2, cost: 16000, in: { tkanina: 3 }, out: { ubrania: 2 } },
+  obuwie:    { n: 'Fabryka obuwia',       d: 'odziez', t: 2, cost: 20000, in: { skora: 2, kauczuk: 1 }, out: { buty: 1.2 } },
+  jubiler:   { n: 'Pracownia jubilerska', d: 'odziez', t: 2, cost: 35000, in: { zloto: .2 }, out: { bizuteria: .5 } },
+  // Pasze
+  paszarnia: { n: 'Wytwórnia pasz',       d: 'pasza', t: 1, cost: 6000,  in: { zboze: 5, ziemniaki: 4 }, out: { pasza: 9 } },
+  paszarnia2:{ n: 'Mieszalnia pasz rzepakowych', d: 'pasza', t: 1, cost: 8000, in: { rzepak: 4, nawozy: 1 }, out: { pasza: 9 } },
+  // Hodowla
+  obora:     { n: 'Ferma bydła',          d: 'hodowla', t: 1, cost: 12000, in: { pasza: 8 }, out: { bydlo: 1, mleko: 6 } },
+  chlewnia:  { n: 'Chlewnia',             d: 'hodowla', t: 1, cost: 9000,  in: { pasza: 6 }, out: { swinie: 2.5 } },
+  kurnik:    { n: 'Kurnik',               d: 'hodowla', t: 1, cost: 6000,  in: { pasza: 4 }, out: { drob: 3, jaja: 8 } },
+  // Mięsna
+  ubojnia:   { n: 'Ubojnia',              d: 'mieso', t: 1, cost: 14000, in: { bydlo: 1, swinie: 2 }, out: { mieso: 3, skory: 1.5 } },
+  wedliny:   { n: 'Zakład wędliniarski',  d: 'mieso', t: 2, cost: 16000, in: { mieso: 3 }, out: { wedliny: 2 } },
+  drobiarnia:{ n: 'Zakład drobiarski',    d: 'mieso', t: 2, cost: 9000,  in: { drob: 3 }, out: { filety: 2 } },
+  // Spożywcza
+  mlyn:      { n: 'Młyn',                 d: 'spoz', t: 1, cost: 7000,  in: { zboze: 10 }, out: { maka: 8 } },
+  cukrownia: { n: 'Cukrownia',            d: 'spoz', t: 1, cost: 9000,  in: { buraki: 12 }, out: { cukier: 4 } },
+  tlocznia:  { n: 'Olejarnia',            d: 'spoz', t: 1, cost: 9000,  in: { rzepak: 8 }, out: { olej: 2.5 } },
+  piekarnia: { n: 'Piekarnia',            d: 'spoz', t: 2, cost: 12000, in: { maka: 8 }, out: { chleb: 6 } },
+  mleczarnia:{ n: 'Mleczarnia',           d: 'spoz', t: 2, cost: 11000, in: { mleko: 10 }, out: { ser: 2.5 } },
+  sokownia:  { n: 'Tłocznia soków',       d: 'spoz', t: 2, cost: 8000,  in: { owoce: 8, opakowania: 1 }, out: { soki: 5 } },
+  // Alkohole
+  browar:    { n: 'Browar',               d: 'alko', t: 2, cost: 14000, in: { zboze: 6, chmiel: 2 }, out: { piwo: 6 } },
+  winiarnia: { n: 'Winiarnia',            d: 'alko', t: 2, cost: 15000, in: { winogrona: 6 }, out: { wino: 2 } },
+  gorzelnia: { n: 'Gorzelnia',            d: 'alko', t: 2, cost: 16000, in: { ziemniaki: 10, zboze: 4 }, out: { wodka: 2 } },
+  // Słodycze
+  czekol:    { n: 'Fabryka czekolady',    d: 'slod', t: 2, cost: 18000, in: { kakao: 4, cukier: 2, mleko: 3 }, out: { czekolada: 2.5 } },
+  cukiernia: { n: 'Cukiernia',            d: 'slod', t: 2, cost: 12000, in: { maka: 3, cukier: 2, jaja: 6 }, out: { ciastka: 3 } },
+  lodziarnia:{ n: 'Wytwórnia lodów',      d: 'slod', t: 2, cost: 11000, in: { mleko: 6, cukier: 1, owoce: 2 }, out: { lody: 3 } },
+  // Elektronika
+  fab_chip:  { n: 'Fabryka chipów',       d: 'elektr', t: 1, cost: 30000, in: { krzem: 4, miedz: 3 }, out: { chipy: 2 } },
+  fab_pc:    { n: 'Fabryka komputerów',   d: 'elektr', t: 2, cost: 50000, in: { chipy: 2, plastik: 2 }, out: { komputery: .5 } },
+  fab_tel:   { n: 'Fabryka telefonów',    d: 'elektr', t: 2, cost: 45000, in: { chipy: 1, plastik: 1, aluminium: 1 }, out: { telefony: .6 } },
+  fab_tv:    { n: 'Fabryka telewizorów',  d: 'elektr', t: 2, cost: 40000, in: { chipy: 1, plastik: 2, kable: 1 }, out: { telewizory: .7 } },
+  // Mechaniczny
+  fab_agd:   { n: 'Fabryka AGD',          d: 'mech', t: 2, cost: 35000, in: { stal: 3, plastik: 2, kable: 1 }, out: { agd: 1 } },
+  fab_row:   { n: 'Fabryka rowerów',      d: 'mech', t: 2, cost: 22000, in: { stal: 1, aluminium: 2, opony: 1 }, out: { rowery: 1.2 } },
+  fab_trak:  { n: 'Fabryka traktorów',    d: 'mech', t: 2, cost: 90000, in: { stal: 6, opony: 2, paliwo: 2 }, out: { traktory: .12 } },
+  fab_aut:   { n: 'Fabryka samochodów',   d: 'mech', t: 2, cost: 120000, in: { stal: 4, plastik: 3, chipy: 2 }, out: { auta: .2 } },
 };
+// gdzie powstaje towar (do przepisów i kategorii)
+const MADE = {}; for (const [id, d] of Object.entries(B)) for (const g in d.out) (MADE[g] = MADE[g] || []).push(id);
+const USED = {}; for (const [id, d] of Object.entries(B)) for (const g in d.in || {}) (USED[g] = USED[g] || []).push(id);
+const GDEP = g => MADE[g] ? B[MADE[g][0]].d : 'uprawa';
+const ISRAW = g => !!(MADE[g] && MADE[g].some(id => !B[id].in));
+
 const TIER = ['Surowce', 'Przetwórstwo', 'Produkty'];
 const AI_NAMES = ['Krupp & Syn', 'Nordic Grain', 'Pacific Motors', 'Sahara Oil', 'Shenzhen Chips', 'Andes Mining', 'Outback Steel', 'Baltic Bakeries'];
 const PERKS = {
@@ -271,6 +386,7 @@ function parseSave(raw) {
     const s = typeof raw === 'string' ? JSON.parse(raw) : raw;
     if (s && s.v === 2) {
       s.custom = s.custom || [];
+      for (const g of GK) if (!s.m[g]) s.m[g] = { sat: 0, d: rnd(.9, 1.1), h: Array(8).fill(G[g].p) };
       if (!s.w) { // zapis sprzed walut: cała gotówka do waluty siedziby
         const hc = curOfCC((LOC[s.hl] || {}).cc); s.w = { [hc]: (s.cash || 0) * (FX0[hc] || 1) }; s.fx = {}; s.fxp = {}; delete s.cash;
         s.news = s.news || []; s.news.unshift({ h: s.hour || 0, t: `Aktualizacja: waluty! Gotówka przeliczona na ${curName(hc)}. Kantor jest w zakładce Rynek.` });
@@ -301,15 +417,25 @@ const slots = (L, lid) => T(lid).slots + L.x * T(lid).step;
 const used = L => L.bld.length + (L.gar ? 1 : 0);
 const free = (s, lid) => { const L = s.L[lid]; return L ? slots(L, lid) - used(L) : T(lid).slots; };
 
+// mnożnik ceny towaru w danym państwie (surowce tańsze tam, gdzie ich dużo; produkty droższe w bogatych krajach)
+const CPF = {};
+function cpf(cc, g) {
+  const k = cc + g; if (CPF[k]) return CPF[k];
+  let f = 1 + ((hashS(k) % 13) - 6) / 100;
+  if (ISRAW(g)) f *= Math.pow(1 / (cRes(cc)[g] || 1), .6);
+  else f *= HI.has(cc) ? 1.12 : MID.has(cc) ? 1 : .88;
+  return CPF[k] = f;
+}
+const lpf = (lid, g) => cpf(LOC[lid].cc, g);
 function sell(s, lid, g, q) {
   const L = s.L[lid]; q = Math.min(q, L.inv[g] || 0);
   if (q <= 0) return 0;
-  const rev = sellPrice(g, q, s) * T(lid).sell * q * (1 - taxOf(lid));
+  const rev = sellPrice(g, q, s) * lpf(lid, g) * T(lid).sell * q * (1 - taxOf(lid));
   s.m[g].sat += q; L.inv[g] -= q; if (L.inv[g] < 1e-6) delete L.inv[g];
   earnC(s, curOf(lid), rev); if (s.tut) s.tut.sold = true; return rev;
 }
 function buy(s, lid, g, q) {
-  const cost = buyPrice(g, q, s) * q;
+  const cost = buyPrice(g, q, s) * lpf(lid, g) * q;
   if (q <= 0 || !canC(s, curOf(lid), cost)) return false;
   payC(s, curOf(lid), cost); s.m[g].sat -= q; add(ensureL(s, lid), g, q); return cost;
 }
@@ -553,6 +679,7 @@ function renderWiz() {
 }
 document.addEventListener('input', e => {
   const t = e.target, k = t.dataset.wz; if (k) wz[k] = t.value;
+  if (t.dataset.rq) { ui.rq = t.value; clearTimeout(ui.rqT); ui.rqT = setTimeout(openRecipes, 250); }
   if (t.dataset.exa && ui.ex) { ui.ex.amt = t.value; const o = $('exOut'); if (o) o.innerHTML = exPreview(); }
   if (t.dataset.wzq) { wz.q = t.value; const r = $('wzList'); if (r) r.innerHTML = wzList(); }
   if (t.dataset.q) { ui.locQ = t.value; const r = $('locRes'); if (r) r.innerHTML = locRes(ui.bc, ui.bl); }
@@ -923,7 +1050,7 @@ function autoPos(lid, key) { // stałe „losowe” miejsce w obrębie miejscowo
 }
 function posOf(lid, b) { if (!(isFinite(b.la) && isFinite(b.lo))) [b.la, b.lo] = autoPos(lid, b.id); return [b.la, b.lo]; }
 function garPos(lid, L) { if (!L.gpos) L.gpos = autoPos(lid, 'gar'); return L.gpos; }
-const KIND = t => t === 'gar' ? 'garage' : t === 'farma' ? 'farm' : t === 'las' ? 'tree' : /^kop_|^szyb/.test(t) ? 'mine' : 'factory';
+const KIND = t => { if (t === 'gar') return 'garage'; const d = B[t] && B[t].d; return d === 'uprawa' || d === 'hodowla' ? 'farm' : d === 'lesn' ? 'tree' : d === 'wydob' ? 'mine' : 'factory'; };
 const bName = t => t === 'gar' ? 'Garaż' : B[t] ? B[t].n : t;
 let OTH = []; // budynki innych graczy (Firestore /bld)
 function iconImg(kind) { // białe ikonki rysowane na płótnie
@@ -1123,18 +1250,82 @@ function vBudowa() {
       ${lmapOn() ? `<button class="btn s" data-a="bMove" data-l="${lid}" data-id="${b.id}">Przenieś</button>` : ''}
       <button class="btn s" data-a="demo" data-l="${lid}" data-id="${b.id}">Sprzedaj za ${mL(bldValue(b), lid)}</button></div></div>`;
   }
-  h += `<h2>Nowa inwestycja ${fr < 1 ? '— brak wolnych działek' : `— wolne działki: ${fr}`}</h2>`;
-  for (let ti = 0; ti < 3; ti++) {
-    for (const [id, d] of Object.entries(B).filter(([, d]) => d.t === ti)) {
-      const cost = d.cost + land, bon = d.in ? t.fac : t.raw;
-      h += `<div class="card"><div class="row"><div class="grow"><span class="tier t${ti}">${TIER[ti]}</span><span class="bname">${d.n}</span>${bon > 1 ? ` <span class="pos small">+${Math.round((bon - 1) * 100)}%</span>` : ''}</div>
-        <button class="btn s p" data-a="${lmapOn() ? 'buildPick' : 'build'}" data-l="${lid}" data-b="${id}" ${!canL(lid, cost) || fr < 1 || !lic ? 'disabled' : ''}>${mL(cost, lid)}</button></div>
-        <div class="flow">${flowTxt(d, 1 + .08 * S.perk.prod, lid)}</div></div>`;
-    }
+  const dep = DEP.find(x => x.id === ui.dep);
+  h += `<div class="deph"><h2 class="grow">${dep ? `${dep.i} ${dep.n}` : `Wybierz dział przemysłu`}<span class="mut small"> · ${fr < 1 ? 'brak wolnych działek' : `wolne działki: ${fr}`}</span></h2>
+    <div class="depbtns"><button class="btn s b" data-a="recipes">☰ Przepisy</button><button class="btn s b" data-a="priceMap">🗺 Mapa cen</button>${dep ? `<button class="btn s b" data-a="dep" data-v="">‹</button>` : ''}</div></div>`;
+  if (!dep) {
+    h += `<div class="deps">${DEP.map(x => { const n = L ? L.bld.filter(b => B[b.t].d === x.id).length : 0, k = Object.values(B).filter(d => d.d === x.id).length;
+      return `<button class="depc" data-a="dep" data-v="${x.id}"><span class="depi">${x.i}</span><b>${x.n}</b><span class="mut small">${k} zakład${k > 4 ? 'ów' : k > 1 ? 'y' : ''}${n ? ` · masz tu ${n}` : ''}</span><span class="depgo">BUDUJ</span></button>`; }).join('')}</div>`;
+    return h;
+  }
+  for (const [id, d] of Object.entries(B).filter(([, d]) => d.d === dep.id)) {
+    const ti = d.t, cost = d.cost + land, bon = d.in ? t.fac : t.raw;
+    const rb = !d.in ? Object.keys(d.out).map(g => resF(S, lid, g)).reduce((a, b) => Math.max(a, b), 0) : 1, tot = bon * rb;
+    h += `<div class="card rise"><div class="row"><div class="grow"><span class="tier t${ti}">${TIER[ti]}</span><span class="bname">${d.n}</span>${Math.abs(tot - 1) > .005 ? ` <span class="${tot > 1 ? 'pos' : 'neg'} small">${tot > 1 ? '+' : '−'}${Math.round(Math.abs(tot - 1) * 100)}%</span>` : ''}</div>
+      <button class="btn s p" data-a="${lmapOn() ? 'buildPick' : 'build'}" data-l="${lid}" data-b="${id}" ${!canL(lid, cost) || fr < 1 || !lic ? 'disabled' : ''}>${mL(cost, lid)}</button></div>
+      <div class="flow">${flowTxt(d, 1 + .08 * S.perk.prod, lid)}</div></div>`;
   }
   return h;
 }
 
+// ===== PRZEPISY =====
+function openRecipes() {
+  $('modal').hidden = false;
+  const q = (ui.rq || '').toLowerCase(), dsel = ui.rdep || '';
+  const rows = Object.entries(B).filter(([, d]) => (!dsel || d.d === dsel) && (!q || d.n.toLowerCase().includes(q) || Object.keys({ ...d.in, ...d.out }).some(g => G[g].n.toLowerCase().includes(q))));
+  const gl = (o) => Object.entries(o).map(([g, v]) => `<span class="rg">${qty(v)} ${G[g].n}</span>`).join(' + ');
+  const body = DEP.filter(x => rows.some(([, d]) => d.d === x.id)).map(x => `<h2>${x.i} ${x.n}</h2>` + rows.filter(([, d]) => d.d === x.id).map(([id, d]) =>
+    `<div class="card rcp"><div class="row"><div class="grow"><span class="tier t${d.t}">${TIER[d.t]}</span><span class="bname">${d.n}</span></div><span class="mut small">${mH(d.cost)}</span></div>
+      <div class="flow">${d.in ? gl(d.in) + ' → ' : ''}${gl(d.out)} <span class="mut">/h</span></div></div>`).join('')).join('') || '<div class="card mut">Nic nie znaleziono.</div>';
+  $('modal').innerHTML = `<div class="sheet tall"><div class="row"><b class="grow" style="font-size:17px">☰ Przepisy na produkty</b><button class="btn s" data-a="close">Zamknij</button></div>
+    <div class="grid2" style="margin:10px 0"><input id="rq" data-rq="1" placeholder="Szukaj towaru lub zakładu" value="${esc(ui.rq || '')}">
+    <select data-in="rdep"><option value="">Wszystkie działy</option>${DEP.map(x => `<option value="${x.id}" ${x.id === dsel ? 'selected' : ''}>${x.i} ${x.n}</option>`).join('')}</select></div>
+    <div class="mut small" style="margin-bottom:6px">Wartości na 1 poziom zakładu, bez bonusów miejscowości. Ceny w ${homeCur()}.</div><div id="rcpBody">${body}</div></div>`;
+  if (q) { const i = $('rq'); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }
+}
+// ===== MAPA CEN =====
+let CPTS = null, PMAP = null;
+function ctryPts() { // największa miejscowość każdego państwa
+  if (CPTS) return CPTS; const best = {};
+  for (const l of LOCS) if (l.cc && (!best[l.cc] || (l.pop || 0) > (best[l.cc].pop || 0))) best[l.cc] = l;
+  return CPTS = Object.values(best);
+}
+function priceData(g) {
+  const hc = homeCur(), pts = ctryPts().map(l => ({ l, v: price(g) * cpf(l.cc, g) })), vs = pts.map(p => p.v), mn = Math.min(...vs), mx = Math.max(...vs);
+  return { pts, mn, mx, hc, geo: { type: 'FeatureCollection', features: pts.map(p => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [p.l.lo, p.l.la] },
+    properties: { k: mx > mn ? (p.v - mn) / (mx - mn) : .5, t: fmtC(p.v * rate(hc), hc), cc: p.l.cc } })) } };
+}
+function openPriceMap() {
+  $('modal').hidden = false;
+  const g = ui.pmg || ui.buyG || 'zboze', D = priceData(g), srt = [...D.pts].sort((a, b) => b.v - a.v);
+  const row = p => `<div class="row pmr"><span class="grow">${flag(p.l.cc)} ${esc(cName(p.l.cc))}</span><span class="pmbar"><i style="width:${(D.mx > D.mn ? (p.v - D.mn) / (D.mx - D.mn) : .5) * 100}%"></i></span><b class="n">${mC(p.v, D.hc)}</b></div>`;
+  $('modal').innerHTML = `<div class="sheet tall"><div class="row"><b class="grow" style="font-size:17px">🗺 Mapa cen zasobów</b><button class="btn s" data-a="close">Zamknij</button></div>
+    <select data-in="pmg" style="margin:10px 0">${DEP.map(x => { const gs = GK.filter(k => GDEP(k) === x.id); return gs.length ? `<optgroup label="${x.n}">${gs.map(k => `<option value="${k}" ${k === g ? 'selected' : ''}>${G[k].n}</option>`).join('')}</optgroup>` : ''; }).join('')}</select>
+    <div id="pmap" class="pmap"></div>
+    <div class="pmleg"><span>${mC(D.mn, D.hc)}</span><i></i><span>${mC(D.mx, D.hc)}</span></div>
+    <div class="mut small" style="margin:6px 2px 4px">Cena sprzedaży przed podatkiem, w ${D.hc}. Surowce są tańsze tam, gdzie ich dużo — wieź je tam, gdzie są drogie.</div>
+    <h2>Najdrożej</h2><div class="card">${srt.slice(0, 8).map(row).join('')}</div>
+    <h2>Najtaniej</h2><div class="card">${srt.slice(-8).reverse().map(row).join('')}</div></div>`;
+  drawPriceMap(D);
+}
+function drawPriceMap(D) {
+  const el = $('pmap'); if (!el) return;
+  if (!window.maplibregl || ui.noGL) { el.remove(); return; }
+  try { if (PMAP) PMAP.remove(); } catch (e) {}
+  try {
+    const m = PMAP = new maplibregl.Map({ container: el, style: styleUrl('caros'), center: [15, 50], zoom: 2.6, attributionControl: { compact: true }, dragRotate: false, pitchWithRotate: false });
+    m.touchZoomRotate.disableRotation();
+    m.on('style.load', () => {
+      try { applyCaros(m); } catch (e) {}
+      m.addSource('pm', { type: 'geojson', data: D.geo });
+      m.addLayer({ id: 'pm-c', type: 'circle', source: 'pm', paint: { 'circle-radius': ['interpolate', ['linear'], ['zoom'], 2, 6, 6, 14],
+        'circle-color': ['interpolate', ['linear'], ['get', 'k'], 0, '#3fb4ff', .5, '#f5c542', 1, '#ff5a4f'], 'circle-stroke-width': 1.5, 'circle-stroke-color': '#0b0e12', 'circle-opacity': .95 } });
+      m.addLayer({ id: 'pm-t', type: 'symbol', source: 'pm', minzoom: 3.4, layout: { 'text-field': ['get', 't'], 'text-size': 11, 'text-offset': [0, 1.3], 'text-font': ['Noto Sans Bold'] },
+        paint: { 'text-color': '#e8eef5', 'text-halo-color': '#0b0e12', 'text-halo-width': 1.4 } });
+      m.on('click', 'pm-c', e => { const p = e.features[0].properties; toast(`${flag(p.cc)} ${cName(p.cc)}: ${p.t}`); });
+    });
+  } catch (e) { el.remove(); }
+}
 // ===== KANTOR =====
 const fxTxt = (a, b) => { const r = rate(b) / rate(a); return `1 ${a} = ${r >= 100 ? Math.round(r).toLocaleString('pl-PL') : r.toFixed(r >= 1 ? 3 : 5).replace('.', ',')} ${b}`; };
 function exPreview() {
@@ -1151,7 +1342,7 @@ function kantor() {
   if (e.to === e.from) e.to = all.find(c => c !== e.from);
   const trend = c => { if (c === hc) return ''; const now = rate(hc) / rate(c), was = (FX0[hc] * ((S.fxp || {})[hc] || 1)) / (FX0[c] * ((S.fxp || {})[c] || 1)), ch = (now - was) / was * 100;
     return `<span class="${ch >= 0 ? 'pos' : 'neg'} small">${ch >= 0 ? '▲' : '▼'} ${Math.abs(ch).toFixed(2).replace('.', ',')}%</span>`; };
-  return `<h2>Kantor i portfele</h2><div class="card">
+  return `<h2 class="kantor">Kantor i portfele</h2><div class="card">
     ${ws.map(c => `<div class="row wallet"><div class="grow"><b>${fmtC(wal(S, c), c)}</b><div class="mut small">${esc(curName(c))}${c !== hc ? ' · ' + fxTxt(c, hc) : ' · waluta siedziby'}</div></div>
       <div class="n">${c !== hc ? `≈ ${fmtC(wal(S, c) / rate(c) * rate(hc), hc)}<br>` : ''}${trend(c)}</div></div>`).join('')}
     <div class="grid2" style="margin-top:10px"><div><label class="f">Z waluty</label><select data-in="exFrom">${ws.map(c => `<option value="${c}" ${c === e.from ? 'selected' : ''}>${c} · ${fmtC(wal(S, c), c)}</option>`).join('')}</select></div>
@@ -1171,9 +1362,9 @@ function vMagazyn() {
   const shown = new Set(items.map(([g]) => g));
   for (const g in L.auto) if (L.auto[g] && !shown.has(g)) items.push([g, 0]);
   for (const [g, q] of items) {
-    const p = sellPrice(g, Math.max(q, 1)) * T(lid).sell * (1 - taxOf(lid));
+    const p = sellPrice(g, Math.max(q, 1)) * lpf(lid, g) * T(lid).sell * (1 - taxOf(lid));
     h += `<div style="padding:8px 0;border-bottom:1px solid var(--line)">
-      <div class="row"><div class="grow"><b>${G[g].n}</b> <span class="mut">· ${mL(price(g) * T(lid).sell, lid)}/szt.</span></div><div class="q"><b>${qty(q)}</b></div></div>
+      <div class="row"><div class="grow"><b>${G[g].n}</b> <span class="mut">· ${mL(price(g) * lpf(lid, g) * T(lid).sell, lid)}/szt.</span></div><div class="q"><b>${qty(q)}</b></div></div>
       <div class="btns">
         <button class="btn s g" data-a="sell" data-l="${lid}" data-g="${g}" data-f=".5" ${q < 1 ? 'disabled' : ''}>Sprzedaj ½</button>
         <button class="btn s g" data-a="sell" data-l="${lid}" data-g="${g}" data-f="1" ${q < 1 ? 'disabled' : ''}>Wszystko ≈ ${mL(p * Math.floor(q), lid)}</button>
@@ -1181,13 +1372,16 @@ function vMagazyn() {
       </div></div>`;
   }
   h += `</div>`;
-  const bq = Math.max(1, Math.floor(ui.buyQ) || 1), bc = buyPrice(ui.buyG, bq) * bq;
+  const bq = Math.max(1, Math.floor(ui.buyQ) || 1), bc = buyPrice(ui.buyG, bq) * lpf(lid, ui.buyG) * bq;
   h += `<h2>Kup na rynku → ${l.n}</h2><div class="card"><div class="grid2">
-    <div><label class="f" for="buyG">Towar</label><select id="buyG" data-in="buyG">${GK.map(g => `<option value="${g}" ${g === ui.buyG ? 'selected' : ''}>${G[g].n}</option>`).join('')}</select></div>
+    <div><label class="f" for="buyG">Towar</label><select id="buyG" data-in="buyG">${DEP.map(x => { const gs = GK.filter(g => GDEP(g) === x.id); return gs.length ? `<optgroup label="${x.n}">${gs.map(g => `<option value="${g}" ${g === ui.buyG ? 'selected' : ''}>${G[g].n}</option>`).join('')}</optgroup>` : ''; }).join('')}</select></div>
     <div><label class="f" for="buyQ">Ilość</label><input id="buyQ" data-in="buyQ" type="number" inputmode="numeric" min="1" value="${bq}"></div></div>
     <div class="btns"><button class="btn p" data-a="buy" data-l="${lid}" ${!canL(lid, bc) ? 'disabled' : ''}>Kup za ${mL(bc, lid)}</button><span class="mut small" style="align-self:center">marża rynku 15%</span></div></div>`;
-  h += `<h2>Ceny rynkowe (ostatnie 2 dni)</h2><div class="card"><table><thead><tr><th>Towar</th><th class="n">Cena</th><th class="n">Zmiana</th><th></th></tr></thead><tbody>
-    ${GK.map(g => { const c = chg(g); return `<tr><td>${G[g].n}</td><td class="n">${mL(price(g), lid)}</td><td class="n ${c >= 0 ? 'pos' : 'neg'}">${c >= 0 ? '+' : ''}${c.toFixed(1).replace('.', ',')}%</td><td>${spark([...S.m[g].h, price(g)])}</td></tr>`; }).join('')}
+  const pd = ui.pdep || 'all', pg = GK.filter(g => pd === 'all' || GDEP(g) === pd);
+  h += `<div class="deph"><h2 class="grow">Ceny — ${flag(l.cc)} ${esc(cName(l.cc))} (2 dni)</h2><div class="depbtns"><button class="btn s b" data-a="priceMap">🗺 Mapa cen</button></div></div>
+    <select data-in="pdep" style="margin-bottom:8px"><option value="all">Wszystkie działy (${GK.length} towarów)</option>${DEP.map(x => `<option value="${x.id}" ${x.id === pd ? 'selected' : ''}>${x.i} ${x.n}</option>`).join('')}</select>
+    <div class="card"><table><thead><tr><th>Towar</th><th class="n">Cena</th><th class="n">Zmiana</th><th></th></tr></thead><tbody>
+    ${pg.map(g => { const c = chg(g); return `<tr><td>${G[g].n}</td><td class="n">${mL(price(g) * lpf(lid, g), lid)}</td><td class="n ${c >= 0 ? 'pos' : 'neg'}">${c >= 0 ? '+' : ''}${c.toFixed(1).replace('.', ',')}%</td><td>${spark([...S.m[g].h, price(g)])}</td></tr>`; }).join('')}
     </tbody></table></div>`;
   return h;
 }
@@ -1307,7 +1501,10 @@ function renderTop() {
   tweenCash();
   $('cash').style.color = wal(S, homeCur()) < 0 ? 'var(--bad)' : '';
   const nw = Object.keys(S.w || {}).filter(c => c !== homeCur() && Math.abs(S.w[c]) >= .5).length;
-  $('inc').textContent = (S.inc >= 0 ? '+' : '') + mH(S.inc) + '/h' + (nw ? ` · +${nw} wal.` : '');
+  $('inc').textContent = (S.inc >= 0 ? '+' : '') + mH(S.inc) + '/h';
+  const ws = Object.keys(S.w).filter(c => c === homeCur() || Math.abs(S.w[c]) >= .5).sort((a, b) => (b === homeCur()) - (a === homeCur()) || S.w[b] / rate(b) - S.w[a] / rate(a));
+  const wb = $('wbar'), html = ws.map(c => `<span class="${S.w[c] < 0 ? 'neg' : ''}"><b>${Math.round(S.w[c]).toLocaleString('pl-PL')}</b> ${c}</span>`).join('') + `<button data-a="goKantor" aria-label="Kantor">+</button>`;
+  if (wb && wb.innerHTML !== html) wb.innerHTML = html; void nw;
   $('seasonFill').style.width = ((S.hour % SEASON_H) / SEASON_H * 100) + '%';
 }
 function render(force) {
@@ -1367,6 +1564,10 @@ function act(a, d) {
     case 'auGuest': try { localStorage.setItem('xyx_guest', '1'); } catch (e) {} SAVE_KEY = SAVE; startGame(load(SAVE) || newState()); return;
     case 'logout': try { localStorage.removeItem('xyx_guest'); } catch (e) {} logout(); return;
     case 'toLogin': try { localStorage.removeItem('xyx_guest'); } catch (e) {} save(); S = null; $('modal').hidden = true; $('wiz').hidden = true; au.mode = 'register'; renderAuth(); return;
+    case 'dep': ui.dep = d.v || null; break;
+    case 'recipes': openRecipes(); return;
+    case 'priceMap': openPriceMap(); return;
+    case 'goKantor': ui.tab = 'magazyn'; render(true); setTimeout(() => { const k = document.querySelector('.kantor'); if (k) k.scrollIntoView({ behavior: 'smooth' }); }, 50); return;
     case 'exMax': ui.ex.amt = String(Math.floor(Math.max(0, wal(S, ui.ex.from)) * 100) / 100); break;
     case 'exch': {
       const e = ui.ex, a = parseFloat(String(e.amt).replace(',', '.')) || 0;
@@ -1550,6 +1751,9 @@ document.addEventListener('change', e => {
   else if (k === 'buyQ') ui.buyQ = +t.value;
   else if (k === 'shipAt') ui.shipAt = t.value;
   else if (k === 'garAt') ui.garAt = t.value;
+  else if (k === 'pdep') ui.pdep = t.value;
+  else if (k === 'rdep') { ui.rdep = t.value; openRecipes(); return; }
+  else if (k === 'pmg') { ui.pmg = t.value; openPriceMap(); return; }
   else if (k === 'exFrom') { ui.ex.from = t.value; ui.ex.amt = ''; }
   else if (k === 'exTo') ui.ex.to = t.value;
   else if (k === 'bcc') { const cid = ui.bc, ls = BYC[cid].filter(l => l.cc === t.value); const own = ls.find(l => S.L[l.id]); ui.bl = (own || ls[0]).id; ui.rgSel = false; fitTo(ls); }
