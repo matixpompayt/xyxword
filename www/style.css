@@ -234,3 +234,6 @@ nav button svg{transition:transform .2s}
 .lock{z-index:60}
 .lock-in h1{font-size:28px}
 .lock-notes{white-space:pre-wrap;margin:8px 0 14px;max-height:30vh;overflow:auto}
+.ctry{margin:2px 0 8px}
+.lic{display:flex;gap:10px;align-items:center;flex-wrap:wrap;background:#2e241c;border:1px solid var(--acc);border-radius:12px;padding:10px 12px;margin:-2px 0 10px;animation:rise .35s cubic-bezier(.2,.8,.2,1)}
+.lic .grow{flex:1;min-width:180px}

@@ -1,4 +1,5 @@
 // Generuje www/maps.js (mapy jako ścieżki SVG) i www/places.js (miasta i wsie) z danych Natural Earth + GeoNames.
+// Wymaga tools/admin1.geojson (ne_10m_admin_1_states_provinces.geojson z github.com/nvkelso/natural-earth-vector).
 // Użycie (OLD=ścieżka do poprzedniego places.js opcjonalnie): cd tools && npm i world-atlas@2 topojson-client@3 d3-geo@3 all-the-cities@3 countries-list@3 && node build-maps.mjs
 import fs from 'fs';
 import { createRequire } from 'module';
@@ -110,7 +111,7 @@ for (const [cid, cf] of Object.entries(CFG)) {
     let id = OLD.get(nm + '|' + la.toFixed(2) + '|' + lo.toFixed(2)) || 'g' + o.x.cityId;
     if (ids.has(id)) id = 'g' + o.x.cityId;
     if (ids.has(id)) continue;
-    const p = { id, c: cid, n: nm, t: o.x.population >= 10000 ? 'm' : 'w', la, lo, port: g.coast ? 1 : 0, ld: cid + ':' + g.ld, pop: o.x.population, f: 0 };
+    const p = { id, c: cid, n: nm, t: o.x.population >= 10000 ? 'm' : 'w', la, lo, port: g.coast ? 1 : 0, ld: cid + ':' + g.ld, pop: o.x.population, f: 0, cc: o.x.country };
     ids.add(id); places.push(p); put(p, 2); n++;
   }
 }
@@ -121,6 +122,49 @@ for (const [id, c, n, t, la, lo, port, , pop] of OLDP) if (!ids.has(id)) {
   const g = geo(lo, la); ids.add(id);
   places.push({ id, c, n, t, la, lo, port: port ? 1 : 0, ld: c + ':' + (g.ld === 'X' ? 'L0' : g.ld), pop: pop || 0, f: 0 });
 }
+
+// --- państwa i regiony (województwa/landy/stany): Natural Earth admin-1 (name_pl) rasteryzowane jak ląd ---
+const A1 = JSON.parse(fs.readFileSync(process.env.ADMIN1 || here + 'admin1.geojson', 'utf8')).features;
+const rgrid = new Int16Array(COLS * ROWS);
+A1.forEach((f, ri) => {
+  const polys = f.geometry ? (f.geometry.type === 'Polygon' ? [f.geometry.coordinates] : f.geometry.coordinates) : [];
+  const buckets = new Map();
+  for (const rings of polys) for (const ring of rings) for (let i = 0; i < ring.length - 1; i++) {
+    const [x1, y1] = ring[i], [x2, y2] = ring[i + 1]; if (y1 === y2) continue;
+    const r0 = Math.max(0, Math.ceil((Math.min(y1, y2) - LAT0) / RES - .5)), r1 = Math.min(ROWS - 1, Math.floor((Math.max(y1, y2) - LAT0) / RES - .5));
+    for (let r = r0; r <= r1; r++) { let b = buckets.get(r); if (!b) buckets.set(r, b = []); b.push(x1, y1, x2, y2); }
+  }
+  for (const [r, e] of buckets) {
+    const y = LAT0 + (r + .5) * RES, xs = [];
+    for (let i = 0; i < e.length; i += 4) { const x1 = e[i], y1 = e[i + 1], x2 = e[i + 2], y2 = e[i + 3];
+      if ((y1 <= y && y2 > y) || (y2 <= y && y1 > y)) xs.push(x1 + (y - y1) / (y2 - y1) * (x2 - x1)); }
+    xs.sort((a, b) => a - b);
+    for (let i = 0; i + 1 < xs.length; i += 2) {
+      const c0 = Math.max(0, Math.ceil((xs[i] + 180) / RES - .5)), c1 = Math.min(COLS - 1, Math.floor((xs[i + 1] + 180) / RES - .5));
+      for (let c = c0; c <= c1; c++) rgrid[r * COLS + c] = ri + 1;
+    }
+  }
+});
+const rAt = (lo, la) => { const r = Math.floor((la - LAT0) / RES), c = Math.floor((lo + 180) / RES); return r < 0 || r >= ROWS ? 0 : rgrid[r * COLS + ((c % COLS) + COLS) % COLS]; };
+function regionOf(lo, la, cc) {
+  let v = rAt(lo, la);
+  const ok = v => v && (!cc || A1[v - 1].properties.iso_a2 === cc);
+  if (ok(v)) return v - 1;
+  for (let R = 1; R <= 12; R++) { const dl = RES / Math.max(.2, Math.cos(la * Math.PI / 180));
+    for (let i = -R; i <= R; i++) for (let j = -R; j <= R; j++) { if (Math.max(Math.abs(i), Math.abs(j)) !== R) continue; const w = rAt(lo + j * dl, la + i * RES); if (ok(w)) return w - 1; } }
+  return v ? v - 1 : -1;
+}
+const RG = [], rgIdx = new Map();
+const rgName = p => { let n = p.name_pl || p.name || '?'; return n.replace(/^województwo /, '').replace(/^(kraj|land|prowincja|stan|region) /i, ''); };
+const ISO_OK = /^[A-Z]{2}$/;
+for (const p of places) {
+  const ri = regionOf(p.lo, p.la, p.cc);
+  if (ri >= 0) { const f = A1[ri].properties; if (!p.cc && ISO_OK.test(f.iso_a2)) p.cc = f.iso_a2;
+    if (!rgIdx.has(ri)) { rgIdx.set(ri, RG.length); RG.push([rgName(f), ISO_OK.test(f.iso_a2) ? f.iso_a2 : (p.cc || '')]); } p.rg = rgIdx.get(ri); }
+  else p.rg = -1;
+  if (!p.cc) p.cc = '';
+}
+const CCS = [...new Set(places.map(p => p.cc))].sort();
 
 // --- mapy ---
 const W = 1000, r1 = v => Math.round(v * 10) / 10;
@@ -159,8 +203,8 @@ const P = {};
 for (const cid of Object.keys(CFG)) {
   const ls = places.filter(p => p.c === cid), ldt = [...new Set(ls.map(p => p.ld))];
   P[cid] = { id: ls.map(p => p.id).join('|'), n: ls.map(p => p.n.replace(/\|/g, '/')).join('|'), t: ls.map(p => p.t).join(''), p: ls.map(p => p.port).join(''),
-    f: ls.map(p => p.f).join(''), ldt, ld: ls.map(p => ldt.indexOf(p.ld)), la: ls.map(p => Math.round(p.la * 1000)), lo: ls.map(p => Math.round(p.lo * 1000)), pop: ls.map(p => p.pop) };
+    f: ls.map(p => p.f).join(''), ldt, ld: ls.map(p => ldt.indexOf(p.ld)), cc: ls.map(p => CCS.indexOf(p.cc)), rg: ls.map(p => p.rg), la: ls.map(p => Math.round(p.la * 1000)), lo: ls.map(p => Math.round(p.lo * 1000)), pop: ls.map(p => p.pop) };
 }
-fs.writeFileSync(WWW + 'places.js', '// Wygenerowane przez tools/build-maps.mjs — miejscowości: GeoNames (CC BY 4.0), format kolumnowy\nwindow.XYX_PLACES = ' + JSON.stringify(P) + ';\n');
+fs.writeFileSync(WWW + 'places.js', '// Wygenerowane przez tools/build-maps.mjs — miejscowości: GeoNames (CC BY 4.0), regiony: Natural Earth; format kolumnowy\nwindow.XYX_REG = ' + JSON.stringify({ cc: CCS, rg: RG }) + ';\nwindow.XYX_PLACES = ' + JSON.stringify(P) + ';\n');
 const cnt = {}; for (const p of places) { const k = p.c + p.t; cnt[k] = (cnt[k] || 0) + 1; }
 console.log(places.length, cnt, 'ports', places.filter(p => p.port).length);
