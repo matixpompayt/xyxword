@@ -423,7 +423,7 @@ function renderWiz() {
 document.addEventListener('input', e => {
   const t = e.target, k = t.dataset.wz; if (k) wz[k] = t.value;
   if (t.dataset.q) { ui.locQ = t.value; const r = $('locRes'); if (r) r.innerHTML = locRes(ui.bc, ui.bl); }
-  if (t.dataset.np && ui.np) ui.np.n = t.value;
+  if (t.dataset.np && ui.np) ui.np[t.dataset.np] = t.value;
 });
 
 // ================== RENDER ==================
@@ -641,13 +641,18 @@ function projOf(cid) {
   if (m.proj.parallels) p.parallels(m.proj.parallels);
   return PROJ[cid] = p.scale(m.proj.scale).translate(m.proj.translate);
 }
+// miejscowości spoza bazy: własne gracza (u) i dodane przez admina dla wszystkich (g)
+let GLOBAL = [];
+try { GLOBAL = JSON.parse(localStorage.getItem('xyx_places') || '[]'); } catch (e) {}
+const clean = t => String(t).replace(/[<>&"'`\\]/g, '');
 function registerCustom(s) {
-  for (let i = LOCS.length - 1; i >= 0; i--) if (LOCS[i].u) { const l = LOCS[i]; delete LOC[l.id]; delete MAPS[l.c].pts[l.id]; LOCS.splice(i, 1); }
-  for (const c of s.custom || []) {
-    const l = { ...c, n: String(c.n).replace(/[<>&"'`\\]/g, ''), port: !!c.port, pop: 0, f: false, u: true }, pr = projOf(l.c);
-    if (!pr) continue;
-    const p = pr([l.lo, l.la]); l.x = p[0]; l.y = p[1]; LOCS.push(l); LOC[l.id] = l; MAPS[l.c].pts[l.id] = p;
-  }
+  const touched = new Set();
+  for (let i = LOCS.length - 1; i >= 0; i--) if (LOCS[i].u || LOCS[i].g) { const l = LOCS[i]; touched.add(l.c); delete LOC[l.id]; delete MAPS[l.c].pts[l.id]; LOCS.splice(i, 1); }
+  const add = l => { const pr = projOf(l.c); if (!pr || !CN[l.c]) return; const p = pr([l.lo, l.la]); l.x = p[0]; l.y = p[1]; LOCS.push(l); LOC[l.id] = l; MAPS[l.c].pts[l.id] = p; touched.add(l.c); };
+  for (const c of (s && s.custom) || []) add({ ...c, n: clean(c.n), port: !!c.port, pop: 0, f: false, u: true });
+  for (const g of GLOBAL) if (!g.del || (s && s.L && s.L[g.id])) add({ id: g.id, c: g.c, n: clean(g.n), t: g.t === 'm' ? 'm' : 'w', la: +g.la, lo: +g.lo, port: !!g.port, ld: g.ld || g.c, pop: +g.pop || 0, f: false, g: true, hide: !!g.del });
+  for (const cid of touched) BYC[cid] = LOCS.filter(l => l.c === cid && !l.hide).sort((a, b) => b.pop - a.pop);
+  if (LM) LM.srcCid = null;
 }
 function placeAt(e, svg) {
   const cid = svg.parentNode.dataset.cid, pr = projOf(cid); if (!pr) { toast('Mapa niedostępna'); return; }
@@ -661,10 +666,12 @@ function placeAtLL(cid, la, lo) {
   if (lo < bx[0][0] || lo > bx[1][0] || la < bx[0][1] || la > bx[1][1]) { toast('Poza obszarem tego kontynentu'); return; }
   let near = null, nd = 1e9;
   for (const l of BYC[cid]) { const d = kmLL(la, lo, l.la, l.lo); if (d < nd) { nd = d; near = l; } }
-  if (!near || nd > 400) { toast('Za daleko od innych miejscowości'); return; }
-  if (nd < 6) { toast(`Za blisko: ${near.n}`); return; }
+  const adm = isAdmin();
+  if (!near) { toast('Brak miejscowości na tym kontynencie'); return; }
+  if (!adm && nd > 400) { toast('Za daleko od innych miejscowości'); return; }
+  if (!adm && nd < 6) { toast(`Za blisko: ${near.n}`); return; }
   const coastNear = LOCS.some(l => l.c === cid && l.port && !l.u && kmLL(la, lo, l.la, l.lo) < 25);
-  ui.np = { c: cid, la: +la.toFixed(3), lo: +lo.toFixed(3), near: near.id, nd, ld: near.ld, port: coastNear, t: 'w', n: '' };
+  ui.np = { c: cid, la: +la.toFixed(4), lo: +lo.toFixed(4), near: near.id, nd, ld: near.ld, port: coastNear, t: 'w', n: '', pop: '', adm };
   foundSheet();
 }
 function foundSheet() {
@@ -674,10 +681,13 @@ function foundSheet() {
     <div class="mut small" style="margin-top:4px">${p.la.toFixed(2).replace('.', ',')}°, ${p.lo.toFixed(2).replace('.', ',')}° · najbliżej: ${esc(near.n)} (${kmTxt(p.nd)})${p.port ? ' · nad morzem' : ''}</div>
     <label class="f" for="npName">Nazwa</label><input id="npName" data-np="n" maxlength="22" placeholder="np. Matiowo" value="${esc(p.n)}">
     <label class="f">Typ</label>
-    ${['w', 'm'].map(t => `<button class="wz-opt ${p.t === t ? 'on' : ''}" data-a="npSet" data-v="${t}"><b>${TYPE[t].n} — ${money(FOUND[t])}</b><span>${TYPE[t].d}</span></button>`).join('')}
-    ${p.port ? '<div class="mut small">Leży nad morzem — będzie można zbudować port.</div>' : ''}
+    ${['w', 'm'].map(t => `<button class="wz-opt ${p.t === t ? 'on' : ''}" data-a="npSet" data-v="${t}"><b>${TYPE[t].n}${p.adm ? '' : ' — ' + money(FOUND[t])}</b><span>${TYPE[t].d}</span></button>`).join('')}
+    ${p.adm ? `<label class="f" for="npPop">Ludność (opcjonalnie)</label><input id="npPop" data-np="pop" type="number" inputmode="numeric" min="0" value="${esc(p.pop)}" placeholder="np. 2500">
+      <button class="toggle ${p.port ? 'on' : ''}" data-a="npPort" style="margin-top:10px;width:100%;min-height:44px">Port (wybrzeże): ${p.port ? 'tak' : 'nie'}</button>`
+      : p.port ? '<div class="mut small">Leży nad morzem — będzie można zbudować port.</div>' : ''}
     <div id="npErr" class="warn"></div>
-    <div class="btns"><button class="btn p" data-a="npFound" ${S.cash < FOUND[p.t] ? 'disabled' : ''}>Załóż — ${money(FOUND[p.t])}</button></div></div>`;
+    <div class="btns">${p.adm ? '<button class="btn p" data-a="npFound">Dodaj dla wszystkich graczy</button>'
+      : `<button class="btn p" data-a="npFound" ${S.cash < FOUND[p.t] ? 'disabled' : ''}>Załóż — ${money(FOUND[p.t])}</button>`}</div></div>`;
 }
 
 // ================== MAPA SZCZEGÓŁOWA (MapLibre + OpenFreeMap: drogi, zabudowa; wymaga internetu) ==================
@@ -782,11 +792,11 @@ function vBudowa() {
   if (LOC[ui.bl].c !== cid) ui.bl = Object.keys(S.L).find(l => LOC[l].c === cid) || CAP[cid];
   const lid = ui.bl, l = LOC[lid], t = TYPE[l.t], L = S.L[lid] || newLoc(), fr = slots(L, lid) - used(L);
   const nC = BYC[cid].length;
-  h += (ui.place ? `<div class="placebar"><span class="grow">Dotknij mapy w miejscu, gdzie ma powstać nowa miejscowość.</span><button class="btn s" data-a="placeOff">Anuluj</button></div>` : '')
+  h += (ui.place ? `<div class="placebar"><span class="grow">${isAdmin() ? 'ADMIN: dotknij mapy — miejscowość pojawi się u wszystkich graczy.' : 'Dotknij mapy w miejscu, gdzie ma powstać nowa miejscowość.'}</span><button class="btn s" data-a="placeOff">Anuluj</button></div>` : '')
     + (lmapOn() ? '<div id="lmapSlot" class="lslot"></div>' : locMap(cid, lid))
     + `<div class="lsearch"><input id="locQ" data-q="1" type="search" placeholder="Szukaj wśród ${nC.toLocaleString('pl-PL')} miejscowości…" value="${esc(ui.locQ || '')}" autocomplete="off">
-       ${ui.place ? '' : `<button class="btn s" data-a="placeMode">+ Własna</button>`}</div><div id="locRes">${locRes(cid, lid)}</div>`;
-  h += `<div class="card"><div class="row"><div class="grow"><span class="bname">${esc(l.n)}</span> ${tag(l)}${l.port ? ' <span class="ltag p">Wybrzeże</span>' : ''}${l.u ? ' <span class="ltag u">Twoja osada</span>' : ''}
+       ${ui.place ? '' : `<button class="btn s ${isAdmin() ? 'p' : ''}" data-a="placeMode">${isAdmin() ? '+ Dodaj (admin)' : '+ Własna'}</button>`}</div><div id="locRes">${locRes(cid, lid)}</div>`;
+  h += `<div class="card"><div class="row"><div class="grow"><span class="bname">${esc(l.n)}</span> ${tag(l)}${l.port ? ' <span class="ltag p">Wybrzeże</span>' : ''}${l.u ? ' <span class="ltag u">Twoja osada</span>' : ''}${l.g ? ' <span class="ltag g">Nowa</span>' : ''}
       <div class="flow">${l.pop ? `Ludność: ${popTxt(l.pop)} · ` : ''}${t.d}</div></div></div>
     <div class="row" style="margin-top:8px"><div class="grow">Działki: <b>${used(L)} / ${slots(L, lid)}</b> <span class="mut small">· działka ${money(t.land)}</span></div>
     ${L.x < t.maxX ? `<button class="btn s" data-a="expand" data-l="${lid}" ${S.cash < xCost(L, lid) ? 'disabled' : ''}>+${t.step} dział${t.step > 1 ? 'ki' : 'ka'} — ${money(xCost(L, lid))}</button>` : '<span class="mut small">maks. działek</span>'}</div>
@@ -992,9 +1002,11 @@ function settings() {
   $('modal').innerHTML = `<div class="sheet"><div class="row"><b class="grow" style="font-size:17px">Ustawienia</b><button class="btn s" data-a="close">Zamknij</button></div>
     <label class="f" for="ceo">Imię prezesa</label><input id="ceo" maxlength="20" value="${esc(S.ceo)}">
     <label class="f" for="nm">Nazwa firmy</label><div class="row"><input id="nm" maxlength="24" value="${esc(S.name)}"><button class="btn p" data-a="name">Zapisz</button></div>
-    <h2>Konto</h2><div class="card"><div class="row"><div class="grow">${USER ? `<b>${esc(USER.email)}</b><div class="mut small">Zapis w chmurze${cloudAt ? ': ' + new Date(cloudAt).toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit' }) : ' włączony'}</div>`
+    <h2>Konto</h2><div class="card"><div class="row"><div class="grow">${USER ? `<b>${isAdmin() ? 'admin <span class="ltag g">ADMIN</span>' : esc(USER.email)}</b><div class="mut small">Zapis w chmurze${cloudAt ? ': ' + new Date(cloudAt).toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit' }) : ' włączony'}</div>`
       : '<b>Gość</b><div class="mut small">Gra zapisana tylko na tym telefonie</div>'}</div>
       ${USER ? '<button class="btn" data-a="logout">Wyloguj</button>' : `<button class="btn p" data-a="toLogin" ${FB ? '' : 'disabled'}>Załóż konto</button>`}</div></div>
+    ${isAdmin() ? `<h2>Administrator</h2><div class="card"><div class="mut small">Miejscowości dodane przez admina widzą wszyscy gracze. Dodajesz je w Budowie przyciskiem „+ Dodaj (admin)” i dotknięciem mapy — bez kosztów i limitów.</div>
+      <div class="btns"><button class="btn p" data-a="admPanel">Lista dodanych miejscowości (${GLOBAL.filter(g => !g.del).length})</button></div></div>` : ''}
     <h2>Mapa</h2><div class="card"><div class="row"><div class="grow">${S.mapMode === 'svg' ? 'Prosta (offline)' : 'Szczegółowa — drogi, miasta (internet)'}<div class="mut small">© OpenFreeMap, © OpenMapTiles, © OpenStreetMap</div></div>
       <button class="btn" data-a="mapMode">${S.mapMode === 'svg' ? 'Szczegółowa' : 'Prosta'}</button></div>
       ${S.mapMode === 'svg' ? '' : `<div class="btns">${Object.entries(MSTYLES).map(([k, n]) => `<button class="toggle ${(S.mapStyle || 'fiord') === k ? 'on' : ''}" data-a="mapStyle" data-v="${k}">${n}</button>`).join('')}</div>`}</div>
@@ -1025,10 +1037,14 @@ function act(a, d) {
     case 'placeMode': ui.place = true; toast('Dotknij mapy, gdzie ma powstać miejscowość'); break;
     case 'placeOff': ui.place = false; break;
     case 'npSet': ui.np.t = d.v; foundSheet(); return;
+    case 'npPort': ui.np.port = !ui.np.port; foundSheet(); return;
+    case 'admDel': adminDel(d.id); return;
+    case 'admPanel': adminPanel(); return;
     case 'npFound': {
       const p = ui.np, n = (p.n || '').replace(/[<>&"'`\\]/g, '').trim().slice(0, 22);
       if (!n) { $('npErr').textContent = 'Wpisz nazwę.'; return; }
       if (LOCS.some(l => l.c === p.c && norm(l.n) === norm(n))) { $('npErr').textContent = 'Taka miejscowość już istnieje.'; return; }
+      if (p.adm) { adminAdd({ n, c: p.c, t: p.t, la: p.la, lo: p.lo, port: p.port ? 1 : 0, ld: p.ld, pop: Math.max(0, Math.round(+p.pop || 0)) }); return; }
       if (S.cash < FOUND[p.t]) return;
       S.cash -= FOUND[p.t];
       const id = 'u' + S.nid++;
@@ -1232,13 +1248,20 @@ document.addEventListener('submit', e => {
 async function auSubmit() {
   if (au.busy || !FB) return;
   au.err = ''; au.info = '';
-  const email = au.email.trim(), A = firebase.auth();
+  let email = au.email.trim(), pass = au.pass; const A = firebase.auth();
+  const admLogin = au.mode === 'login' && email.toLowerCase() === 'admin';
+  if (admLogin) { email = ADMIN_EMAIL; pass = pass + ADMIN_PAD; }
   if (au.mode === 'register' && au.pass !== au.pass2) { au.err = 'Hasła nie są takie same.'; renderAuth(); return; }
   au.busy = true; renderAuth();
   try {
     if (au.mode === 'reset') { await A.sendPasswordResetEmail(email); au.info = 'Link wysłany — sprawdź skrzynkę (też spam).'; au.mode = 'login'; }
     else if (au.mode === 'register') { au.justReg = true; await A.createUserWithEmailAndPassword(email, au.pass); }
-    else await A.signInWithEmailAndPassword(email, au.pass);
+    else if (admLogin) {
+      try { await A.signInWithEmailAndPassword(email, pass); }
+      catch (e) { // pierwsze logowanie admina — konto zakłada się samo
+        if (au.pass === 'admin' && /invalid-credential|user-not-found/.test(e.code || '')) await A.createUserWithEmailAndPassword(email, pass); else throw e;
+      }
+    } else await A.signInWithEmailAndPassword(email, au.pass);
   } catch (err) { au.err = AUTH_ERR[err.code] || ('Błąd: ' + (err.code || err.message)); au.justReg = false; }
   au.busy = false; if (!S) renderAuth();
 }
@@ -1279,6 +1302,7 @@ async function onUser(user) {
   toast(`Zalogowano: ${user.email}`);
 }
 function startGame(s) {
+  if (!s.setup) Object.assign(wz, { step: 0, ceo: '', name: '' });
   S = s; registerCustom(S); ui.z = {}; ui.animTab = null; ui.cashShown = null; ui.wzLast = null; if (LM) LM.cid = null;
   ui.bc = S.hq; ui.bl = ui.ml = S.hl; ui.tab = 'firma';
   if (S.setup) {
@@ -1297,6 +1321,41 @@ function logout() {
   S = null; SAVE_KEY = SAVE; $('modal').hidden = true; $('wiz').hidden = true;
   au.mode = 'login'; au.err = ''; au.info = '';
   if (USER && FB) firebase.auth().signOut(); else renderAuth();
+}
+
+// ================== ADMIN: miejscowości dla wszystkich ==================
+const ADMIN_EMAIL = 'admin@xyxword.game', ADMIN_PAD = '_xyxword'; // Firebase wymaga min. 6 znaków hasła
+const isAdmin = () => !!(USER && USER.email === ADMIN_EMAIL);
+function adminAdd(p) {
+  if (!DB || !isAdmin()) return;
+  const id = 'a' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
+  DB.collection('places').doc(id).set({ ...p, id, by: USER.uid, ts: Date.now(), del: false })
+    .then(() => { toast(`${p.n} — dodana dla wszystkich`); })
+    .catch(e => toast('Błąd zapisu: ' + (e.code || e.message) + ' (reguły Firestore?)'));
+  GLOBAL = GLOBAL.filter(g => g.id !== id).concat([{ ...p, id }]); registerCustom(S);
+  ui.bl = id; ui.place = false; ui.np = null; $('modal').hidden = true; render(true);
+}
+function adminDel(id) {
+  if (!DB || !isAdmin()) return;
+  DB.collection('places').doc(id).set({ del: true }, { merge: true }).then(() => toast('Usunięto')).catch(e => toast('Błąd: ' + (e.code || e.message)));
+}
+function adminPanel() {
+  const list = GLOBAL.filter(g => !g.del).sort((a, b) => (b.ts || 0) - (a.ts || 0));
+  $('modal').hidden = false;
+  $('modal').innerHTML = `<div class="sheet"><div class="row"><b class="grow" style="font-size:17px">Miejscowości admina (${list.length})</b><button class="btn s" data-a="close">Zamknij</button></div>
+    <div class="card" style="margin-top:10px">${list.map(g => `<div class="row" style="padding:6px 0;border-bottom:1px solid var(--line)"><div class="grow"><b>${esc(g.n)}</b> <span class="ltag ${g.t === 'm' ? 'm' : 'w'}">${g.t === 'm' ? 'Miasto' : 'Wieś'}</span>
+      <div class="mut small">${CN[g.c] ? CN[g.c].n : g.c} · ${(+g.la).toFixed(3)}, ${(+g.lo).toFixed(3)}${g.pop ? ' · ' + popTxt(g.pop) : ''}${g.port ? ' · port' : ''}</div></div>
+      <button class="btn s" data-a="admDel" data-id="${esc(g.id)}">Usuń</button></div>`).join('') || '<div class="mut">Brak. Dodaj w Budowie: „+ Dodaj (admin)”.</div>'}</div></div>`;
+}
+function listenPlaces() {
+  if (!DB) return;
+  DB.collection('places').onSnapshot(snap => {
+    GLOBAL = snap.docs.map(d => ({ ...d.data(), id: d.id })).filter(g => CN[g.c] && isFinite(g.la) && isFinite(g.lo));
+    try { localStorage.setItem('xyx_places', JSON.stringify(GLOBAL)); } catch (e) {}
+    registerCustom(S);
+    if (S) render(true);
+    if (!$('modal').hidden && $('modal').querySelector('[data-a=admDel]')) adminPanel();
+  }, () => {});
 }
 
 // ================== PĘTLA ==================
@@ -1323,7 +1382,8 @@ document.addEventListener('visibilitychange', () => {
   }
 });
 if (VERSION === 'dev') window.__xyx = { get S() { return S; }, get LM() { return LM; }, hour: n => { for (let i = 0; i < n; i++) hour(S); render(true); } };
-if (FB) { au.mode = 'wait'; renderAuth(); firebase.auth().onAuthStateChanged(onUser); }
+registerCustom(null);
+if (FB) { au.mode = 'wait'; renderAuth(); firebase.auth().onAuthStateChanged(onUser); listenPlaces(); }
 else if (localStorage.getItem('xyx_guest') === '1') startGame(load(SAVE) || newState());
 else renderAuth();
 setInterval(loop, 500);

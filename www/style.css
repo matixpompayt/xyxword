@@ -214,3 +214,4 @@ nav button svg{transition:transform .2s}
 .wz-opt.on{animation:pop .3s ease}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
 .au-google{width:100%;min-height:48px;margin-top:10px;background:#fff;color:#1f1f1f;display:flex;align-items:center;justify-content:center;gap:10px}
+.ltag.g{background:#3a1f3a;color:#ffb3f0}
