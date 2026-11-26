@@ -151,7 +151,7 @@ function newState(o = {}) {
   const m = {};
   for (const g of GK) m[g] = { sat: 0, d: rnd(.9, 1.1), h: [] };
   const s = {
-    v: 2, setup: !!o.done, ceo: o.ceo || '', name: o.name || 'Moja Firma', color: o.color || COLORS[0], hq, hl, diff,
+    v: 2, created: Date.now(), setup: !!o.done, ceo: o.ceo || '', name: o.name || 'Moja Firma', color: o.color || COLORS[0], hq, hl, diff,
     cash, hour: 0, last: Date.now(),
     c: { [hq]: {} }, L: { [hl]: newLoc() }, ships: [], veh: [], custom: [], nid: 1, m, ai: mkAI(cash, diff),
     season: 1, pp: 0, perk: { prod: 0, upk: 0, ship: 0, sell: 0 }, ev: [],
@@ -624,7 +624,7 @@ function locRes(cid, sel) {
     const nn = l => l.nn || (l.nn = norm(l.n)), st = [], inc = [];
     for (const l of BYC[cid]) { const v = nn(l); if (v.startsWith(q)) { if (st.length < 16) st.push(l); } else if (inc.length < 16 && v.includes(q)) inc.push(l); }
     list = [...st, ...inc].slice(0, 16);
-    if (!list.length) return '<div class="mut small" style="padding:4px 4px 10px">Brak wyników. Możesz założyć własną miejscowość (+ Własna).</div>';
+    if (!list.length) return '<div class="mut small" style="padding:4px 4px 10px">Brak wyników.</div>';
   } else {
     const ids = new Set([sel, ...Object.keys(S.L).filter(id => LOC[id].c === cid), ...LOCS.filter(l => l.c === cid && l.u).map(l => l.id),
       ...LOCS.filter(l => l.c === cid && l.f).map(l => l.id)]);
@@ -693,7 +693,7 @@ function foundSheet() {
 // ================== MAPA SZCZEGÓŁOWA (MapLibre + OpenFreeMap: drogi, zabudowa; wymaga internetu) ==================
 const MSTYLES = { fiord: 'Granatowa (jak nocna Google)', dark: 'Ciemna', liberty: 'Jasna (budynki 3D)' };
 let LM = null;
-function lmapOn() { return S.mapMode !== 'svg' && !ui.noGL && !!window.maplibregl && navigator.onLine !== false; }
+function lmapOn() { return (!S || S.mapMode !== 'svg') && !ui.noGL && !!window.maplibregl && navigator.onLine !== false; }
 function ensureLM() {
   if (LM) return LM;
   const el = document.createElement('div'); el.className = 'lmapL';
@@ -713,7 +713,7 @@ function ensureLM() {
   map.on('click', e => {
     if (ui.place) { placeAtLL(LM.cid, e.lngLat.lat, e.lngLat.lng); return; }
     const f = map.queryRenderedFeatures([[e.point.x - 10, e.point.y - 10], [e.point.x + 10, e.point.y + 10]], { layers: PL_LAYERS.map(x => x[0]) })[0];
-    if (f) act('bl', { l: f.properties.id, fromMap: '1' });
+    if (f) { if (!S) toast(LOC[f.properties.id] ? LOC[f.properties.id].n : ''); else act('bl', { l: f.properties.id, fromMap: '1' }); }
   });
   return LM;
 }
@@ -761,19 +761,20 @@ function drawLM() {
   }
   // Twoje / wybrana / własne miejscowości i pojazdy jako znaczniki z podpisem
   for (const m of lm.mk) m.remove(); lm.mk = [];
-  const ids = new Set([ui.bl, ...Object.keys(S.L), ...LOCS.filter(l => l.u).map(l => l.id)]);
+  const SS = S || { L: {}, veh: [], color: '#e0823f', hour: 0 };
+  const ids = new Set([ui.bl, ...Object.keys(SS.L), ...LOCS.filter(l => l.u || (!S && l.g)).map(l => l.id)]);
   for (const id of ids) {
     const l = LOC[id]; if (!l || l.c !== cid) continue;
-    const L = S.L[id], mine = !!(L && (L.bld.length || L.gar || Object.keys(L.inv).length)), on = id === ui.bl;
+    const L = SS.L[id], mine = !!(L && (L.bld.length || L.gar || Object.keys(L.inv).length)), on = id === ui.bl;
     const d = document.createElement('div'); d.className = 'mk' + (on ? ' on' : '') + (mine ? ' mine' : '');
-    d.innerHTML = `<i style="background:${mine ? S.color : l.u ? '#ffc98a' : l.t === 'm' ? '#a9bfd6' : '#86c98a'};${L && L.port ? 'box-shadow:0 0 0 3px #4aa3ff' : ''}"></i><span>${esc(l.n)}</span>`;
-    d.addEventListener('click', ev => { ev.stopPropagation(); if (!ui.place) act('bl', { l: id, fromMap: '1' }); });
+    d.innerHTML = `<i style="background:${mine ? SS.color : l.g ? '#ff8fe0' : l.u ? '#ffc98a' : l.t === 'm' ? '#a9bfd6' : '#86c98a'};${L && L.port ? 'box-shadow:0 0 0 3px #4aa3ff' : ''}"></i><span>${esc(l.n)}</span>`;
+    d.addEventListener('click', ev => { ev.stopPropagation(); if (!S) { toast(l.n); return; } if (!ui.place) act('bl', { l: id, fromMap: '1' }); });
     lm.mk.push(new maplibregl.Marker({ element: d, anchor: 'bottom', offset: [0, on ? 9 : 7] }).setLngLat([l.lo, l.la]).addTo(map));
   }
   const lines = [];
-  for (const v of S.veh) {
+  for (const v of SS.veh) {
     if (v.st !== 'go') continue;
-    const a = LOC[v.from], c = LOC[v.to], p = clamp(1 - (v.eta - S.hour) / v.dur, 0, 1);
+    const a = LOC[v.from], c = LOC[v.to], p = clamp(1 - (v.eta - SS.hour) / v.dur, 0, 1);
     lines.push({ type: 'Feature', geometry: { type: 'LineString', coordinates: [[a.lo, a.la], [c.lo, c.la]] }, properties: {} });
     const d = document.createElement('div'); d.className = 'mk veh'; d.innerHTML = `<i></i><span>${VEH[v.k].n} #${v.id}</span>`;
     lm.mk.push(new maplibregl.Marker({ element: d, anchor: 'bottom', offset: [0, 6] }).setLngLat([a.lo + (c.lo - a.lo) * p, a.la + (c.la - a.la) * p]).addTo(map));
@@ -795,7 +796,7 @@ function vBudowa() {
   h += (ui.place ? `<div class="placebar"><span class="grow">${isAdmin() ? 'ADMIN: dotknij mapy — miejscowość pojawi się u wszystkich graczy.' : 'Dotknij mapy w miejscu, gdzie ma powstać nowa miejscowość.'}</span><button class="btn s" data-a="placeOff">Anuluj</button></div>` : '')
     + (lmapOn() ? '<div id="lmapSlot" class="lslot"></div>' : locMap(cid, lid))
     + `<div class="lsearch"><input id="locQ" data-q="1" type="search" placeholder="Szukaj wśród ${nC.toLocaleString('pl-PL')} miejscowości…" value="${esc(ui.locQ || '')}" autocomplete="off">
-       ${ui.place ? '' : `<button class="btn s ${isAdmin() ? 'p' : ''}" data-a="placeMode">${isAdmin() ? '+ Dodaj (admin)' : '+ Własna'}</button>`}</div><div id="locRes">${locRes(cid, lid)}</div>`;
+       </div><div id="locRes">${locRes(cid, lid)}</div>`;
   h += `<div class="card"><div class="row"><div class="grow"><span class="bname">${esc(l.n)}</span> ${tag(l)}${l.port ? ' <span class="ltag p">Wybrzeże</span>' : ''}${l.u ? ' <span class="ltag u">Twoja osada</span>' : ''}${l.g ? ' <span class="ltag g">Nowa</span>' : ''}
       <div class="flow">${l.pop ? `Ludność: ${popTxt(l.pop)} · ` : ''}${t.d}</div></div></div>
     <div class="row" style="margin-top:8px"><div class="grow">Działki: <b>${used(L)} / ${slots(L, lid)}</b> <span class="mut small">· działka ${money(t.land)}</span></div>
@@ -1005,8 +1006,6 @@ function settings() {
     <h2>Konto</h2><div class="card"><div class="row"><div class="grow">${USER ? `<b>${isAdmin() ? 'admin <span class="ltag g">ADMIN</span>' : esc(USER.email)}</b><div class="mut small">Zapis w chmurze${cloudAt ? ': ' + new Date(cloudAt).toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit' }) : ' włączony'}</div>`
       : '<b>Gość</b><div class="mut small">Gra zapisana tylko na tym telefonie</div>'}</div>
       ${USER ? '<button class="btn" data-a="logout">Wyloguj</button>' : `<button class="btn p" data-a="toLogin" ${FB ? '' : 'disabled'}>Załóż konto</button>`}</div></div>
-    ${isAdmin() ? `<h2>Administrator</h2><div class="card"><div class="mut small">Miejscowości dodane przez admina widzą wszyscy gracze. Dodajesz je w Budowie przyciskiem „+ Dodaj (admin)” i dotknięciem mapy — bez kosztów i limitów.</div>
-      <div class="btns"><button class="btn p" data-a="admPanel">Lista dodanych miejscowości (${GLOBAL.filter(g => !g.del).length})</button></div></div>` : ''}
     <h2>Mapa</h2><div class="card"><div class="row"><div class="grow">${S.mapMode === 'svg' ? 'Prosta (offline)' : 'Szczegółowa — drogi, miasta (internet)'}<div class="mut small">© OpenFreeMap, © OpenMapTiles, © OpenStreetMap</div></div>
       <button class="btn" data-a="mapMode">${S.mapMode === 'svg' ? 'Szczegółowa' : 'Prosta'}</button></div>
       ${S.mapMode === 'svg' ? '' : `<div class="btns">${Object.entries(MSTYLES).map(([k, n]) => `<button class="toggle ${(S.mapStyle || 'fiord') === k ? 'on' : ''}" data-a="mapStyle" data-v="${k}">${n}</button>`).join('')}</div>`}</div>
@@ -1034,12 +1033,21 @@ function act(a, d) {
     case 'auGuest': try { localStorage.setItem('xyx_guest', '1'); } catch (e) {} SAVE_KEY = SAVE; startGame(load(SAVE) || newState()); return;
     case 'logout': try { localStorage.removeItem('xyx_guest'); } catch (e) {} logout(); return;
     case 'toLogin': try { localStorage.removeItem('xyx_guest'); } catch (e) {} save(); S = null; $('modal').hidden = true; $('wiz').hidden = true; au.mode = 'register'; renderAuth(); return;
-    case 'placeMode': ui.place = true; toast('Dotknij mapy, gdzie ma powstać miejscowość'); break;
+    case 'placeMode': if (!isAdmin()) return; ui.place = true; toast('Dotknij mapy, gdzie ma powstać miejscowość'); break;
     case 'placeOff': ui.place = false; break;
     case 'npSet': ui.np.t = d.v; foundSheet(); return;
     case 'npPort': ui.np.port = !ui.np.port; foundSheet(); return;
     case 'admDel': adminDel(d.id); return;
-    case 'admPanel': adminPanel(); return;
+    case 'admTab': ADM.tab = d.v; if (d.v !== 'miejsca') ui.place = false; renderAdmin(); return;
+    case 'admCont': ADM.cid = d.c; renderAdmin(); return;
+    case 'admPl': admPlayer(d.id); return;
+    case 'admLL': {
+      const la = parseFloat(String($('admLa').value).replace(',', '.')), lo = parseFloat(String($('admLo').value).replace(',', '.'));
+      if (!isFinite(la) || !isFinite(lo)) { toast('Podaj współrzędne'); return; }
+      const c = CONT.find(c => { const b = MAPS[c.id].box; return lo >= b[0][0] && lo <= b[1][0] && la >= b[0][1] && la <= b[1][1]; });
+      if (!c) { toast('Poza obszarem gry'); return; }
+      placeAtLL(c.id, la, lo); return;
+    }
     case 'npFound': {
       const p = ui.np, n = (p.n || '').replace(/[<>&"'`\\]/g, '').trim().slice(0, 22);
       if (!n) { $('npErr').textContent = 'Wpisz nazwę.'; return; }
@@ -1152,7 +1160,7 @@ document.addEventListener('click', e => {
   act(t.dataset.a, t.dataset);
 });
 document.addEventListener('change', e => {
-  const t = e.target, k = t.dataset.in; if (!k) return;
+  const t = e.target, k = t.dataset.in; if (!k || k === 'admSort') return;
   if (k === 'buyG') ui.buyG = t.value;
   else if (k === 'buyQ') ui.buyQ = +t.value;
   else if (k === 'shipAt') ui.shipAt = t.value;
@@ -1205,15 +1213,26 @@ const AUTH_ERR = {
   'auth/user-disabled': 'Konto zablokowane.',
 };
 function cloudSave(now) {
-  if (!USER || !DB || !S || !S.setup) return;
+  if (!USER || !DB || !S || !S.setup || isAdmin()) return;
   clearTimeout(cloudT);
-  const go = () => DB.collection('users').doc(USER.uid).set({ save: JSON.stringify(S), updated: Date.now(), name: S.name, ceo: S.ceo, worth: Math.round(worth()), email: USER.email }, { merge: true })
-    .then(() => { cloudAt = Date.now(); }).catch(() => {});
+  const go = () => {
+    if (!S || !USER) return;
+    if (!S.created) S.created = Date.now();
+    const now = Date.now(), Ls = Object.values(S.L);
+    DB.collection('users').doc(USER.uid).set({ save: JSON.stringify(S), updated: now, name: S.name, ceo: S.ceo, worth: Math.round(worth()), email: USER.email }, { merge: true })
+      .then(() => { cloudAt = Date.now(); }).catch(() => {});
+    // podsumowanie dla panelu admina (bez całego zapisu)
+    DB.collection('stats').doc(USER.uid).set({ uid: USER.uid, email: USER.email || '', name: S.name, ceo: S.ceo, color: S.color, hq: S.hq, hl: S.hl, diff: S.diff ?? 1,
+      worth: Math.round(worth()), cash: Math.round(S.cash), inc: Math.round(S.inc), hour: S.hour, season: S.season, pp: S.pp,
+      bld: Ls.reduce((a, L) => a + L.bld.length, 0), lvl: Ls.reduce((a, L) => a + L.bld.reduce((x, b) => x + b.l, 0), 0), locs: Object.keys(S.L).length,
+      ports: Ls.filter(L => L.port).length, veh: S.veh.length, ships: S.ships.length, conts: Object.keys(S.c).length,
+      created: S.created, updated: now, ver: VERSION, plat: window.Capacitor && Capacitor.isNativePlatform && Capacitor.isNativePlatform() ? 'android' : 'web' }, { merge: true }).catch(() => {});
+  };
   if (now) go(); else cloudT = setTimeout(go, 20000);
 }
 function renderAuth() {
   const el = $('auth');
-  if (S) { el.hidden = true; return; }
+  if (S || ADM.on) { el.hidden = true; return; }
   el.hidden = false;
   if (au.mode === 'wait') {
     el.innerHTML = `<div class="au-in"><div class="au-logo">${LOGO}</div><h1>XyxWord</h1><div class="spin"></div><p class="mut" style="text-align:center">Łączenie z kontem…</p></div>`;
@@ -1287,6 +1306,7 @@ async function onUser(user) {
   USER = user;
   if (!user) { if (!S) { au.mode = au.mode === 'wait' ? 'login' : au.mode; renderAuth(); } return; }
   if (S && SAVE_KEY === SAVE + '_' + user.uid) return;
+  if (user.email === ADMIN_EMAIL) { S = null; $('wiz').hidden = true; openAdmin(); return; }
   au.mode = 'wait'; renderAuth();
   SAVE_KEY = SAVE + '_' + user.uid;
   let local = load(), cloud = null;
@@ -1317,6 +1337,7 @@ function startGame(s) {
   save(); renderAuth(); render(true); renderWiz();
 }
 function logout() {
+  if (ADM.on) { ADM.on = false; if (ADM.unsub) ADM.unsub(); ADM.unsub = null; $('adm').hidden = true; ui.place = false; }
   if (USER) { save(); cloudSave(true); }
   S = null; SAVE_KEY = SAVE; $('modal').hidden = true; $('wiz').hidden = true;
   au.mode = 'login'; au.err = ''; au.info = '';
@@ -1333,19 +1354,11 @@ function adminAdd(p) {
     .then(() => { toast(`${p.n} — dodana dla wszystkich`); })
     .catch(e => toast('Błąd zapisu: ' + (e.code || e.message) + ' (reguły Firestore?)'));
   GLOBAL = GLOBAL.filter(g => g.id !== id).concat([{ ...p, id }]); registerCustom(S);
-  ui.bl = id; ui.place = false; ui.np = null; $('modal').hidden = true; render(true);
+  ui.np = null; $('modal').hidden = true; if (S) { ui.bl = id; ui.place = false; render(true); } else renderAdmin();
 }
 function adminDel(id) {
   if (!DB || !isAdmin()) return;
   DB.collection('places').doc(id).set({ del: true }, { merge: true }).then(() => toast('Usunięto')).catch(e => toast('Błąd: ' + (e.code || e.message)));
-}
-function adminPanel() {
-  const list = GLOBAL.filter(g => !g.del).sort((a, b) => (b.ts || 0) - (a.ts || 0));
-  $('modal').hidden = false;
-  $('modal').innerHTML = `<div class="sheet"><div class="row"><b class="grow" style="font-size:17px">Miejscowości admina (${list.length})</b><button class="btn s" data-a="close">Zamknij</button></div>
-    <div class="card" style="margin-top:10px">${list.map(g => `<div class="row" style="padding:6px 0;border-bottom:1px solid var(--line)"><div class="grow"><b>${esc(g.n)}</b> <span class="ltag ${g.t === 'm' ? 'm' : 'w'}">${g.t === 'm' ? 'Miasto' : 'Wieś'}</span>
-      <div class="mut small">${CN[g.c] ? CN[g.c].n : g.c} · ${(+g.la).toFixed(3)}, ${(+g.lo).toFixed(3)}${g.pop ? ' · ' + popTxt(g.pop) : ''}${g.port ? ' · port' : ''}</div></div>
-      <button class="btn s" data-a="admDel" data-id="${esc(g.id)}">Usuń</button></div>`).join('') || '<div class="mut">Brak. Dodaj w Budowie: „+ Dodaj (admin)”.</div>'}</div></div>`;
 }
 function listenPlaces() {
   if (!DB) return;
@@ -1354,9 +1367,98 @@ function listenPlaces() {
     try { localStorage.setItem('xyx_places', JSON.stringify(GLOBAL)); } catch (e) {}
     registerCustom(S);
     if (S) render(true);
-    if (!$('modal').hidden && $('modal').querySelector('[data-a=admDel]')) adminPanel();
+    if (ADM.on && ADM.tab === 'miejsca') renderAdmin();
   }, () => {});
 }
+
+// ================== PANEL ADMINISTRATORA ==================
+const ADM = { on: false, tab: 'gracze', players: [], q: '', sort: 'worth', unsub: null, cid: 'eu', err: '' };
+const ago = t => { if (!t) return '—'; const m = (Date.now() - t) / 6e4; return m < 2 ? 'teraz' : m < 60 ? Math.round(m) + ' min temu' : m < 1440 ? Math.round(m / 60) + ' h temu' : Math.round(m / 1440) + ' dni temu'; };
+const dt = t => t ? new Date(t).toLocaleString('pl-PL', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
+function openAdmin() {
+  ADM.on = true; ui.place = true; ui.bl = ''; $('view').innerHTML = ''; renderAuth(); $('adm').hidden = false; renderAdmin();
+  if (DB && !ADM.unsub) ADM.unsub = DB.collection('stats').onSnapshot(snap => {
+    ADM.players = snap.docs.map(d => ({ ...d.data(), uid: d.id })); ADM.err = '';
+    const ae = document.activeElement; if (!(ae && ae.closest && ae.closest('#adm input'))) renderAdmin(); else renderAdminList();
+  }, e => { ADM.err = 'Brak dostępu do listy graczy — opublikuj nowe reguły Firestore. (' + (e.code || '') + ')'; renderAdmin(); });
+  setTimeout(() => toast('Zalogowano jako administrator'), 300);
+}
+function admPlayers() {
+  const q = norm(ADM.q.trim());
+  const by = { worth: (a, b) => (b.worth || 0) - (a.worth || 0), active: (a, b) => (b.updated || 0) - (a.updated || 0), new: (a, b) => (b.created || 0) - (a.created || 0) }[ADM.sort];
+  return ADM.players.filter(p => !q || norm(`${p.email} ${p.name} ${p.ceo}`).includes(q)).sort(by);
+}
+function renderAdminList() {
+  const el = $('admList'); if (!el) return;
+  const list = admPlayers();
+  el.innerHTML = list.map((p, i) => `<button class="card pl" data-a="admPl" data-id="${esc(p.uid)}" style="--i:${Math.min(i, 12)}">
+      <span class="dot" style="background:${esc(p.color || '#888')}"></span>
+      <span class="grow"><b>${esc(p.name || '—')}</b> <span class="mut small">· ${esc(p.ceo || '')}</span><br><span class="mut small">${esc(p.email)} · ${ago(p.updated)}</span></span>
+      <span class="n"><b>${money(p.worth || 0)}</b><br><span class="mut small">${LOC[p.hl] ? LOC[p.hl].n : (CN[p.hq] || {}).n || ''}</span></span></button>`).join('')
+    || `<div class="card mut">${ADM.players.length ? 'Brak wyników.' : 'Brak graczy z kontem. (Gracze bez konta nie są widoczni.)'}</div>`;
+}
+function admStats() {
+  const P = ADM.players, now = Date.now(), D = 864e5;
+  const sum = f => P.reduce((a, p) => a + (+p[f] || 0), 0);
+  const act1 = P.filter(p => now - (p.updated || 0) < D).length, act7 = P.filter(p => now - (p.updated || 0) < 7 * D).length, new7 = P.filter(p => now - (p.created || 0) < 7 * D).length;
+  const kpi = [['Gracze', P.length], ['Aktywni 24 h', act1], ['Aktywni 7 dni', act7], ['Nowi 7 dni', new7], ['Łączna wartość', money(sum('worth'))],
+    ['Średnia wartość', money(P.length ? sum('worth') / P.length : 0)], ['Zakłady', sum('bld')], ['Pojazdy / statki', `${sum('veh')} / ${sum('ships')}`],
+    ['Porty', sum('ports')], ['Miejscowości admina', GLOBAL.filter(g => !g.del).length]];
+  const bars = (title, rows) => { const mx = Math.max(1, ...rows.map(r => r[1]));
+    return `<h2>${title}</h2><div class="card">${rows.map(([n, v]) => `<div class="hb"><span>${esc(n)}</span><div class="bar"><i style="width:${v / mx * 100}%"></i></div><b>${v}</b></div>`).join('')}</div>`; };
+  const days = [...Array(7)].map((_, i) => { const d0 = new Date(now - (6 - i) * D); d0.setHours(0, 0, 0, 0); const d1 = +d0 + D;
+    return [d0.toLocaleDateString('pl-PL', { weekday: 'short', day: 'numeric' }), P.filter(p => p.created >= +d0 && p.created < d1).length]; });
+  const top = [...P].sort((a, b) => (b.worth || 0) - (a.worth || 0)).slice(0, 10);
+  return `<div class="kpis">${kpi.map(([n, v]) => `<div class="kpi"><span>${n}</span><b>${v}</b></div>`).join('')}</div>
+    ${bars('Rejestracje — ostatnie 7 dni', days)}
+    ${bars('Siedziby wg kontynentów', CONT.map(c => [c.n, P.filter(p => p.hq === c.id).length]))}
+    ${bars('Poziom trudności', DIFF.map((d, i) => [d.n, P.filter(p => (p.diff ?? 1) === i).length]))}
+    ${bars('Platforma', [['Android', P.filter(p => p.plat === 'android').length], ['Przeglądarka', P.filter(p => p.plat !== 'android').length]])}
+    <h2>Top 10 firm</h2><div class="card"><table><thead><tr><th>#</th><th>Firma</th><th class="n">Wartość</th></tr></thead><tbody>
+    ${top.map((p, i) => `<tr><td>${i + 1}</td><td>${esc(p.name || '—')}<div class="mut small">${esc(p.email)}</div></td><td class="n">${money(p.worth || 0)}</td></tr>`).join('')}</tbody></table></div>`;
+}
+function admPlaces() {
+  const list = GLOBAL.filter(g => !g.del).sort((a, b) => (b.ts || 0) - (a.ts || 0));
+  return `<div class="chips">${CONT.map(c => `<button class="${c.id === ADM.cid ? 'on' : ''}" data-a="admCont" data-c="${c.id}">${c.n}</button>`).join('')}</div>
+    <div class="placebar"><span class="grow">Dotknij mapy, żeby dodać miejscowość dla wszystkich graczy.</span></div>
+    ${lmapOn() ? '<div id="lmapSlot" class="lslot"></div>' : '<div class="card mut small">Mapa szczegółowa niedostępna (brak internetu / WebGL) — użyj współrzędnych poniżej.</div>'}
+    <h2>Dodaj po współrzędnych</h2><div class="card"><div class="grid2">
+      <div><label class="f" for="admLa">Szerokość (lat)</label><input id="admLa" type="number" inputmode="decimal" step="any" placeholder="52.7389"></div>
+      <div><label class="f" for="admLo">Długość (lon)</label><input id="admLo" type="number" inputmode="decimal" step="any" placeholder="14.4521"></div></div>
+      <div class="btns"><button class="btn p" data-a="admLL">Dalej</button><span class="mut small" style="align-self:center">z Google Maps: przytrzymaj punkt → skopiuj współrzędne</span></div></div>
+    <h2>Dodane miejscowości (${list.length})</h2><div class="card">${list.map(g => `<div class="row" style="padding:6px 0;border-bottom:1px solid var(--line)"><div class="grow"><b>${esc(g.n)}</b> <span class="ltag ${g.t === 'm' ? 'm' : 'w'}">${g.t === 'm' ? 'Miasto' : 'Wieś'}</span>
+      <div class="mut small">${CN[g.c] ? CN[g.c].n : g.c} · ${(+g.la).toFixed(4)}, ${(+g.lo).toFixed(4)}${g.pop ? ' · ' + popTxt(g.pop) : ''}${g.port ? ' · port' : ''}</div></div>
+      <button class="btn s" data-a="admDel" data-id="${esc(g.id)}">Usuń</button></div>`).join('') || '<div class="mut">Brak.</div>'}</div>`;
+}
+function renderAdmin() {
+  if (!ADM.on) return;
+  const el = $('adm'), T = [['gracze', 'Gracze'], ['stat', 'Statystyki'], ['miejsca', 'Miejscowości']];
+  const animate = ADM.lastTab !== ADM.tab; ADM.lastTab = ADM.tab;
+  let body = '';
+  if (ADM.tab === 'gracze') body = `<div class="lsearch"><input id="admQ" data-admq="1" type="search" placeholder="Szukaj: e-mail, firma, prezes" value="${esc(ADM.q)}">
+      <select data-in="admSort" style="width:auto">${[['worth', 'Wartość'], ['active', 'Aktywność'], ['new', 'Najnowsi']].map(([k, n]) => `<option value="${k}" ${ADM.sort === k ? 'selected' : ''}>${n}</option>`).join('')}</select></div>
+      <div class="mut small" style="margin:4px 2px 8px">${ADM.players.length} graczy z kontem</div><div id="admList"></div>`;
+  else if (ADM.tab === 'stat') body = admStats();
+  else body = admPlaces();
+  el.innerHTML = `<div class="adm-top"><div class="grow"><b>Panel administratora</b><div class="mut small">XyxWord · ${esc(VERSION)}</div></div><button class="btn s" data-a="logout">Wyloguj</button></div>
+    <div class="au-tabs adm-tabs">${T.map(([k, n]) => `<button class="${ADM.tab === k ? 'on' : ''}" data-a="admTab" data-v="${k}">${n}</button>`).join('')}<i style="left:calc(${T.findIndex(t => t[0] === ADM.tab)} * 33.33% + 4px);width:calc(33.33% - 8px)"></i></div>
+    ${ADM.err ? `<div class="card warn">${esc(ADM.err)}</div>` : ''}<div class="adm-body ${animate ? 'enter' : ''}">${body}</div>`;
+  if (ADM.tab === 'gracze') renderAdminList();
+  if (ADM.tab === 'miejsca' && $('lmapSlot')) { ui.place = true; mountLM(ADM.cid, ''); }
+}
+function admPlayer(uid) {
+  const p = ADM.players.find(x => x.uid === uid); if (!p) return;
+  const rows = [['E-mail', esc(p.email)], ['Firma', esc(p.name)], ['Prezes', esc(p.ceo)], ['Wartość firmy', money(p.worth || 0)], ['Gotówka', money(p.cash || 0)],
+    ['Przepływ /h', money(p.inc || 0)], ['Siedziba', `${LOC[p.hl] ? LOC[p.hl].n : '—'} (${(CN[p.hq] || {}).n || '—'})`], ['Trudność', (DIFF[p.diff ?? 1] || {}).n || '—'],
+    ['Sezon / dzień gry', `${p.season || 1} / ${Math.floor((p.hour || 0) / 24) + 1}`], ['Punkty prestiżu', p.pp || 0], ['Zakłady (suma poziomów)', `${p.bld || 0} (${p.lvl || 0})`],
+    ['Miejscowości / kontynenty', `${p.locs || 0} / ${p.conts || 0}`], ['Porty', p.ports || 0], ['Pojazdy / statki', `${p.veh || 0} / ${p.ships || 0}`],
+    ['Konto od', dt(p.created)], ['Ostatnio aktywny', `${dt(p.updated)} (${ago(p.updated)})`], ['Wersja / platforma', `${esc(p.ver || '?')} / ${p.plat || '?'}`], ['UID', `<span class="small">${esc(p.uid)}</span>`]];
+  $('modal').hidden = false;
+  $('modal').innerHTML = `<div class="sheet"><div class="row"><span class="dot" style="background:${esc(p.color || '#888')}"></span><b class="grow" style="font-size:17px">${esc(p.name || 'Gracz')}</b><button class="btn s" data-a="close">Zamknij</button></div>
+    <div class="card" style="margin-top:10px"><table><tbody>${rows.map(([k, v]) => `<tr><td class="mut">${k}</td><td class="n">${v}</td></tr>`).join('')}</tbody></table></div></div>`;
+}
+document.addEventListener('input', e => { if (e.target.dataset.admq) { ADM.q = e.target.value; renderAdminList(); } });
+document.addEventListener('change', e => { if (e.target.dataset.in === 'admSort') { ADM.sort = e.target.value; renderAdminList(); } });
 
 // ================== PĘTLA ==================
 initPts();

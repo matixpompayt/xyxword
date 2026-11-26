@@ -215,3 +215,19 @@ nav button svg{transition:transform .2s}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
 .au-google{width:100%;min-height:48px;margin-top:10px;background:#fff;color:#1f1f1f;display:flex;align-items:center;justify-content:center;gap:10px}
 .ltag.g{background:#3a1f3a;color:#ffb3f0}
+/* ===== panel administratora ===== */
+.adm{position:fixed;inset:0;z-index:15;overflow:auto;background:var(--bg);padding:calc(12px + var(--safe-t)) 12px calc(24px + var(--safe-b))}
+.adm[hidden]{display:none}
+.adm>*{max-width:720px;margin-left:auto;margin-right:auto}
+.adm-top{display:flex;align-items:center;gap:10px;padding:4px 2px 12px}
+.adm-top b{font-size:18px}
+.adm-tabs{grid-template-columns:repeat(3,1fr);margin-bottom:10px}
+.adm-tabs i{animation:none;transition:left .3s cubic-bezier(.2,.8,.2,1)}
+.adm-body.enter>*{animation:rise .4s cubic-bezier(.2,.8,.2,1) both}
+.pl{display:flex;align-items:center;gap:10px;width:100%;text-align:left;color:var(--ink);font:inherit;animation:rise .35s cubic-bezier(.2,.8,.2,1) both;animation-delay:calc(var(--i,0)*30ms)}
+.pl .n{text-align:right;white-space:nowrap}
+.pl:active{transform:scale(.98)}
+.hb{display:grid;grid-template-columns:7.5em minmax(0,1fr) 2.5em;gap:8px;align-items:center;padding:4px 0;font-size:13px}
+.hb .bar{margin:0;height:8px}.hb .bar i{background:var(--acc)}
+.hb b{text-align:right;font-variant-numeric:tabular-nums}
+.pl .grow{flex:1;min-width:0}
