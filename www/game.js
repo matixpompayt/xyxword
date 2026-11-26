@@ -680,72 +680,95 @@ function foundSheet() {
     <div class="btns"><button class="btn p" data-a="npFound" ${S.cash < FOUND[p.t] ? 'disabled' : ''}>Załóż — ${money(FOUND[p.t])}</button></div></div>`;
 }
 
-// ================== MAPA SZCZEGÓŁOWA (OpenStreetMap / CARTO, wymaga internetu) ==================
+// ================== MAPA SZCZEGÓŁOWA (MapLibre + OpenFreeMap: drogi, zabudowa; wymaga internetu) ==================
+const MSTYLES = { fiord: 'Granatowa (jak nocna Google)', dark: 'Ciemna', liberty: 'Jasna (budynki 3D)' };
 let LM = null;
-function lmapOn() { return S.mapMode !== 'svg' && !!window.L && navigator.onLine !== false; }
+function lmapOn() { return S.mapMode !== 'svg' && !ui.noGL && !!window.maplibregl && navigator.onLine !== false; }
 function ensureLM() {
   if (LM) return LM;
   const el = document.createElement('div'); el.className = 'lmapL';
-  const map = L.map(el, { preferCanvas: true, minZoom: 2, maxZoom: 18, zoomSnap: .5, worldCopyJump: true, attributionControl: true });
-  map.attributionControl.setPrefix('');
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { subdomains: 'abcd', maxZoom: 19, attribution: '© OpenStreetMap · © CARTO' })
-    .on('tileerror', () => { if (!LM.err) { LM.err = true; toast('Brak internetu — mapa szczegółowa nie wczytuje się (Ustawienia → mapa prosta)'); } }).addTo(map);
-  LM = { map, el, rend: L.canvas({ padding: .5 }), dots: L.layerGroup().addTo(map), top: L.layerGroup().addTo(map), cid: null };
-  map.on('moveend zoomend', drawLM);
-  map.on('movestart zoomstart', () => { ui.gesture = true; });
+  const sty = MSTYLES[S.mapStyle] ? S.mapStyle : 'fiord';
+  let map;
+  try {
+    map = new maplibregl.Map({ container: el, style: 'https://tiles.openfreemap.org/styles/' + sty, center: [14.55, 53.43], zoom: 9,
+      attributionControl: { compact: true }, dragRotate: false, pitchWithRotate: false, maxPitch: 0 });
+  } catch (e) { ui.noGL = true; toast('Ten telefon nie obsługuje mapy szczegółowej — mapa prosta'); return null; }
+  map.touchZoomRotate.disableRotation();
+  map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-left');
+  LM = { map, el, sty, cid: null, mk: [], ready: false, srcCid: null };
+  map.on('style.load', () => { LM.ready = true; LM.srcCid = null; setupLayers(); drawLM(); });
+  map.on('error', e => { if (!LM.ready && !LM.err) { LM.err = true; toast('Mapa szczegółowa się nie wczytała (internet?) — Ustawienia → Mapa'); } });
+  map.on('movestart', () => { ui.gesture = true; });
   map.on('moveend', () => { ui.gesture = false; });
-  el.addEventListener('pointerdown', () => { ui.gesture = true; });
-  const up = () => { if (!map._animatingZoom) setTimeout(() => { ui.gesture = false; }, 50); };
-  el.addEventListener('pointerup', up); el.addEventListener('pointercancel', up);
-  map.on('click', e => { if (ui.place) placeAtLL(LM.cid, e.latlng.lat, e.latlng.lng); });
+  map.on('click', e => {
+    if (ui.place) { placeAtLL(LM.cid, e.lngLat.lat, e.lngLat.lng); return; }
+    const f = map.queryRenderedFeatures([[e.point.x - 10, e.point.y - 10], [e.point.x + 10, e.point.y + 10]], { layers: PL_LAYERS.map(x => x[0]) })[0];
+    if (f) act('bl', { l: f.properties.id, fromMap: '1' });
+  });
   return LM;
 }
+// warstwy naszych miejscowości: większe miasta widać wcześniej, wsie dopiero po przybliżeniu
+const PL_LAYERS = [['xy-big', 5e5, 1e12, 0], ['xy-mid', 1e5, 5e5, 4.5], ['xy-small', 1e4, 1e5, 6.5], ['xy-vil', 0, 1e4, 8.5]];
+function setupLayers() {
+  const map = LM.map;
+  // polskie nazwy na podkładzie, gdzie są dostępne
+  for (const ly of map.getStyle().layers) {
+    if (ly.type !== 'symbol') continue;
+    const tf = map.getLayoutProperty(ly.id, 'text-field');
+    if (tf && JSON.stringify(tf).includes('name')) try { map.setLayoutProperty(ly.id, 'text-field', ['coalesce', ['get', 'name:pl'], ['get', 'name:latin'], ['get', 'name']]); } catch (e) {}
+  }
+  map.addSource('xy-pl', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+  map.addSource('xy-veh', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+  const popR = ['interpolate', ['linear'], ['get', 'p'], 1000, 2.2, 1e4, 3.2, 1e5, 5, 1e6, 8, 1e7, 12];
+  for (const [id, lo, hi, minz] of PL_LAYERS) map.addLayer({ id, type: 'circle', source: 'xy-pl', minzoom: minz,
+    filter: ['all', ['>=', ['get', 'p'], lo], ['<', ['get', 'p'], hi]],
+    paint: { 'circle-radius': ['interpolate', ['linear'], ['zoom'], 3, ['*', .7, popR], 10, ['*', 1.2, popR], 15, ['*', 1.8, popR]],
+      'circle-color': ['case', ['==', ['get', 't'], 'm'], '#a9bfd6', '#86c98a'], 'circle-opacity': .9,
+      'circle-stroke-color': '#0b131b', 'circle-stroke-width': 1 } });
+  map.addLayer({ id: 'xy-veh-l', type: 'line', source: 'xy-veh', paint: { 'line-color': '#f5c542', 'line-width': 2, 'line-dasharray': [3, 2] } });
+}
 function mountLM(cid, sel) {
-  const slot = $('lmapSlot'), lm = ensureLM(); if (!slot) return;
-  slot.appendChild(lm.el); lm.map.invalidateSize({ pan: false });
+  const slot = $('lmapSlot'), lm = ensureLM();
+  if (!slot) return; if (!lm) { render(true); return; }
+  slot.appendChild(lm.el); lm.map.resize();
   lm.el.classList.toggle('placing', !!ui.place);
   const l = LOC[sel];
   if (lm.cid !== cid) {
     lm.cid = cid;
-    if (l && l.c === cid) lm.map.setView([l.la, l.lo], 10, { animate: false });
-    else { const b = MAPS[cid].box; lm.map.fitBounds([[b[0][1], b[0][0]], [b[1][1], b[1][0]]], { animate: false }); }
-  } else if (ui.panTo && l) lm.map.setView([l.la, l.lo], Math.max(lm.map.getZoom(), 10));
+    if (l && l.c === cid) lm.map.jumpTo({ center: [l.lo, l.la], zoom: 9.5 });
+    else { const b = MAPS[cid].box; lm.map.fitBounds([b[0], b[1]], { animate: false }); }
+  } else if (ui.panTo && l) lm.map.easeTo({ center: [l.lo, l.la], zoom: Math.max(lm.map.getZoom(), 9.5) });
   ui.panTo = false;
   drawLM();
 }
-const popR = l => l.t === 'm' ? clamp(4 + (Math.log10(Math.max(l.pop, 1e4)) - 4) * 3.2, 4, 13) : 3.2;
 function drawLM() {
-  const lm = LM; if (!lm || !lm.el.isConnected || !lm.cid) return;
-  const map = lm.map, cid = lm.cid, b = map.getBounds().pad(.15), cell = 20, taken = new Set(), seen = new Set(), list = [];
-  const ownSet = new Set(Object.keys(S.L).filter(id => { const L = S.L[id]; return L.bld.length || L.gar || Object.keys(L.inv).length; }));
-  const add = (l, force) => {
-    if (!l || seen.has(l.id) || !b.contains([l.la, l.lo])) return;
-    const p = map.latLngToContainerPoint([l.la, l.lo]), k = Math.floor(p.x / cell) + ',' + Math.floor(p.y / cell);
-    if (!force && taken.has(k)) return;
-    taken.add(k); seen.add(l.id); list.push([l, force]);
-  };
-  add(LOC[ui.bl], true);
-  for (const id of ownSet) add(LOC[id], true);
-  for (const l of LOCS) if (l.u) add(l, true);
-  for (const cc of Object.keys(BYC)) { if (!b.intersects(L.latLngBounds([[MAPS[cc].box[0][1], MAPS[cc].box[0][0]], [MAPS[cc].box[1][1], MAPS[cc].box[1][0]]]))) continue;
-    for (const l of BYC[cc]) { if (list.length > 900) break; add(l, false); } }
-  lm.dots.clearLayers(); lm.top.clearLayers();
-  for (const [l, force] of list.reverse()) {
-    const mine = ownSet.has(l.id), on = l.id === ui.bl, port = S.L[l.id] && S.L[l.id].port;
-    const mk = L.circleMarker([l.la, l.lo], { renderer: lm.rend, radius: popR(l) + (mine || on ? 2 : 0), weight: on ? 3 : mine ? 2 : 1,
-      color: on ? '#e0823f' : port ? '#4aa3ff' : mine ? '#fff' : 'rgba(10,16,22,.9)', fillColor: mine ? S.color : l.u ? '#ffc98a' : l.t === 'm' ? '#9fb3c8' : '#7fbf7f',
-      fillOpacity: mine || on ? 1 : .85, bubblingMouseEvents: false });
-    mk.on('click', () => { if (ui.place) return; act('bl', { l: l.id, fromMap: '1' }); });
-    if (mine || on || l.u) mk.bindTooltip(esc(l.n), { permanent: true, direction: 'top', offset: [0, -popR(l) - 2], className: 'lm-tip' + (on ? ' on' : '') });
-    mk.addTo(force ? lm.top : lm.dots);
+  const lm = LM; if (!lm || !lm.ready || !lm.cid) return;
+  const map = lm.map, cid = lm.cid;
+  if (lm.srcCid !== cid) { // dane kontynentu ładowane raz
+    lm.srcCid = cid;
+    map.getSource('xy-pl').setData({ type: 'FeatureCollection', features: BYC[cid].map(l => ({ type: 'Feature',
+      geometry: { type: 'Point', coordinates: [l.lo, l.la] }, properties: { id: l.id, p: l.pop || (l.t === 'm' ? 1e4 : 1000), t: l.t } })) });
   }
+  // Twoje / wybrana / własne miejscowości i pojazdy jako znaczniki z podpisem
+  for (const m of lm.mk) m.remove(); lm.mk = [];
+  const ids = new Set([ui.bl, ...Object.keys(S.L), ...LOCS.filter(l => l.u).map(l => l.id)]);
+  for (const id of ids) {
+    const l = LOC[id]; if (!l || l.c !== cid) continue;
+    const L = S.L[id], mine = !!(L && (L.bld.length || L.gar || Object.keys(L.inv).length)), on = id === ui.bl;
+    const d = document.createElement('div'); d.className = 'mk' + (on ? ' on' : '') + (mine ? ' mine' : '');
+    d.innerHTML = `<i style="background:${mine ? S.color : l.u ? '#ffc98a' : l.t === 'm' ? '#a9bfd6' : '#86c98a'};${L && L.port ? 'box-shadow:0 0 0 3px #4aa3ff' : ''}"></i><span>${esc(l.n)}</span>`;
+    d.addEventListener('click', ev => { ev.stopPropagation(); if (!ui.place) act('bl', { l: id, fromMap: '1' }); });
+    lm.mk.push(new maplibregl.Marker({ element: d, anchor: 'bottom', offset: [0, on ? 9 : 7] }).setLngLat([l.lo, l.la]).addTo(map));
+  }
+  const lines = [];
   for (const v of S.veh) {
     if (v.st !== 'go') continue;
     const a = LOC[v.from], c = LOC[v.to], p = clamp(1 - (v.eta - S.hour) / v.dur, 0, 1);
-    L.polyline([[a.la, a.lo], [c.la, c.lo]], { color: '#f5c542', weight: 2, dashArray: '6 5', interactive: false }).addTo(lm.top);
-    L.circleMarker([a.la + (c.la - a.la) * p, a.lo + (c.lo - a.lo) * p], { renderer: lm.rend, radius: 6, color: '#0b131b', weight: 2, fillColor: '#f5c542', fillOpacity: 1, interactive: false })
-      .bindTooltip(`${VEH[v.k].n} #${v.id}`, { direction: 'right', className: 'lm-tip' }).addTo(lm.top);
+    lines.push({ type: 'Feature', geometry: { type: 'LineString', coordinates: [[a.lo, a.la], [c.lo, c.la]] }, properties: {} });
+    const d = document.createElement('div'); d.className = 'mk veh'; d.innerHTML = `<i></i><span>${VEH[v.k].n} #${v.id}</span>`;
+    lm.mk.push(new maplibregl.Marker({ element: d, anchor: 'bottom', offset: [0, 6] }).setLngLat([a.lo + (c.lo - a.lo) * p, a.la + (c.la - a.la) * p]).addTo(map));
   }
+  map.getSource('xy-veh').setData({ type: 'FeatureCollection', features: lines });
 }
 
 function vBudowa() {
@@ -949,8 +972,9 @@ function settings() {
   $('modal').innerHTML = `<div class="sheet"><div class="row"><b class="grow" style="font-size:17px">Ustawienia</b><button class="btn s" data-a="close">Zamknij</button></div>
     <label class="f" for="ceo">Imię prezesa</label><input id="ceo" maxlength="20" value="${esc(S.ceo)}">
     <label class="f" for="nm">Nazwa firmy</label><div class="row"><input id="nm" maxlength="24" value="${esc(S.name)}"><button class="btn p" data-a="name">Zapisz</button></div>
-    <h2>Mapa</h2><div class="card"><div class="row"><div class="grow">${S.mapMode === 'svg' ? 'Prosta (offline)' : 'Szczegółowa — drogi, miasta (internet)'}<div class="mut small">Mapa szczegółowa: © OpenStreetMap, © CARTO</div></div>
-      <button class="btn" data-a="mapMode">${S.mapMode === 'svg' ? 'Szczegółowa' : 'Prosta'}</button></div></div>
+    <h2>Mapa</h2><div class="card"><div class="row"><div class="grow">${S.mapMode === 'svg' ? 'Prosta (offline)' : 'Szczegółowa — drogi, miasta (internet)'}<div class="mut small">© OpenFreeMap, © OpenMapTiles, © OpenStreetMap</div></div>
+      <button class="btn" data-a="mapMode">${S.mapMode === 'svg' ? 'Szczegółowa' : 'Prosta'}</button></div>
+      ${S.mapMode === 'svg' ? '' : `<div class="btns">${Object.entries(MSTYLES).map(([k, n]) => `<button class="toggle ${(S.mapStyle || 'fiord') === k ? 'on' : ''}" data-a="mapStyle" data-v="${k}">${n}</button>`).join('')}</div>`}</div>
     <h2>Aktualizacje</h2><div class="card"><div class="row"><div class="grow">Wersja: <b>${esc(VERSION)}</b><div class="mut small">Źródło: github.com/${REPO}</div></div><button class="btn" data-a="chkUpd">Sprawdź</button></div></div>
     <h2>Gra</h2><div class="card"><div class="mut small">1 godzina gry = ${HOUR_MS / 1000} s. Gra liczy się też offline (do 10 dni gry).</div>
     <div class="btns"><button class="btn" data-a="tutAgain">Powtórz samouczek</button><button class="btn" data-a="reset" style="${ui.resetArm ? 'background:var(--bad);color:#fff' : ''}">${ui.resetArm ? 'Na pewno? Kliknij ponownie' : 'Zacznij od nowa'}</button></div></div></div>`;
@@ -967,7 +991,8 @@ function act(a, d) {
       if (!d.fromMap) ui.panTo = true;
       break;
     }
-    case 'mapMode': S.mapMode = S.mapMode === 'svg' ? 'osm' : 'svg'; $('modal').hidden = true; break;
+    case 'mapMode': S.mapMode = S.mapMode === 'svg' ? 'osm' : 'svg'; ui.noGL = false; $('modal').hidden = true; break;
+    case 'mapStyle': S.mapStyle = d.v; if (LM) { LM.ready = false; LM.map.setStyle('https://tiles.openfreemap.org/styles/' + d.v); } $('modal').hidden = true; break;
     case 'placeMode': ui.place = true; toast('Dotknij mapy, gdzie ma powstać miejscowość'); break;
     case 'placeOff': ui.place = false; break;
     case 'npSet': ui.np.t = d.v; foundSheet(); return;
@@ -1149,7 +1174,7 @@ document.addEventListener('visibilitychange', () => {
     acc = 0; prev = performance.now(); save(); render(true);
   }
 });
-if (VERSION === 'dev') window.__xyx = { get S() { return S; }, hour: n => { for (let i = 0; i < n; i++) hour(S); render(true); } };
+if (VERSION === 'dev') window.__xyx = { get S() { return S; }, get LM() { return LM; }, hour: n => { for (let i = 0; i < n; i++) hour(S); render(true); } };
 save(); render(true); renderWiz();
 setInterval(loop, 500);
 setTimeout(() => checkUpdate(false), 2000);
