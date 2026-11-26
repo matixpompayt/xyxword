@@ -1524,7 +1524,7 @@ function render(force) {
   if (ui.tab === 'budowa' && $('lmapSlot')) mountLM(ui.bc, ui.bl);
 }
 function renderUpd() {
-  $('upd').innerHTML = ui.update ? `<div class="updbar"><div class="grow" style="flex:1"><b>Nowa wersja ${esc(ui.update.v)}</b><div class="mut small">Masz ${esc(VERSION)}</div></div><button class="btn p s" data-a="getUpd">Pobierz</button></div>` : '';
+  $('upd').innerHTML = ui.update ? `<div class="updbar"><div class="grow" style="flex:1"><b>Nowa wersja ${esc(ui.update.v)}</b><div class="mut small">Masz ${esc(VERSION)}</div></div><button class="btn p s" data-a="getUpd">${IS_WEB() ? 'Odśwież' : 'Pobierz'}</button></div>` : '';
 }
 let toastT;
 function toast(t) { const el = $('toast'); el.textContent = t; el.classList.add('show'); clearTimeout(toastT); toastT = setTimeout(() => el.classList.remove('show'), 2200); }
@@ -1728,7 +1728,7 @@ function act(a, d) {
       if (!ui.resetArm) { ui.resetArm = true; settings(); return; }
       S = newState(); registerCustom(S); ui.z = {}; Object.assign(wz, { step: 0, ceo: '', name: '', hl: '', cc: '', rg: null, lvl: 'ctry', q: '' }); ui.resetArm = false; $('modal').hidden = true; save(); renderWiz(); break;
     case 'chkUpd': checkUpdate(true); return;
-    case 'getUpd': if (ui.locked) runUpdate(); else openUrl(ui.update.url); return;
+    case 'getUpd': if (IS_WEB()) { if (S) { save(); cloudSave(true); } setTimeout(() => location.reload(), 600); return; } if (ui.locked) runUpdate(); else openUrl(ui.update.url); return;
     case 'dlPerm': { const P = UPD(); if (P) P.openInstallSettings(); return; }
     case 'dlInstall': { const P = UPD(); if (P) P.install().catch(e => { ui.dl = { st: 'err', msg: e.message }; lockView(); }); return; }
     case 'dlBrowser': openUrl(ui.update.url); return;
@@ -1773,8 +1773,9 @@ function cmpVer(a, b) {
   return 0;
 }
 // wymuszona aktualizacja: zapis gry i blokada do czasu instalacji nowej wersji
+const IS_WEB = () => !(window.Capacitor && Capacitor.isNativePlatform && Capacitor.isNativePlatform());
 function forceUpdate() {
-  if (VERSION === 'dev' || !ui.update) return;
+  if (VERSION === 'dev' || !ui.update || IS_WEB()) return;
   if (ui.dl && ['dl', 'inst', 'perm'].includes(ui.dl.st)) return;
   if (!ui.locked) { ui.locked = true; if (S) { save(); cloudSave(true); } }
   lockView();

@@ -8,6 +8,8 @@ on:
 
 permissions:
   contents: write
+  pages: write
+  id-token: write
 
 jobs:
   apk:
@@ -41,6 +43,11 @@ jobs:
           echo "Wersja: $VERSION"
           echo "VERSION=$VERSION" >> $GITHUB_ENV
           echo "window.XYX_VERSION = '$VERSION';" > www/version.js
+
+      - name: Strona WWW (GitHub Pages)
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: www
 
       - name: Capacitor
         run: |
@@ -96,3 +103,16 @@ jobs:
           body: ${{ github.event.head_commit.message || 'Nowa wersja' }}
           files: xyxword-${{ env.VERSION }}.apk
           make_latest: true
+
+  web:
+    needs: apk
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.dep.outputs.page_url }}
+    steps:
+      - uses: actions/configure-pages@v5
+        with:
+          enablement: true
+      - id: dep
+        uses: actions/deploy-pages@v4
