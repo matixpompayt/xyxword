@@ -853,6 +853,10 @@ function ensureLM() {
   map.on('movestart', () => { ui.gesture = true; });
   map.on('moveend', () => { ui.gesture = false; });
   map.on('click', e => {
+    if (ui.placeB && S) { placeBld(e.lngLat.lat, e.lngLat.lng); return; }
+    const bb = [[e.point.x - 12, e.point.y - 12], [e.point.x + 12, e.point.y + 12]];
+    const fb = map.getLayer('xy-bld-c') && map.queryRenderedFeatures(bb, { layers: ['xy-bld-c', 'xy-bld-s'] })[0];
+    if (fb && S) { bldSheet(fb.properties); return; }
     const f = map.queryRenderedFeatures([[e.point.x - 10, e.point.y - 10], [e.point.x + 10, e.point.y + 10]], { layers: PL_LAYERS.map(x => x[0]) })[0];
     if (!S && ADM.on) { if (f) admEdit(f.properties.id); else placeAtLL(LM.cid, e.lngLat.lat, e.lngLat.lng); return; }
     if (ui.place) { placeAtLL(LM.cid, e.lngLat.lat, e.lngLat.lng); return; }
@@ -862,6 +866,64 @@ function ensureLM() {
 }
 // warstwy naszych miejscowości: większe miasta widać wcześniej, wsie dopiero po przybliżeniu
 const PL_LAYERS = [['xy-big', 5e5, 1e12, 0], ['xy-mid', 1e5, 5e5, 4.5], ['xy-small', 1e4, 1e5, 6.5], ['xy-vil', 0, 1e4, 8.5]];
+// ===== BUDYNKI NA MAPIE (Twoje i innych graczy) =====
+const townR = l => l.t === 'm' ? clamp(2 + Math.sqrt((l.pop || 1e4) / 1e4) * .8, 2, 12) : 1.5; // promień zabudowy w km
+function offLL(la, lo, km, deg) { const r = deg * Math.PI / 180; return [la + km / 111.32 * Math.cos(r), lo + km / (111.32 * Math.cos(la * Math.PI / 180)) * Math.sin(r)]; }
+function autoPos(lid, key) { // stałe „losowe” miejsce w obrębie miejscowości
+  const l = LOC[lid], h = hashS(String(key) + lid), R = townR(l);
+  return offLL(l.la, l.lo, R * (.15 + ((h >>> 8) % 1000) / 1000 * .6), h % 360).map(v => +v.toFixed(5));
+}
+function posOf(lid, b) { if (!(isFinite(b.la) && isFinite(b.lo))) [b.la, b.lo] = autoPos(lid, b.id); return [b.la, b.lo]; }
+function garPos(lid, L) { if (!L.gpos) L.gpos = autoPos(lid, 'gar'); return L.gpos; }
+const KIND = t => t === 'gar' ? 'garage' : t === 'farma' ? 'farm' : t === 'las' ? 'tree' : /^kop_|^szyb/.test(t) ? 'mine' : 'factory';
+const bName = t => t === 'gar' ? 'Garaż' : B[t] ? B[t].n : t;
+let OTH = []; // budynki innych graczy (Firestore /bld)
+function iconImg(kind) { // białe ikonki rysowane na płótnie
+  const n = 64, c = document.createElement('canvas'); c.width = c.height = n; const g = c.getContext('2d');
+  g.fillStyle = '#fff'; g.strokeStyle = '#fff'; g.lineWidth = 5; g.lineJoin = 'round'; g.beginPath();
+  if (kind === 'factory') { g.moveTo(10, 52); g.lineTo(10, 30); g.lineTo(22, 22); g.lineTo(22, 30); g.lineTo(34, 22); g.lineTo(34, 30); g.lineTo(44, 22); g.lineTo(44, 10); g.lineTo(52, 10); g.lineTo(52, 52); g.closePath(); g.fill(); }
+  else if (kind === 'farm') { g.moveTo(10, 30); g.lineTo(32, 12); g.lineTo(54, 30); g.lineTo(54, 52); g.lineTo(10, 52); g.closePath(); g.fill(); g.fillStyle = '#000'; g.globalCompositeOperation = 'destination-out'; g.fillRect(26, 36, 12, 16); }
+  else if (kind === 'tree') { g.moveTo(32, 8); g.lineTo(52, 40); g.lineTo(12, 40); g.closePath(); g.fill(); g.fillRect(28, 38, 8, 16); }
+  else if (kind === 'mine') { g.moveTo(8, 52); g.quadraticCurveTo(32, 14, 56, 52); g.closePath(); g.fill(); g.lineWidth = 6; g.beginPath(); g.moveTo(20, 14); g.lineTo(44, 38); g.moveTo(14, 20); g.quadraticCurveTo(24, 6, 38, 10); g.stroke(); }
+  else { g.fillRect(6, 24, 34, 20); g.fillRect(40, 30, 16, 14); g.beginPath(); g.arc(18, 48, 6, 0, 7); g.arc(46, 48, 6, 0, 7); g.fill(); } // garaż: ciężarówka
+  return g.getImageData(0, 0, n, n);
+}
+function bldFeatures() {
+  const F = [], me = S ? USER && USER.uid : null;
+  if (S) for (const lid in S.L) {
+    const L = S.L[lid], l = LOC[lid]; if (!l) continue;
+    for (const b of L.bld) { const [la, lo] = posOf(lid, b); F.push({ type: 'Feature', geometry: { type: 'Point', coordinates: [lo, la] },
+      properties: { own: 1, ic: 'ic-' + KIND(b.t), col: S.color, lb: `${bName(b.t)} ${b.l}`, lid, bid: b.id } }); }
+    if (L.gar) { const [la, lo] = garPos(lid, L); F.push({ type: 'Feature', geometry: { type: 'Point', coordinates: [lo, la] },
+      properties: { own: 1, ic: 'ic-garage', col: S.color, lb: `Garaż ${L.gar}`, lid, bid: 'gar' } }); }
+  }
+  for (const p of OTH) { if (p.uid === me) continue;
+    for (const it of p.items || []) { if (!isFinite(it.la) || !isFinite(it.lo)) continue; F.push({ type: 'Feature', geometry: { type: 'Point', coordinates: [it.lo, it.la] },
+      properties: { own: 0, ic: 'ic-' + KIND(it.t), col: p.color || '#8aa0b6', lb: `${bName(it.t)} · ${clean(p.name || '?')}`, uid: p.uid, t: it.t, l: it.l || 1, lid: it.lid || '' } }); } }
+  return F;
+}
+function circleGeo(la, lo, km) { const c = []; for (let i = 0; i <= 64; i++) { const [a, o] = offLL(la, lo, km, i * 360 / 64); c.push([o, a]); } return { type: 'Feature', geometry: { type: 'Polygon', coordinates: [c] }, properties: {} }; }
+// okienko po dotknięciu budynku
+function bldSheet(p) {
+  $('modal').hidden = false;
+  if (p.own) {
+    const L = S.L[p.lid], l = LOC[p.lid], b = p.bid === 'gar' ? null : L.bld.find(x => x.id == p.bid);
+    const d = b && B[b.t];
+    $('modal').innerHTML = `<div class="sheet"><div class="row"><span class="dot" style="background:${esc(S.color)}"></span><b class="grow" style="font-size:17px">${b ? d.n + ' · poz. ' + b.l : 'Garaż · poz. ' + L.gar}</b><button class="btn s" data-a="close">Zamknij</button></div>
+      <div class="mut small" style="margin:4px 0 8px">Twoja firma · ${flag(l.cc)} ${esc(l.n)}</div>
+      ${b ? `<div class="card"><div class="flow">${flowTxt(d, b.l * (1 + .08 * S.perk.prod), p.lid)}</div>${b.st ? `<div class="warn">${esc(b.st)}</div>` : ''}</div>` : `<div class="card">${garUsed(S, p.lid)}/${garCap(S, p.lid)} pojazdów</div>`}
+      <div class="btns"><button class="btn p" data-a="bMove" data-l="${p.lid}" data-id="${p.bid}">Przenieś na mapie</button><button class="btn" data-a="bGo" data-l="${p.lid}">Pokaż w Budowie</button></div></div>`;
+  } else {
+    const o = OTH.find(x => x.uid === p.uid) || {}, n = (o.items || []).length, l = LOC[p.lid];
+    $('modal').innerHTML = `<div class="sheet"><div class="row"><span class="dot" style="background:${esc(o.color || '#8aa0b6')}"></span><b class="grow" style="font-size:17px">${esc(bName(p.t))} · poz. ${+p.l || 1}</b><button class="btn s" data-a="close">Zamknij</button></div>
+      <div class="card" style="margin-top:10px"><table><tbody>
+        <tr><td class="mut">Właściciel</td><td class="n"><b>${esc(o.name || '?')}</b></td></tr><tr><td class="mut">Prezes</td><td class="n">${esc(o.ceo || '—')}</td></tr>
+        ${l ? `<tr><td class="mut">Miejscowość</td><td class="n">${flag(l.cc)} ${esc(l.n)}</td></tr>` : ''}
+        <tr><td class="mut">Budynków firmy</td><td class="n">${n}</td></tr><tr><td class="mut">Wartość firmy</td><td class="n">${money(o.worth || 0)}</td></tr>
+        <tr><td class="mut">Aktywność</td><td class="n">${ago(o.ts)}</td></tr></tbody></table></div></div>`;
+  }
+}
+
 function setupLayers() {
   const map = LM.map;
   if ((S && S.mapStyle ? S.mapStyle : 'caros') === 'caros' || (!S && LM.sty === 'caros')) applyCaros(map);
@@ -880,18 +942,31 @@ function setupLayers() {
       'circle-color': ['case', ['==', ['get', 't'], 'm'], '#a9bfd6', '#86c98a'], 'circle-opacity': .9,
       'circle-stroke-color': '#0b131b', 'circle-stroke-width': 1 } });
   map.addLayer({ id: 'xy-veh-l', type: 'line', source: 'xy-veh', paint: { 'line-color': '#f5c542', 'line-width': 2, 'line-dasharray': [3, 2] } });
+  map.addSource('xy-rad', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+  map.addLayer({ id: 'xy-rad-f', type: 'fill', source: 'xy-rad', paint: { 'fill-color': '#e0823f', 'fill-opacity': .08 } });
+  map.addLayer({ id: 'xy-rad-l', type: 'line', source: 'xy-rad', paint: { 'line-color': '#e0823f', 'line-width': 2, 'line-dasharray': [2, 2] } });
+  for (const k of ['factory', 'farm', 'tree', 'mine', 'garage']) if (!map.hasImage('ic-' + k)) map.addImage('ic-' + k, iconImg(k), { pixelRatio: 2 });
+  map.addSource('xy-bld', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+  map.addLayer({ id: 'xy-bld-c', type: 'circle', source: 'xy-bld', minzoom: 10,
+    paint: { 'circle-radius': ['interpolate', ['linear'], ['zoom'], 10, 5, 13, 10, 16, 15], 'circle-color': ['get', 'col'],
+      'circle-stroke-color': ['case', ['==', ['get', 'own'], 1], '#ffffff', '#0b131b'], 'circle-stroke-width': 2, 'circle-pitch-alignment': 'viewport' } });
+  map.addLayer({ id: 'xy-bld-s', type: 'symbol', source: 'xy-bld', minzoom: 10,
+    layout: { 'icon-image': ['get', 'ic'], 'icon-size': ['interpolate', ['linear'], ['zoom'], 10, .28, 13, .5, 16, .75], 'icon-allow-overlap': true,
+      'text-field': ['step', ['zoom'], '', 12.5, ['get', 'lb']], 'text-font': ['Noto Sans Regular'], 'text-size': 11, 'text-offset': [0, 1.5], 'text-anchor': 'top', 'text-optional': true },
+    paint: { 'text-color': '#eef0f3', 'text-halo-color': '#0a0c0f', 'text-halo-width': 1.4 } });
 }
 function mountLM(cid, sel) {
   const slot = $('lmapSlot'), lm = ensureLM();
   if (!slot) return; if (!lm) { render(true); return; }
   slot.appendChild(lm.el); lm.map.resize();
-  lm.el.classList.toggle('placing', !!ui.place);
+  lm.el.classList.toggle('placing', !!(ui.place || ui.placeB));
   const l = LOC[sel];
   if (lm.cid !== cid) {
     lm.cid = cid;
     if (l && l.c === cid) lm.map.jumpTo({ center: [l.lo, l.la], zoom: 10.5, pitch: 50 });
     else { const b = MAPS[cid].box; lm.map.fitBounds([b[0], b[1]], { animate: false }); }
-  } else if (ui.fitB) lm.map.fitBounds(ui.fitB, { padding: 30, maxZoom: 11 });
+  } else if (ui.flyB) { const t = LOC[ui.flyB]; lm.map.flyTo({ center: [t.lo, t.la], zoom: t.t === 'm' ? 13 : 14.5, pitch: 50, duration: 900 }); ui.flyB = null; }
+  else if (ui.fitB) lm.map.fitBounds(ui.fitB, { padding: 30, maxZoom: 11 });
   else if (ui.panTo && l) lm.map.easeTo({ center: [l.lo, l.la], zoom: Math.max(lm.map.getZoom(), 9.5) });
   ui.panTo = false; ui.fitB = null;
   drawLM();
@@ -913,7 +988,13 @@ function drawLM() {
     const L = SS.L[id], mine = !!(L && (L.bld.length || L.gar || Object.keys(L.inv).length)), on = id === ui.bl;
     const d = document.createElement('div'); d.className = 'mk' + (on ? ' on' : '') + (mine ? ' mine' : '');
     d.innerHTML = `<i style="background:${mine ? SS.color : l.g ? '#ff8fe0' : l.u ? '#ffc98a' : l.t === 'm' ? '#a9bfd6' : '#86c98a'};${L && L.port ? 'box-shadow:0 0 0 3px #4aa3ff' : ''}"></i><span>${esc(l.n)}</span>`;
-    d.addEventListener('click', ev => { ev.stopPropagation(); if (!S) { if (ADM.on) admEdit(id); return; } if (!ui.place) act('bl', { l: id, fromMap: '1' }); });
+    d.addEventListener('click', ev => {
+      ev.stopPropagation(); if (!S) { if (ADM.on) admEdit(id); return; }
+      const r = lm.el.getBoundingClientRect(), x = ev.clientX - r.left, y = ev.clientY - r.top; // budynek pod znacznikiem ma pierwszeństwo
+      const fb = map.getLayer('xy-bld-c') && map.queryRenderedFeatures([[x - 12, y - 12], [x + 12, y + 12]], { layers: ['xy-bld-c'] })[0];
+      if (fb) { bldSheet(fb.properties); return; }
+      if (!ui.place) act('bl', { l: id, fromMap: '1' });
+    });
     lm.mk.push(new maplibregl.Marker({ element: d, anchor: 'bottom', offset: [0, on ? 9 : 7] }).setLngLat([l.lo, l.la]).addTo(map));
   }
   const lines = [];
@@ -925,6 +1006,9 @@ function drawLM() {
     lm.mk.push(new maplibregl.Marker({ element: d, anchor: 'bottom', offset: [0, 6] }).setLngLat([a.lo + (c.lo - a.lo) * p, a.la + (c.la - a.la) * p]).addTo(map));
   }
   map.getSource('xy-veh').setData({ type: 'FeatureCollection', features: lines });
+  try { map.getSource('xy-bld').setData({ type: 'FeatureCollection', features: bldFeatures() }); } catch (e) {}
+  const pb = ui.placeB, pl = pb && LOC[pb.lid];
+  try { map.getSource('xy-rad').setData({ type: 'FeatureCollection', features: pl ? [circleGeo(pl.la, pl.lo, townR(pl))] : [] }); } catch (e) {}
 }
 
 function ctryList(cid) { // państwa kontynentu: Twoje licencje najpierw, potem wg liczby miejscowości
@@ -942,6 +1026,15 @@ function fitTo(ls) { // pokaż obszar (państwo/region) na mapie
   if (pr) { const p0 = pr([o0, a1]), p1 = pr([o1, a0]); const w = Math.max(20, p1[0] - p0[0]), hgt = Math.max(20, p1[1] - p0[1]);
     zoomAt(cid, Math.min(m.w / w, m.h / hgt) * .8, (p0[0] + p1[0]) / 2, (p0[1] + p1[1]) / 2); }
 }
+function placeBld(la, lo) { // postawienie / przeniesienie budynku w klikniętym miejscu
+  const p = ui.placeB, l = LOC[p.lid], dk = kmLL(la, lo, l.la, l.lo), R = townR(l);
+  if (dk > R) { toast(`Za daleko od centrum: ${l.n} (max ${String(+R.toFixed(1)).replace('.', ',')} km)`); return; }
+  const pos = { la: +la.toFixed(5), lo: +lo.toFixed(5) };
+  ui.placeB = null;
+  if (p.k === 'b') act('build', { l: p.lid, b: p.b, ...pos });
+  else if (p.k === 'g') act('garage', { l: p.lid, ...pos });
+  else if (p.k === 'mv') { const L = S.L[p.lid]; if (p.id === 'gar') L.gpos = [pos.la, pos.lo]; else { const b = L.bld.find(x => x.id == p.id); if (b) Object.assign(b, pos); } toast('Przeniesiono'); save(); render(true); }
+}
 function vBudowa() {
   const cid = ui.bc, c = CN[cid];
   let h = contChips(cid);
@@ -952,6 +1045,8 @@ function vBudowa() {
     <div><label class="f">Region</label><select data-in="brg"><option value="">— cały kraj —</option>${rl.map(r => `<option value="${r}" ${r === l.rg && ui.rgSel ? 'selected' : ''}>${esc(REG[r][0])}</option>`).join('')}</select></div></div>`;
   const nC = BYC[cid].length;
   h += (ui.place ? `<div class="placebar"><span class="grow">${isAdmin() ? 'ADMIN: dotknij mapy — miejscowość pojawi się u wszystkich graczy.' : 'Dotknij mapy w miejscu, gdzie ma powstać nowa miejscowość.'}</span><button class="btn s" data-a="placeOff">Anuluj</button></div>` : '')
+    + (ui.placeB ? `<div class="placebar"><span class="grow">Dotknij mapy w obrębie <b>${esc(LOC[ui.placeB.lid].n)}</b> (pomarańczowy okrąg), gdzie postawić: <b>${ui.placeB.k === 'mv' ? 'nowe miejsce' : ui.placeB.k === 'g' ? 'Garaż' : B[ui.placeB.b].n}</b></span>
+        ${ui.placeB.k !== 'mv' ? '<button class="btn s" data-a="pbAuto">Losowo</button>' : ''}<button class="btn s" data-a="pbOff">Anuluj</button></div>` : '')
     + (lmapOn() ? '<div id="lmapSlot" class="lslot"></div>' : locMap(cid, lid))
     + `<div class="lsearch"><input id="locQ" data-q="1" type="search" placeholder="Szukaj wśród ${nC.toLocaleString('pl-PL')} miejscowości…" value="${esc(ui.locQ || '')}" autocomplete="off">
        </div><div id="locRes">${locRes(cid, lid)}</div>`;
@@ -966,7 +1061,7 @@ function vBudowa() {
     ${L.x < t.maxX ? `<button class="btn s" data-a="expand" data-l="${lid}" ${S.cash < xCost(L, lid) || !lic ? 'disabled' : ''}>+${t.step} dział${t.step > 1 ? 'ki' : 'ka'} — ${money(xCost(L, lid))}</button>` : '<span class="mut small">maks. działek</span>'}</div>
     <div class="row" style="margin-top:8px"><div class="grow">Garaż: ${L.gar ? `<b>poz. ${L.gar}</b> <span class="mut small">· ${garUsed(S, lid)}/${garCap(S, lid)} pojazdów</span>` : '<span class="mut">brak</span>'}</div>
     ${L.gar ? `<button class="btn s" data-a="garUp" data-l="${lid}" ${S.cash < garUp(L) ? 'disabled' : ''}>Rozbuduj — ${money(garUp(L))}</button>`
-      : `<button class="btn s g" data-a="garage" data-l="${lid}" ${S.cash < GARAGE_COST + land || fr < 1 || !lic ? 'disabled' : ''}>Zbuduj — ${money(GARAGE_COST + land)}</button>`}</div>
+      : `<button class="btn s g" data-a="${lmapOn() ? 'garPick' : 'garage'}" data-l="${lid}" ${S.cash < GARAGE_COST + land || fr < 1 || !lic ? 'disabled' : ''}>Zbuduj — ${money(GARAGE_COST + land)}</button>`}</div>
     ${l.port ? `<div class="row" style="margin-top:8px"><div class="grow">Port: ${L.port ? '<b class="pos">czynny</b>' : '<span class="mut">brak</span>'}</div>
       ${L.port ? '' : `<button class="btn s p" data-a="port" data-l="${lid}" ${S.cash < PORT_COST || !lic ? 'disabled' : ''}>Zbuduj — ${money(PORT_COST)}</button>`}</div>` : ''}</div>`;
   h += `<h2>Zakłady — ${l.n}</h2>`;
@@ -976,6 +1071,7 @@ function vBudowa() {
     h += `<div class="card"><div class="row"><div class="grow"><span class="tier t${d.t}">${TIER[d.t]}</span><span class="bname">${d.n}</span> <span class="mut">poz. ${b.l}</span></div></div>
       <div class="flow">${flowTxt(d, k, lid)}</div>${b.st ? `<div class="warn">${esc(b.st)}</div>` : ''}
       <div class="btns"><button class="btn s g" data-a="up" data-l="${lid}" data-id="${b.id}" ${S.cash < uc ? 'disabled' : ''}>Ulepsz — ${money(uc)}</button>
+      ${lmapOn() ? `<button class="btn s" data-a="bMove" data-l="${lid}" data-id="${b.id}">Przenieś</button>` : ''}
       <button class="btn s" data-a="demo" data-l="${lid}" data-id="${b.id}">Sprzedaj za ${money(bldValue(b))}</button></div></div>`;
   }
   h += `<h2>Nowa inwestycja ${fr < 1 ? '— brak wolnych działek' : `— wolne działki: ${fr}`}</h2>`;
@@ -983,7 +1079,7 @@ function vBudowa() {
     for (const [id, d] of Object.entries(B).filter(([, d]) => d.t === ti)) {
       const cost = d.cost + land, bon = d.in ? t.fac : t.raw;
       h += `<div class="card"><div class="row"><div class="grow"><span class="tier t${ti}">${TIER[ti]}</span><span class="bname">${d.n}</span>${bon > 1 ? ` <span class="pos small">+${Math.round((bon - 1) * 100)}%</span>` : ''}</div>
-        <button class="btn s p" data-a="build" data-l="${lid}" data-b="${id}" ${S.cash < cost || fr < 1 || !lic ? 'disabled' : ''}>${money(cost)}</button></div>
+        <button class="btn s p" data-a="${lmapOn() ? 'buildPick' : 'build'}" data-l="${lid}" data-b="${id}" ${S.cash < cost || fr < 1 || !lic ? 'disabled' : ''}>${money(cost)}</button></div>
         <div class="flow">${flowTxt(d, 1 + .08 * S.perk.prod, lid)}</div></div>`;
     }
   }
@@ -1254,9 +1350,17 @@ function act(a, d) {
       const c = licCost(d.cc); if (S.lic[d.cc] || S.cash < c) return;
       S.cash -= c; S.lic[d.cc] = true; S.c[LOC[ui.bl].c] = {}; addNews(S, `Licencja: ${cName(d.cc)}`); toast(`${flag(d.cc)} Licencja na ${cName(d.cc)}!`); break;
     }
+    case 'buildPick': case 'garPick':
+      ui.placeB = a === 'garPick' ? { k: 'g', lid: d.l } : { k: 'b', lid: d.l, b: d.b }; ui.flyB = d.l; window.scrollTo({ top: 0, behavior: 'smooth' }); break;
+    case 'bMove': $('modal').hidden = true; ui.bc = LOC[d.l].c; ui.bl = d.l; ui.tab = 'budowa'; ui.placeB = { k: 'mv', lid: d.l, id: d.id }; ui.flyB = d.l; window.scrollTo({ top: 0, behavior: 'smooth' }); break;
+    case 'bGo': $('modal').hidden = true; ui.bc = LOC[d.l].c; ui.bl = d.l; ui.tab = 'budowa'; ui.panTo = true; break;
+    case 'pbOff': ui.placeB = null; break;
+    case 'pbAuto': { const p = ui.placeB; ui.placeB = null; if (!p) break; act(p.k === 'g' ? 'garage' : 'build', { l: p.lid, b: p.b }); return; }
     case 'build': {
       const def = B[d.b], ld = landOf(d.l), cost = def.cost + ld; if (!hasLic(d.l) || S.cash < cost || free(S, d.l) < 1) return;
-      S.cash -= cost; ensureL(S, d.l).bld.push({ id: S.nid++, t: d.b, l: 1, st: '', land: ld }); toast(`${def.n} — ${LOC[d.l].n}`); break;
+      const id = S.nid++, b = { id, t: d.b, l: 1, st: '', land: ld };
+      if (isFinite(d.la) && isFinite(d.lo)) { b.la = +d.la; b.lo = +d.lo; } else posOf(d.l, b);
+      S.cash -= cost; ensureL(S, d.l).bld.push(b); toast(`${def.n} — ${LOC[d.l].n}`); break;
     }
     case 'up': {
       const b = S.L[d.l].bld.find(x => x.id == d.id), c = upCost(b); if (S.cash < c) return;
@@ -1272,7 +1376,7 @@ function act(a, d) {
     }
     case 'garage': {
       const c = GARAGE_COST + landOf(d.l); if (!hasLic(d.l) || S.cash < c || free(S, d.l) < 1) return;
-      S.cash -= c; ensureL(S, d.l).gar = 1; ui.garAt = d.l; toast(`Garaż — ${LOC[d.l].n}`); break;
+      S.cash -= c; const GL = ensureL(S, d.l); GL.gar = 1; GL.gpos = isFinite(d.la) && isFinite(d.lo) ? [+d.la, +d.lo] : autoPos(d.l, 'gar'); ui.garAt = d.l; toast(`Garaż — ${LOC[d.l].n}`); break;
     }
     case 'garUp': { const L = S.L[d.l], c = garUp(L); if (S.cash < c) return; S.cash -= c; L.gar++; toast(`Garaż poz. ${L.gar}`); break; }
     case 'veh': {
@@ -1470,6 +1574,10 @@ function cloudSave(now) {
     const now = Date.now(), Ls = Object.values(S.L);
     DB.collection('users').doc(USER.uid).set({ save: JSON.stringify(S), updated: now, name: S.name, ceo: S.ceo, worth: Math.round(worth()), email: USER.email }, { merge: true })
       .then(() => { cloudAt = Date.now(); }).catch(() => {});
+    // budynki widoczne dla innych graczy na mapie
+    const items = []; for (const lid in S.L) { const L = S.L[lid]; for (const b of L.bld) { const [la, lo] = posOf(lid, b); items.push({ t: b.t, l: b.l, la, lo, lid }); }
+      if (L.gar) { const [la, lo] = garPos(lid, L); items.push({ t: 'gar', l: L.gar, la, lo, lid }); } }
+    DB.collection('bld').doc(USER.uid).set({ uid: USER.uid, name: S.name, ceo: S.ceo, color: S.color, worth: Math.round(worth()), ts: now, items }).catch(() => {});
     // podsumowanie dla panelu admina (bez całego zapisu)
     DB.collection('stats').doc(USER.uid).set({ uid: USER.uid, email: USER.email || '', name: S.name, ceo: S.ceo, color: S.color, hq: S.hq, hl: S.hl, diff: S.diff ?? 1,
       worth: Math.round(worth()), cash: Math.round(S.cash), inc: Math.round(S.inc), hour: S.hour, season: S.season, pp: S.pp,
@@ -1608,6 +1716,10 @@ function adminAdd(p) {
 function adminDel(id) {
   if (!DB || !isAdmin()) return;
   DB.collection('places').doc(id).set({ del: true }, { merge: true }).then(() => toast('Usunięto')).catch(e => toast('Błąd: ' + (e.code || e.message)));
+}
+function listenBld() {
+  if (!DB || ui.bldUnsub) return;
+  ui.bldUnsub = DB.collection('bld').onSnapshot(snap => { OTH = snap.docs.map(d => ({ ...d.data(), uid: d.id })); if (LM && LM.ready) drawLM(); }, () => {});
 }
 function listenPlaces() {
   if (!DB) return;
@@ -1774,7 +1886,7 @@ document.addEventListener('visibilitychange', () => {
 });
 if (VERSION === 'dev') window.__xyx = { get S() { return S; }, get LM() { return LM; }, hour: n => { for (let i = 0; i < n; i++) hour(S); render(true); } };
 registerCustom(null);
-if (FB) { au.mode = 'wait'; renderAuth(); firebase.auth().onAuthStateChanged(onUser); listenPlaces(); }
+if (FB) { au.mode = 'wait'; renderAuth(); firebase.auth().onAuthStateChanged(onUser); listenPlaces(); listenBld(); }
 else if (localStorage.getItem('xyx_guest') === '1') startGame(load(SAVE) || newState());
 else renderAuth();
 setInterval(loop, 500);
