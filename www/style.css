@@ -248,3 +248,5 @@ nav button svg{transition:transform .2s}
 .crumbs button.on{border-color:var(--acc);color:var(--ink)}
 .wz-pick{background:#1d2b1f;border:1px solid #3a6a43;border-radius:10px;padding:8px 12px;margin-bottom:4px;animation:rise .3s ease}
 .lmapL.placing .mk{pointer-events:none}
+.wallet{padding:8px 0;border-bottom:1px solid var(--line)}
+.wallet .n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;font-size:13px}

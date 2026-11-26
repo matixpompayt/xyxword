@@ -96,6 +96,44 @@ function rRes(rg) { // bonus regionu (województwa / landu / stanu)
 }
 const bonList = r => Object.entries(r).sort((a, b) => b[1] - a[1]).map(([g, v]) => `${G[g].n} ×${String(+v.toFixed(2)).replace('.', ',')}`).join(' · ') || 'brak';
 const CTRY_N = {};
+// ===== WALUTY =====
+const CUR_OF = { AD: 'EUR', AT: 'EUR', AX: 'EUR', BE: 'EUR', CY: 'EUR', DE: 'EUR', EE: 'EUR', ES: 'EUR', FI: 'EUR', FR: 'EUR', GF: 'EUR', GR: 'EUR', HR: 'EUR', IE: 'EUR',
+  IT: 'EUR', LT: 'EUR', LU: 'EUR', LV: 'EUR', MC: 'EUR', ME: 'EUR', MT: 'EUR', NL: 'EUR', PT: 'EUR', SI: 'EUR', SK: 'EUR', SM: 'EUR', VA: 'EUR', XK: 'EUR', YT: 'EUR',
+  PL: 'PLN', CZ: 'CZK', HU: 'HUF', RO: 'RON', BG: 'BGN', SE: 'SEK', DK: 'DKK', FO: 'DKK', NO: 'NOK', CH: 'CHF', LI: 'CHF', GB: 'GBP', IM: 'GBP', JE: 'GBP', GG: 'GBP',
+  GI: 'GBP', FK: 'GBP', SH: 'GBP', UA: 'UAH', BY: 'BYN', RU: 'RUB', TR: 'TRY', RS: 'RSD', BA: 'BAM', MK: 'MKD', AL: 'ALL', MD: 'MDL', KZ: 'KZT',
+  US: 'USD', CA: 'CAD', MX: 'MXN', BS: 'BSD', BR: 'BRL', AR: 'ARS', CL: 'CLP', CO: 'COP', PE: 'PEN', EC: 'USD', UY: 'UYU', PY: 'PYG', BO: 'BOB', VE: 'VES', GY: 'GYD', SR: 'SRD',
+  CN: 'CNY', JP: 'JPY', KR: 'KRW', KP: 'KPW', TW: 'TWD', HK: 'HKD', MO: 'MOP', IN: 'INR', PK: 'PKR', BD: 'BDT', NP: 'NPR', BT: 'BTN', LK: 'LKR', MM: 'MMK', TH: 'THB',
+  LA: 'LAK', KH: 'KHR', VN: 'VND', MY: 'MYR', PH: 'PHP', MN: 'MNT', KG: 'KGS', TJ: 'TJS', TM: 'TMT', UZ: 'UZS', AF: 'AFN',
+  ZA: 'ZAR', NA: 'NAD', LS: 'LSL', SZ: 'SZL', BW: 'BWP', ZW: 'USD', ZM: 'ZMW', MW: 'MWK', MZ: 'MZN', AO: 'AOA', CD: 'CDF', CG: 'XAF', GA: 'XAF', CM: 'XAF', CF: 'XAF',
+  TD: 'XAF', GQ: 'XAF', NG: 'NGN', GH: 'GHS', BJ: 'XOF', BF: 'XOF', CI: 'XOF', GW: 'XOF', ML: 'XOF', NE: 'XOF', SN: 'XOF', TG: 'XOF', GM: 'GMD', GN: 'GNF', SL: 'SLE',
+  LR: 'LRD', MR: 'MRU', MA: 'MAD', EH: 'MAD', DZ: 'DZD', TN: 'TND', LY: 'LYD', EG: 'EGP', SD: 'SDG', SS: 'SSP', ER: 'ERN', ET: 'ETB', DJ: 'DJF', SO: 'SOS', KE: 'KES',
+  UG: 'UGX', TZ: 'TZS', RW: 'RWF', BI: 'BIF', MG: 'MGA', KM: 'KMF', ST: 'STN', AU: 'AUD', PG: 'PGK' };
+const FX0 = { USD: 1, EUR: .92, PLN: 4, CZK: 23, HUF: 360, RON: 4.6, BGN: 1.8, SEK: 10.5, DKK: 6.9, NOK: 10.8, CHF: .88, GBP: .79, UAH: 41, BYN: 3.3, RUB: 90, TRY: 34,
+  RSD: 108, BAM: 1.8, MKD: 57, ALL: 92, MDL: 18, KZT: 480, CAD: 1.37, MXN: 18, BSD: 1, BRL: 5.5, ARS: 950, CLP: 930, COP: 4000, PEN: 3.75, UYU: 40, PYG: 7500,
+  BOB: 6.9, VES: 36, GYD: 209, SRD: 32, CNY: 7.2, JPY: 150, KRW: 1350, KPW: 900, TWD: 32, HKD: 7.8, MOP: 8, INR: 83, PKR: 280, BDT: 117, NPR: 133, BTN: 83, LKR: 300,
+  MMK: 2100, THB: 35, LAK: 21000, KHR: 4100, VND: 25000, MYR: 4.6, PHP: 56, MNT: 3400, KGS: 87, TJS: 10.9, TMT: 3.5, UZS: 12600, AFN: 70, ZAR: 18.5, NAD: 18.5,
+  LSL: 18.5, SZL: 18.5, BWP: 13.6, ZMW: 26, MWK: 1730, MZN: 64, AOA: 900, CDF: 2800, XAF: 600, XOF: 600, NGN: 1500, GHS: 15, GMD: 68, GNF: 8600, SLE: 22, LRD: 190,
+  MRU: 40, MAD: 10, DZD: 135, TND: 3.1, LYD: 4.8, EGP: 48, SDG: 600, SSP: 1300, ERN: 15, ETB: 57, DJF: 178, SOS: 570, KES: 130, UGX: 3700, TZS: 2600, RWF: 1300,
+  BIF: 2900, MGA: 4500, KMF: 450, STN: 22.5, AUD: 1.52, PGK: 3.9 };
+const SYM = { USD: ['$', 1], EUR: ['€', 1], GBP: ['£', 1], JPY: ['¥', 1], CNY: ['¥', 1], PLN: [' zł', 0], CHF: ['CHF ', 1], CZK: [' Kč', 0], UAH: [' ₴', 0], RUB: [' ₽', 0],
+  TRY: [' ₺', 0], INR: ['₹', 1], KRW: ['₩', 1], BRL: ['R$ ', 1], AUD: ['A$', 1], CAD: ['C$', 1], MXN: ['MX$', 1] };
+const SPREAD = .015; // prowizja kantoru
+let CDN = null; try { CDN = new Intl.DisplayNames(['pl'], { type: 'currency' }); } catch (e) {}
+const curName = c => { try { return (CDN && CDN.of(c)) || c; } catch (e) { return c; } };
+const curOfCC = cc => CUR_OF[cc] || 'USD';
+const curOf = lid => curOfCC(LOC[lid] ? LOC[lid].cc : '');
+const rate = (c, s = S) => (FX0[c] || 1) * ((s && s.fx && s.fx[c]) || 1);
+const wal = (s, c) => (s.w && s.w[c]) || 0;
+const canC = (s, c, usd) => wal(s, c) + 1e-6 >= usd * rate(c, s);
+const payC = (s, c, usd) => { s.w[c] = wal(s, c) - usd * rate(c, s); };
+const earnC = (s, c, usd) => { s.w[c] = wal(s, c) + usd * rate(c, s); };
+const totUSD = s => Object.entries(s.w || {}).reduce((a, [c, v]) => a + v / rate(c, s), 0);
+const homeCur = (s = S) => curOf(s.hl);
+function fmtC(v, c) { const sy = SYM[c] || [' ' + c, 0], t = fmt(Math.abs(v)), sg = v < 0 ? '−' : ''; return sy[1] ? sg + sy[0] + t : sg + t + sy[0]; }
+const mC = (usd, c) => fmtC(usd * rate(c), c);          // kwota w USD → w walucie c
+const mL = (usd, lid) => mC(usd, curOf(lid));            // → w walucie miejscowości
+const mH = usd => mC(usd, homeCur());                     // → w walucie siedziby
+const canL = (lid, usd) => canC(S, curOf(lid), usd);
 const licCost = cc => Math.round(TIERS[tierOf(cc)].lic * (1 + Math.min(1, (CTRY_N[cc] || 0) / 3000)) / 1000) * 1000;
 const CAP = { eu: 'hamburg', na: 'nowyjork', sa: 'rio', af: 'lagos', as: 'szanghaj', au: 'sydney' };
 const TYPE = {
@@ -198,13 +236,13 @@ function newState(o = {}) {
   for (const g of GK) m[g] = { sat: 0, d: rnd(.9, 1.1), h: [] };
   const s = {
     v: 2, created: Date.now(), setup: !!o.done, ceo: o.ceo || '', name: o.name || 'Moja Firma', color: o.color || COLORS[0], hq, hl, diff,
-    cash, hour: 0, last: Date.now(),
+    w: { [curOfCC(LOC[hl].cc)]: cash * (FX0[curOfCC(LOC[hl].cc)] || 1) }, fx: {}, fxp: {}, hour: 0, last: Date.now(),
     c: { [hq]: {} }, lic: { [LOC[hl].cc]: true }, L: { [hl]: newLoc() }, ships: [], veh: [], custom: [], nid: 1, m, ai: mkAI(cash, diff),
     season: 1, pp: 0, perk: { prod: 0, upk: 0, ship: 0, sell: 0 }, ev: [],
     news: [], inc: 0, upk: 0, lastSeason: null, tut: { step: o.tut === false ? 99 : 0, sold: false, rew: false },
   };
   for (const g of GK) m[g].h = Array(8).fill(price(g, s));
-  addNews(s, `Start! ${s.ceo ? 'Prezes ' + s.ceo + ', masz' : 'Masz'} ${money(cash)} i siedzibę: ${LOC[hl].n} (${CN[hq].n}).`);
+  addNews(s, `Start! ${s.ceo ? 'Prezes ' + s.ceo + ', masz' : 'Masz'} ${fmtC(cash * (FX0[curOfCC(LOC[hl].cc)] || 1), curOfCC(LOC[hl].cc))} i siedzibę: ${LOC[hl].n} (${CN[hq].n}).`);
   return s;
 }
 // zapis z 0.1–0.3 (kontynenty bez miejscowości) → wszystko trafia do stolicy kontynentu
@@ -233,6 +271,10 @@ function parseSave(raw) {
     const s = typeof raw === 'string' ? JSON.parse(raw) : raw;
     if (s && s.v === 2) {
       s.custom = s.custom || [];
+      if (!s.w) { // zapis sprzed walut: cała gotówka do waluty siedziby
+        const hc = curOfCC((LOC[s.hl] || {}).cc); s.w = { [hc]: (s.cash || 0) * (FX0[hc] || 1) }; s.fx = {}; s.fxp = {}; delete s.cash;
+        s.news = s.news || []; s.news.unshift({ h: s.hour || 0, t: `Aktualizacja: waluty! Gotówka przeliczona na ${curName(hc)}. Kantor jest w zakładce Rynek.` });
+      }
       if (!s.lic) { // zapis sprzed państw: licencje tam, gdzie gracz już działa, + stolice opłaconych kontynentów
         s.lic = {};
         const add = id => { const l = LOC[id]; if (l && l.cc) s.lic[l.cc] = true; };
@@ -264,12 +306,12 @@ function sell(s, lid, g, q) {
   if (q <= 0) return 0;
   const rev = sellPrice(g, q, s) * T(lid).sell * q * (1 - taxOf(lid));
   s.m[g].sat += q; L.inv[g] -= q; if (L.inv[g] < 1e-6) delete L.inv[g];
-  s.cash += rev; if (s.tut) s.tut.sold = true; return rev;
+  earnC(s, curOf(lid), rev); if (s.tut) s.tut.sold = true; return rev;
 }
 function buy(s, lid, g, q) {
   const cost = buyPrice(g, q, s) * q;
-  if (q <= 0 || cost > s.cash) return false;
-  s.cash -= cost; s.m[g].sat -= q; add(ensureL(s, lid), g, q); return cost;
+  if (q <= 0 || !canC(s, curOf(lid), cost)) return false;
+  payC(s, curOf(lid), cost); s.m[g].sat -= q; add(ensureL(s, lid), g, q); return cost;
 }
 const taxOf = lid => TIERS[tierOf(LOC[lid].cc)].tax;
 const landOf = lid => Math.round(T(lid).land * TIERS[tierOf(LOC[lid].cc)].land);
@@ -287,7 +329,7 @@ function upCost(b) { return Math.round(B[b.t].cost * b.l * .8); }
 const garUp = L => GARAGE_COST * L.gar;
 const xCost = (L, lid) => T(lid).xCost * (L.x + 1);
 function worth(s = S) {
-  let w = s.cash;
+  let w = totUSD(s);
   for (const cc in s.lic || {}) if (cc !== (LOC[s.hl] || {}).cc) w += licCost(cc) * .5;
   for (const lid in s.L) {
     const L = s.L[lid];
@@ -314,14 +356,14 @@ function tstr(h) { const d = Math.floor(h / 24) + 1, hh = h % 24; return `Dzień
 // ================== SYMULACJA 1 GODZINY ==================
 function hour(s) {
   s.hour++;
-  const cash0 = s.cash;
+  const cash0 = totUSD(s);
   const prodM = 1 + .08 * s.perk.prod, upkM = Math.max(.3, 1 - .07 * s.perk.upk);
   let upk = 0;
   for (const lid in s.L) {
-    const L = s.L[lid];
+    const L = s.L[lid], cur = curOf(lid); let u = 0;
     for (const b of L.bld) {
       const d = B[b.t], k = b.l * prodM;
-      upk += d.cost * .0012 * b.l * upkM;
+      u += d.cost * .0012 * b.l * upkM;
       if (d.in) {
         let f = 1; const miss = [];
         for (const g in d.in) { const r = (L.inv[g] || 0) / (d.in[g] * k); if (r < 1) miss.push(G[g].n); f = Math.min(f, r); }
@@ -334,12 +376,17 @@ function hour(s) {
         b.st = '';
       }
     }
-    if (L.port) upk += 30 * upkM;
-    if (L.gar) upk += 15 * L.gar * upkM;
+    if (L.port) u += 30 * upkM;
+    if (L.gar) u += 15 * L.gar * upkM;
+    payC(s, cur, u); upk += u;
     for (const g in L.auto) if (L.auto[g] && (L.inv[g] || 0) >= 1) sell(s, lid, g, Math.floor(L.inv[g]));
   }
-  for (const v of s.veh) upk += VEH[v.k].cost * .001 * upkM;
-  s.cash -= upk; s.upk = upk;
+  for (const v of s.veh) { const u = VEH[v.k].cost * .001 * upkM; payC(s, curOf(v.home), u); upk += u; }
+  s.upk = upk;
+  // kursy walut: błądzenie losowe z powrotem do średniej
+  s.fx = s.fx || {}; s.fxp = s.fxp || {};
+  for (const c in FX0) { if (c === 'USD') continue; const f = s.fx[c] || 1; s.fx[c] = clamp(f * Math.exp((Math.random() + Math.random() + Math.random() - 1.5) * .004) + (1 - f) * .01, .7, 1.35); }
+  if (s.hour % 24 === 0) s.fxp = { ...s.fx };
   // statki i pojazdy
   for (const sh of s.ships) if (sh.st === 'sail' && s.hour >= sh.eta) {
     if (sh.q) add(ensureL(s, sh.to), sh.g, sh.q);
@@ -366,7 +413,7 @@ function hour(s) {
   s.ev = s.ev.filter(e => e.until > s.hour);
   if (Math.random() < 1 / 30) randomEvent(s);
   if (s.hour % 3 === 0) for (const g of GK) { const h = s.m[g].h; h.push(price(g, s)); if (h.length > 16) h.shift(); }
-  s.inc = s.inc * .85 + (s.cash - cash0) * .15;
+  s.inc = s.inc * .85 + (totUSD(s) - cash0) * .15;
   if (s.hour % SEASON_H === 0) endSeason(s);
 }
 function randomEvent(s) {
@@ -497,7 +544,7 @@ function renderWiz() {
   } else {
     b = `<h1>Gotowe do startu</h1>
       <div class="card"><div class="row"><span class="dot" style="background:${wz.color}"></span><div class="grow"><b>${esc(wz.name)}</b><div class="mut small">Prezes: ${esc(wz.ceo)}</div></div></div>
-      <table style="margin-top:8px"><tr><td>Siedziba</td><td class="n">${LOC[wz.hl].n} (${TYPE[LOC[wz.hl].t].n.toLowerCase()})</td></tr><tr><td>Kontynent</td><td class="n">${CN[wz.hq].n}</td></tr><tr><td>Trudność</td><td class="n">${DIFF[wz.diff].n}</td></tr><tr><td>Gotówka</td><td class="n">${money(DIFF[wz.diff].cash)}</td></tr></table></div>
+      <table style="margin-top:8px"><tr><td>Siedziba</td><td class="n">${LOC[wz.hl].n} (${TYPE[LOC[wz.hl].t].n.toLowerCase()})</td></tr><tr><td>Kontynent</td><td class="n">${CN[wz.hq].n}</td></tr><tr><td>Trudność</td><td class="n">${DIFF[wz.diff].n}</td></tr><tr><td>Gotówka</td><td class="n">${fmtC(DIFF[wz.diff].cash * (FX0[curOfCC(LOC[wz.hl].cc)] || 1), curOfCC(LOC[wz.hl].cc))}</td></tr></table></div>
       <button class="toggle ${wz.tut ? 'on' : ''}" data-a="wzSet" data-k="tut" data-v="${wz.tut ? 0 : 1}" style="width:100%;min-height:44px">Samouczek: ${wz.tut ? 'włączony' : 'wyłączony'}</button>`;
   }
   const anim = ui.wzLast !== wz.step; ui.wzLast = wz.step;
@@ -506,6 +553,7 @@ function renderWiz() {
 }
 document.addEventListener('input', e => {
   const t = e.target, k = t.dataset.wz; if (k) wz[k] = t.value;
+  if (t.dataset.exa && ui.ex) { ui.ex.amt = t.value; const o = $('exOut'); if (o) o.innerHTML = exPreview(); }
   if (t.dataset.wzq) { wz.q = t.value; const r = $('wzList'); if (r) r.innerHTML = wzList(); }
   if (t.dataset.q) { ui.locQ = t.value; const r = $('locRes'); if (r) r.innerHTML = locRes(ui.bc, ui.bl); }
   if (t.dataset.np && ui.np) ui.np[t.dataset.np] = t.value;
@@ -541,9 +589,9 @@ function vFirma() {
   if (!bldCount() && S.tut.step >= TUT.length) h += `<div class="card hint"><b>Jak zacząć</b><div class="mut" style="margin-top:4px">W <b>Budowa</b> postaw Farmę i Młyn w swojej siedzibie, potem Piekarnię. Na wsiach farmy i kopalnie dają więcej, w miastach fabryki. Towar między miejscowościami wożą ciężarówki, między kontynentami statki.</div><div class="btns"><button class="btn p" data-a="tab" data-t="budowa">Do budowy</button></div></div>`;
   h += mapSvg();
   h += `<div class="kpis">
-    <div class="kpi"><span>Wartość firmy</span><b>${money(worth())}</b></div>
-    <div class="kpi"><span>Przepływ gotówki /h</span><b class="${S.inc >= 0 ? 'pos' : 'neg'}">${money(S.inc)}</b></div>
-    <div class="kpi"><span>Koszty utrzymania /h</span><b>${money(S.upk)}</b></div>
+    <div class="kpi"><span>Wartość firmy</span><b>${mH(worth())}</b></div>
+    <div class="kpi"><span>Przepływ gotówki /h</span><b class="${S.inc >= 0 ? 'pos' : 'neg'}">${mH(S.inc)}</b></div>
+    <div class="kpi"><span>Koszty utrzymania /h</span><b>${mH(S.upk)}</b></div>
     <div class="kpi"><span>Sezon ${S.season} · dzień ${day}/30</span><b>Miejsce ${pos} / ${r.length}</b></div>
   </div>`;
   h += `<h2>Wiadomości</h2><div class="card">${S.news.slice(0, 10).map(n => `<div class="news"><span>D${Math.floor(n.h / 24) + 1}</span>${esc(n.t)}</div>`).join('')}</div>`;
@@ -782,7 +830,7 @@ function foundSheet() {
       : p.port ? '<div class="mut small">Leży nad morzem — będzie można zbudować port.</div>' : ''}
     <div id="npErr" class="warn"></div>
     <div class="btns">${p.adm ? '<button class="btn p" data-a="npFound">Dodaj dla wszystkich graczy</button>'
-      : `<button class="btn p" data-a="npFound" ${S.cash < FOUND[p.t] ? 'disabled' : ''}>Załóż — ${money(FOUND[p.t])}</button>`}</div></div>`;
+      : `<button class="btn p" data-a="npFound" ${!canC(S, homeCur(), FOUND[p.t]) ? 'disabled' : ''}>Załóż — ${mH(FOUND[p.t])}</button>`}</div></div>`;
 }
 
 // ================== MAPA SZCZEGÓŁOWA (MapLibre + OpenFreeMap: drogi, zabudowa; wymaga internetu) ==================
@@ -919,7 +967,7 @@ function bldSheet(p) {
       <div class="card" style="margin-top:10px"><table><tbody>
         <tr><td class="mut">Właściciel</td><td class="n"><b>${esc(o.name || '?')}</b></td></tr><tr><td class="mut">Prezes</td><td class="n">${esc(o.ceo || '—')}</td></tr>
         ${l ? `<tr><td class="mut">Miejscowość</td><td class="n">${flag(l.cc)} ${esc(l.n)}</td></tr>` : ''}
-        <tr><td class="mut">Budynków firmy</td><td class="n">${n}</td></tr><tr><td class="mut">Wartość firmy</td><td class="n">${money(o.worth || 0)}</td></tr>
+        <tr><td class="mut">Budynków firmy</td><td class="n">${n}</td></tr><tr><td class="mut">Wartość firmy</td><td class="n">${mH(o.worth || 0)}</td></tr>
         <tr><td class="mut">Aktywność</td><td class="n">${ago(o.ts)}</td></tr></tbody></table></div></div>`;
   }
 }
@@ -1054,43 +1102,69 @@ function vBudowa() {
       <div class="flow">${flag(l.cc)} ${cName(l.cc)}${rName(l) ? ' · ' + esc(rName(l)) : ''}${l.pop ? ` · ${popTxt(l.pop)} mieszk.` : ''}</div>
       <div class="flow">${t.d}</div>
       <div class="flow">Bonusy: państwo ${bonList(cRes(l.cc))} · region ${bonList(rRes(l.rg))}</div>
-      <div class="flow">Podatek od sprzedaży ${Math.round(taxOf(lid) * 100)}%${EU.has(l.cc) ? ' · UE (bez cła)' : ''}</div></div></div>
+      <div class="flow">Podatek od sprzedaży ${Math.round(taxOf(lid) * 100)}%${EU.has(l.cc) ? ' · UE (bez cła)' : ''} · waluta: <b>${curOf(lid)}</b> (masz ${fmtC(wal(S, curOf(lid)), curOf(lid))})</div></div></div>
     ${lic ? '' : `<div class="lic"><div class="grow"><b>Brak licencji: ${flag(l.cc)} ${cName(l.cc)}</b><div class="mut small">Państwo ${TIERS[tierOf(l.cc)].n} — bez licencji nie zbudujesz tu nic.</div></div>
-      <button class="btn p" data-a="lic" data-cc="${l.cc}" ${S.cash < licCost(l.cc) ? 'disabled' : ''}>Kup licencję — ${money(licCost(l.cc))}</button></div>`}
-    <div class="row" style="margin-top:8px"><div class="grow">Działki: <b>${used(L)} / ${slots(L, lid)}</b> <span class="mut small">· działka ${money(land)}</span></div>
-    ${L.x < t.maxX ? `<button class="btn s" data-a="expand" data-l="${lid}" ${S.cash < xCost(L, lid) || !lic ? 'disabled' : ''}>+${t.step} dział${t.step > 1 ? 'ki' : 'ka'} — ${money(xCost(L, lid))}</button>` : '<span class="mut small">maks. działek</span>'}</div>
+      <button class="btn p" data-a="lic" data-cc="${l.cc}" ${!canC(S, curOfCC(l.cc), licCost(l.cc)) ? 'disabled' : ''}>Kup licencję — ${mC(licCost(l.cc), curOfCC(l.cc))}</button>
+      ${!canC(S, curOfCC(l.cc), licCost(l.cc)) ? `<div class="mut small" style="flex-basis:100%">Płacisz w walucie: ${curName(curOfCC(l.cc))}. Masz ${fmtC(wal(S, curOfCC(l.cc)), curOfCC(l.cc))} — wymień w kantorze (Rynek).</div>` : ''}</div>`}
+    <div class="row" style="margin-top:8px"><div class="grow">Działki: <b>${used(L)} / ${slots(L, lid)}</b> <span class="mut small">· działka ${mL(land, lid)}</span></div>
+    ${L.x < t.maxX ? `<button class="btn s" data-a="expand" data-l="${lid}" ${!canL(lid, xCost(L, lid)) || !lic ? 'disabled' : ''}>+${t.step} dział${t.step > 1 ? 'ki' : 'ka'} — ${mL(xCost(L, lid), lid)}</button>` : '<span class="mut small">maks. działek</span>'}</div>
     <div class="row" style="margin-top:8px"><div class="grow">Garaż: ${L.gar ? `<b>poz. ${L.gar}</b> <span class="mut small">· ${garUsed(S, lid)}/${garCap(S, lid)} pojazdów</span>` : '<span class="mut">brak</span>'}</div>
-    ${L.gar ? `<button class="btn s" data-a="garUp" data-l="${lid}" ${S.cash < garUp(L) ? 'disabled' : ''}>Rozbuduj — ${money(garUp(L))}</button>`
-      : `<button class="btn s g" data-a="${lmapOn() ? 'garPick' : 'garage'}" data-l="${lid}" ${S.cash < GARAGE_COST + land || fr < 1 || !lic ? 'disabled' : ''}>Zbuduj — ${money(GARAGE_COST + land)}</button>`}</div>
+    ${L.gar ? `<button class="btn s" data-a="garUp" data-l="${lid}" ${!canL(lid, garUp(L)) ? 'disabled' : ''}>Rozbuduj — ${mL(garUp(L), lid)}</button>`
+      : `<button class="btn s g" data-a="${lmapOn() ? 'garPick' : 'garage'}" data-l="${lid}" ${!canL(lid, GARAGE_COST + land) || fr < 1 || !lic ? 'disabled' : ''}>Zbuduj — ${mL(GARAGE_COST + land, lid)}</button>`}</div>
     ${l.port ? `<div class="row" style="margin-top:8px"><div class="grow">Port: ${L.port ? '<b class="pos">czynny</b>' : '<span class="mut">brak</span>'}</div>
-      ${L.port ? '' : `<button class="btn s p" data-a="port" data-l="${lid}" ${S.cash < PORT_COST || !lic ? 'disabled' : ''}>Zbuduj — ${money(PORT_COST)}</button>`}</div>` : ''}</div>`;
+      ${L.port ? '' : `<button class="btn s p" data-a="port" data-l="${lid}" ${!canL(lid, PORT_COST) || !lic ? 'disabled' : ''}>Zbuduj — ${mL(PORT_COST, lid)}</button>`}</div>` : ''}</div>`;
   h += `<h2>Zakłady — ${l.n}</h2>`;
   if (!L.bld.length) h += `<div class="card mut">Brak zakładów. Zbuduj coś poniżej.</div>`;
   for (const b of L.bld) {
     const d = B[b.t], k = b.l * (1 + .08 * S.perk.prod), uc = upCost(b);
     h += `<div class="card"><div class="row"><div class="grow"><span class="tier t${d.t}">${TIER[d.t]}</span><span class="bname">${d.n}</span> <span class="mut">poz. ${b.l}</span></div></div>
       <div class="flow">${flowTxt(d, k, lid)}</div>${b.st ? `<div class="warn">${esc(b.st)}</div>` : ''}
-      <div class="btns"><button class="btn s g" data-a="up" data-l="${lid}" data-id="${b.id}" ${S.cash < uc ? 'disabled' : ''}>Ulepsz — ${money(uc)}</button>
+      <div class="btns"><button class="btn s g" data-a="up" data-l="${lid}" data-id="${b.id}" ${!canL(lid, uc) ? 'disabled' : ''}>Ulepsz — ${mL(uc, lid)}</button>
       ${lmapOn() ? `<button class="btn s" data-a="bMove" data-l="${lid}" data-id="${b.id}">Przenieś</button>` : ''}
-      <button class="btn s" data-a="demo" data-l="${lid}" data-id="${b.id}">Sprzedaj za ${money(bldValue(b))}</button></div></div>`;
+      <button class="btn s" data-a="demo" data-l="${lid}" data-id="${b.id}">Sprzedaj za ${mL(bldValue(b), lid)}</button></div></div>`;
   }
   h += `<h2>Nowa inwestycja ${fr < 1 ? '— brak wolnych działek' : `— wolne działki: ${fr}`}</h2>`;
   for (let ti = 0; ti < 3; ti++) {
     for (const [id, d] of Object.entries(B).filter(([, d]) => d.t === ti)) {
       const cost = d.cost + land, bon = d.in ? t.fac : t.raw;
       h += `<div class="card"><div class="row"><div class="grow"><span class="tier t${ti}">${TIER[ti]}</span><span class="bname">${d.n}</span>${bon > 1 ? ` <span class="pos small">+${Math.round((bon - 1) * 100)}%</span>` : ''}</div>
-        <button class="btn s p" data-a="${lmapOn() ? 'buildPick' : 'build'}" data-l="${lid}" data-b="${id}" ${S.cash < cost || fr < 1 || !lic ? 'disabled' : ''}>${money(cost)}</button></div>
+        <button class="btn s p" data-a="${lmapOn() ? 'buildPick' : 'build'}" data-l="${lid}" data-b="${id}" ${!canL(lid, cost) || fr < 1 || !lic ? 'disabled' : ''}>${mL(cost, lid)}</button></div>
         <div class="flow">${flowTxt(d, 1 + .08 * S.perk.prod, lid)}</div></div>`;
     }
   }
   return h;
 }
 
+// ===== KANTOR =====
+const fxTxt = (a, b) => { const r = rate(b) / rate(a); return `1 ${a} = ${r >= 100 ? Math.round(r).toLocaleString('pl-PL') : r.toFixed(r >= 1 ? 3 : 5).replace('.', ',')} ${b}`; };
+function exPreview() {
+  const e = ui.ex, a = parseFloat(String(e.amt).replace(',', '.')) || 0, got = a / rate(e.from) * rate(e.to) * (1 - SPREAD);
+  return a > 0 ? `Otrzymasz ≈ <b>${fmtC(got, e.to)}</b> · ${fxTxt(e.from, e.to)} · prowizja ${String(SPREAD * 100).replace('.', ',')}%` : `${fxTxt(e.from, e.to)} · prowizja ${String(SPREAD * 100).replace('.', ',')}%`;
+}
+function kantor() {
+  const hc = homeCur();
+  const ws = Object.keys(S.w).filter(c => c === hc || Math.abs(S.w[c]) >= .005).sort((a, b) => (b === hc) - (a === hc) || wal(S, b) / rate(b) - wal(S, a) / rate(a));
+  const need = [...new Set([...ws, ...Object.keys(S.lic || {}).map(curOfCC), ...Object.keys(S.L).map(curOf), 'EUR', 'USD', 'GBP', 'PLN', 'CHF'])];
+  const all = [...need, ...Object.keys(FX0).filter(c => !need.includes(c)).sort()];
+  const e = ui.ex || (ui.ex = { from: hc, to: need.find(c => c !== hc) || 'EUR', amt: '' });
+  if (!ws.includes(e.from)) e.from = ws[0];
+  if (e.to === e.from) e.to = all.find(c => c !== e.from);
+  const trend = c => { if (c === hc) return ''; const now = rate(hc) / rate(c), was = (FX0[hc] * ((S.fxp || {})[hc] || 1)) / (FX0[c] * ((S.fxp || {})[c] || 1)), ch = (now - was) / was * 100;
+    return `<span class="${ch >= 0 ? 'pos' : 'neg'} small">${ch >= 0 ? '▲' : '▼'} ${Math.abs(ch).toFixed(2).replace('.', ',')}%</span>`; };
+  return `<h2>Kantor i portfele</h2><div class="card">
+    ${ws.map(c => `<div class="row wallet"><div class="grow"><b>${fmtC(wal(S, c), c)}</b><div class="mut small">${esc(curName(c))}${c !== hc ? ' · ' + fxTxt(c, hc) : ' · waluta siedziby'}</div></div>
+      <div class="n">${c !== hc ? `≈ ${fmtC(wal(S, c) / rate(c) * rate(hc), hc)}<br>` : ''}${trend(c)}</div></div>`).join('')}
+    <div class="grid2" style="margin-top:10px"><div><label class="f">Z waluty</label><select data-in="exFrom">${ws.map(c => `<option value="${c}" ${c === e.from ? 'selected' : ''}>${c} · ${fmtC(wal(S, c), c)}</option>`).join('')}</select></div>
+      <div><label class="f">Na walutę</label><select data-in="exTo">${all.filter(c => c !== e.from).map(c => `<option value="${c}" ${c === e.to ? 'selected' : ''}>${c} — ${esc(curName(c))}</option>`).join('')}</select></div></div>
+    <label class="f" for="exA">Kwota (${e.from})</label><div class="row"><input id="exA" data-exa="1" type="number" inputmode="decimal" min="0" step="any" value="${esc(e.amt)}" placeholder="0"><button class="btn s" data-a="exMax">Max</button></div>
+    <div id="exOut" class="mut small" style="margin:8px 2px">${exPreview()}</div>
+    <div class="btns"><button class="btn p" data-a="exch">Wymień</button></div></div>`;
+}
 function vMagazyn() {
   const list = LOCS.filter(l => S.L[l.id]);
   if (!S.L[ui.ml]) ui.ml = S.L[S.hl] ? S.hl : list[0].id;
   const lid = ui.ml, L = S.L[lid], l = LOC[lid];
-  let h = locChips(list, lid, 'ml');
+  let h = kantor() + `<h2>Magazyny</h2>` + locChips(list, lid, 'ml');
   const items = Object.entries(L.inv).filter(([, q]) => q >= .05);
   h += `<h2>Magazyn — ${flag(l.cc)} ${l.n} · ceny ${l.t === 'm' ? '+5% (miasto)' : '−5% (wieś)'} · podatek ${Math.round(taxOf(lid) * 100)}%</h2><div class="card">`;
   if (!items.length && !Object.values(L.auto).some(Boolean)) h += `<div class="mut">Magazyn pusty.</div>`;
@@ -1099,10 +1173,10 @@ function vMagazyn() {
   for (const [g, q] of items) {
     const p = sellPrice(g, Math.max(q, 1)) * T(lid).sell * (1 - taxOf(lid));
     h += `<div style="padding:8px 0;border-bottom:1px solid var(--line)">
-      <div class="row"><div class="grow"><b>${G[g].n}</b> <span class="mut">· ${money(price(g) * T(lid).sell)}/szt.</span></div><div class="q"><b>${qty(q)}</b></div></div>
+      <div class="row"><div class="grow"><b>${G[g].n}</b> <span class="mut">· ${mL(price(g) * T(lid).sell, lid)}/szt.</span></div><div class="q"><b>${qty(q)}</b></div></div>
       <div class="btns">
         <button class="btn s g" data-a="sell" data-l="${lid}" data-g="${g}" data-f=".5" ${q < 1 ? 'disabled' : ''}>Sprzedaj ½</button>
-        <button class="btn s g" data-a="sell" data-l="${lid}" data-g="${g}" data-f="1" ${q < 1 ? 'disabled' : ''}>Wszystko ≈ ${money(p * Math.floor(q))}</button>
+        <button class="btn s g" data-a="sell" data-l="${lid}" data-g="${g}" data-f="1" ${q < 1 ? 'disabled' : ''}>Wszystko ≈ ${mL(p * Math.floor(q), lid)}</button>
         <button class="toggle ${L.auto[g] ? 'on' : ''}" data-a="auto" data-l="${lid}" data-g="${g}">Auto ${L.auto[g] ? 'wł.' : 'wył.'}</button>
       </div></div>`;
   }
@@ -1111,9 +1185,9 @@ function vMagazyn() {
   h += `<h2>Kup na rynku → ${l.n}</h2><div class="card"><div class="grid2">
     <div><label class="f" for="buyG">Towar</label><select id="buyG" data-in="buyG">${GK.map(g => `<option value="${g}" ${g === ui.buyG ? 'selected' : ''}>${G[g].n}</option>`).join('')}</select></div>
     <div><label class="f" for="buyQ">Ilość</label><input id="buyQ" data-in="buyQ" type="number" inputmode="numeric" min="1" value="${bq}"></div></div>
-    <div class="btns"><button class="btn p" data-a="buy" data-l="${lid}" ${bc > S.cash ? 'disabled' : ''}>Kup za ${money(bc)}</button><span class="mut small" style="align-self:center">marża rynku 15%</span></div></div>`;
+    <div class="btns"><button class="btn p" data-a="buy" data-l="${lid}" ${!canL(lid, bc) ? 'disabled' : ''}>Kup za ${mL(bc, lid)}</button><span class="mut small" style="align-self:center">marża rynku 15%</span></div></div>`;
   h += `<h2>Ceny rynkowe (ostatnie 2 dni)</h2><div class="card"><table><thead><tr><th>Towar</th><th class="n">Cena</th><th class="n">Zmiana</th><th></th></tr></thead><tbody>
-    ${GK.map(g => { const c = chg(g); return `<tr><td>${G[g].n}</td><td class="n">${money(price(g))}</td><td class="n ${c >= 0 ? 'pos' : 'neg'}">${c >= 0 ? '+' : ''}${c.toFixed(1).replace('.', ',')}%</td><td>${spark([...S.m[g].h, price(g)])}</td></tr>`; }).join('')}
+    ${GK.map(g => { const c = chg(g); return `<tr><td>${G[g].n}</td><td class="n">${mL(price(g), lid)}</td><td class="n ${c >= 0 ? 'pos' : 'neg'}">${c >= 0 ? '+' : ''}${c.toFixed(1).replace('.', ',')}%</td><td>${spark([...S.m[g].h, price(g)])}</td></tr>`; }).join('')}
     </tbody></table></div>`;
   return h;
 }
@@ -1130,7 +1204,7 @@ function sendForm(kind, u, dests, cap, hrsF, feeF) {
   return `<div class="grid2"><div><label class="f">Cel</label><select data-in="${kind}" data-s="${u.id}" data-k="to">${dests.map(d => `<option value="${d}" ${d === f.to ? 'selected' : ''}>${flag(LOC[d].cc)} ${LOC[d].n} · ${kmTxt(km(u.at, d))}</option>`).join('')}</select></div>
     <div><label class="f">Ładunek</label><select data-in="${kind}" data-s="${u.id}" data-k="g"><option value="">— pusty —</option>${goods.map(g => `<option value="${g}" ${g === f.g ? 'selected' : ''}>${G[g].n} (${qty(inv[g])})</option>`).join('')}</select></div></div>
     ${f.g ? `<label class="f">Ilość (max ${maxQ})</label><input type="number" inputmode="numeric" data-in="${kind}" data-s="${u.id}" data-k="q" value="${q}" min="0" max="${maxQ}">` : ''}
-    <div class="btns"><button class="btn p" data-a="${kind === 'sf' ? 'send' : 'drive'}" data-id="${u.id}" ${S.cash < fee ? 'disabled' : ''}>Wyślij · ${hrs} h · ${money(fee)}</button>${duty ? `<span class="mut small" style="align-self:center">w tym cło ${money(duty)} (${cName(LOC[u.at].cc)} → ${cName(LOC[f.to].cc)})</span>` : ''}</div>`;
+    <div class="btns"><button class="btn p" data-a="${kind === 'sf' ? 'send' : 'drive'}" data-id="${u.id}" ${!canL(u.at, fee) ? 'disabled' : ''}>Wyślij · ${hrs} h · ${mL(fee, u.at)}</button>${duty ? `<span class="mut small" style="align-self:center">w tym cło ${mL(duty, u.at)} (${cName(LOC[u.at].cc)} → ${cName(LOC[f.to].cc)})</span>` : ''}</div>`;
 }
 const NEAR = {};
 function vehDests(at) { // Twoje miejscowości na tym samym lądzie + 25 najbliższych
@@ -1152,8 +1226,8 @@ function vLogistyka() {
     h += `<div class="card"><div class="grid2">
       <div><label class="f">Garaż</label><select data-in="garAt">${gars.map(l => `<option value="${l}" ${l === ui.garAt ? 'selected' : ''}>${LOC[l].n} (${garUsed(S, l)}/${garCap(S, l)})</option>`).join('')}</select></div>
       <div><label class="f">Pojazd</label><select data-in="vehK">${Object.entries(VEH).map(([k, v]) => `<option value="${k}" ${k === ui.vehK ? 'selected' : ''}>${v.n}</option>`).join('')}</select></div></div>
-      <div class="flow">${vk.n}: ładowność ${vk.cap} szt. · ${vk.spd} km/h · paliwo ${String(vk.fuel).replace('.', ',')} $/km</div>
-      <div class="btns"><button class="btn p" data-a="veh" ${S.cash < vk.cost || full ? 'disabled' : ''}>${full ? 'Garaż pełny — rozbuduj' : `Kup — ${money(vk.cost)}`}</button></div></div>`;
+      <div class="flow">${vk.n}: ładowność ${vk.cap} szt. · ${vk.spd} km/h · paliwo ${mL(vk.fuel, ui.garAt)}/km</div>
+      <div class="btns"><button class="btn p" data-a="veh" ${!canL(ui.garAt, vk.cost) || full ? 'disabled' : ''}>${full ? 'Garaż pełny — rozbuduj' : `Kup — ${mL(vk.cost, ui.garAt)}`}</button></div></div>`;
   }
   for (const v of S.veh) {
     const k = VEH[v.k];
@@ -1171,7 +1245,7 @@ function vLogistyka() {
   const coast = Object.keys(S.L).map(id => LOC[id]).filter(l => l.port);
   h += `<h2>Porty</h2><div class="card">${coast.map(l => { const L = S.L[l.id];
     return `<div class="row" style="padding:6px 0"><div class="grow">${l.n} <span class="mut small">${CN[l.c].n}</span></div>${L && L.port ? '<span class="pos small">Port czynny</span>' :
-      `<button class="btn s p" data-a="port" data-l="${l.id}" ${S.cash < PORT_COST ? 'disabled' : ''}>Zbuduj — ${money(PORT_COST)}</button>`}</div>`; }).join('') ||
+      `<button class="btn s p" data-a="port" data-l="${l.id}" ${!canL(l.id, PORT_COST) ? 'disabled' : ''}>Zbuduj — ${mL(PORT_COST, l.id)}</button>`}</div>`; }).join('') ||
       '<div class="mut small">Port zbudujesz w miejscowości nad morzem (oznaczonej „Wybrzeże” w Budowie), w której masz zakład lub magazyn.</div>'}</div>`;
   // --- statki ---
   const ports = Object.keys(S.L).filter(l => S.L[l].port);
@@ -1179,7 +1253,7 @@ function vLogistyka() {
   if (ports.length) {
     if (!ports.includes(ui.shipAt)) ui.shipAt = ports[0];
     h += `<div class="card"><div class="row"><div class="grow"><select data-in="shipAt">${ports.map(l => `<option value="${l}" ${l === ui.shipAt ? 'selected' : ''}>Port: ${LOC[l].n}</option>`).join('')}</select></div>
-      <button class="btn p" data-a="ship" ${S.cash < SHIP_COST ? 'disabled' : ''}>Kup statek — ${money(SHIP_COST)}</button></div>
+      <button class="btn p" data-a="ship" ${!canL(ui.shipAt, SHIP_COST) ? 'disabled' : ''}>Kup statek — ${mL(SHIP_COST, ui.shipAt)}</button></div>
       <div class="mut small" style="margin-top:6px">Ładowność ${SHIP_CAP} szt. Port wymagany w obu miejscach.</div></div>`;
   } else h += `<div class="card mut">Zbuduj port, żeby kupić statek. Statki wożą towar między portami (inne kontynenty, wyspy).</div>`;
   for (const sh of S.ships) {
@@ -1200,7 +1274,7 @@ function vRanking() {
   const r = ranking(), day = Math.floor((S.hour % SEASON_H) / 24) + 1;
   let h = `<h2>Sezon ${S.season} · dzień ${day}/30 · nagrody: ${SEASON_PP.slice(0, 3).join(' / ')} pkt za podium</h2>
     <div class="card"><table><thead><tr><th>#</th><th>Firma</th><th class="n">Wartość</th></tr></thead><tbody>
-    ${r.map((x, i) => `<tr class="${x.me ? 'me' : ''}"><td>${i + 1}</td><td>${esc(x.n)}</td><td class="n">${money(x.w)}</td></tr>`).join('')}
+    ${r.map((x, i) => `<tr class="${x.me ? 'me' : ''}"><td>${i + 1}</td><td>${esc(x.n)}</td><td class="n">${mH(x.w)}</td></tr>`).join('')}
     </tbody></table></div>`;
   if (S.lastSeason) h += `<div class="card mut">Poprzedni sezon (${S.lastSeason.season}): miejsce ${S.lastSeason.pos}, +${S.lastSeason.pp} pkt prestiżu.</div>`;
   h += `<h2>Prestiż: ${S.pp} pkt do wydania</h2>`;
@@ -1215,13 +1289,13 @@ function vRanking() {
 const VIEWS = { firma: vFirma, budowa: vBudowa, magazyn: vMagazyn, logistyka: vLogistyka, ranking: vRanking };
 const RM = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
 function tweenCash() { // licznik gotówki płynnie dobija do wartości
-  const el = $('cash'), to = S.cash, from = ui.cashShown ?? to;
+  const el = $('cash'), hc = homeCur(), to = wal(S, hc), from = ui.cashShown ?? to;
   cancelAnimationFrame(ui.cashRaf);
-  if (RM || Math.abs(to - from) < 1) { ui.cashShown = to; el.textContent = money(to); return; }
+  if (RM || Math.abs(to - from) < 1) { ui.cashShown = to; el.textContent = fmtC(to, hc); return; }
   el.classList.remove('up', 'down'); void el.offsetWidth; el.classList.add(to > from ? 'up' : 'down');
   const t0 = performance.now(), step = t => {
     const k = Math.min(1, (t - t0) / 650), e = 1 - (1 - k) ** 3;
-    ui.cashShown = from + (to - from) * e; el.textContent = money(ui.cashShown);
+    ui.cashShown = from + (to - from) * e; el.textContent = fmtC(ui.cashShown, hc);
     if (k < 1) ui.cashRaf = requestAnimationFrame(step);
   };
   ui.cashRaf = requestAnimationFrame(step);
@@ -1231,8 +1305,9 @@ function renderTop() {
   document.documentElement.style.setProperty('--me', S.color);
   $('clock').textContent = tstr(S.hour) + ' · Sezon ' + S.season;
   tweenCash();
-  $('cash').style.color = S.cash < 0 ? 'var(--bad)' : '';
-  $('inc').textContent = (S.inc >= 0 ? '+' : '') + money(S.inc) + '/h';
+  $('cash').style.color = wal(S, homeCur()) < 0 ? 'var(--bad)' : '';
+  const nw = Object.keys(S.w || {}).filter(c => c !== homeCur() && Math.abs(S.w[c]) >= .5).length;
+  $('inc').textContent = (S.inc >= 0 ? '+' : '') + mH(S.inc) + '/h' + (nw ? ` · +${nw} wal.` : '');
   $('seasonFill').style.width = ((S.hour % SEASON_H) / SEASON_H * 100) + '%';
 }
 function render(force) {
@@ -1292,6 +1367,15 @@ function act(a, d) {
     case 'auGuest': try { localStorage.setItem('xyx_guest', '1'); } catch (e) {} SAVE_KEY = SAVE; startGame(load(SAVE) || newState()); return;
     case 'logout': try { localStorage.removeItem('xyx_guest'); } catch (e) {} logout(); return;
     case 'toLogin': try { localStorage.removeItem('xyx_guest'); } catch (e) {} save(); S = null; $('modal').hidden = true; $('wiz').hidden = true; au.mode = 'register'; renderAuth(); return;
+    case 'exMax': ui.ex.amt = String(Math.floor(Math.max(0, wal(S, ui.ex.from)) * 100) / 100); break;
+    case 'exch': {
+      const e = ui.ex, a = parseFloat(String(e.amt).replace(',', '.')) || 0;
+      if (a <= 0) { toast('Wpisz kwotę'); return; }
+      if (a > wal(S, e.from) + 1e-6) { toast(`Masz tylko ${fmtC(wal(S, e.from), e.from)}`); return; }
+      const got = a / rate(e.from) * rate(e.to) * (1 - SPREAD);
+      S.w[e.from] = wal(S, e.from) - a; S.w[e.to] = wal(S, e.to) + got; e.amt = '';
+      toast(`Wymieniono ${fmtC(a, e.from)} → ${fmtC(got, e.to)}`); break;
+    }
     case 'placeMode': if (!isAdmin()) return; ui.place = true; toast('Dotknij mapy, gdzie ma powstać miejscowość'); break;
     case 'placeOff': ui.place = false; break;
     case 'npSet': ui.np.t = d.v; foundSheet(); return;
@@ -1331,8 +1415,8 @@ function act(a, d) {
       if (!n) { $('npErr').textContent = 'Wpisz nazwę.'; return; }
       if (LOCS.some(l => l.c === p.c && norm(l.n) === norm(n))) { $('npErr').textContent = 'Taka miejscowość już istnieje.'; return; }
       if (p.adm) { adminAdd({ n, c: p.c, t: p.t, la: p.la, lo: p.lo, port: p.port ? 1 : 0, ld: p.ld, pop: Math.max(0, Math.round(+p.pop || 0)) }); return; }
-      if (S.cash < FOUND[p.t]) return;
-      S.cash -= FOUND[p.t];
+      if (!canC(S, homeCur(), FOUND[p.t])) return;
+      payC(S, homeCur(), FOUND[p.t]);
       const id = 'u' + S.nid++;
       S.custom.push({ id, c: p.c, n, t: p.t, la: p.la, lo: p.lo, port: p.port ? 1 : 0, ld: p.ld });
       registerCustom(S); ensureL(S, id); ui.bl = id; ui.place = false; ui.np = null; $('modal').hidden = true;
@@ -1347,8 +1431,8 @@ function act(a, d) {
     case 'ml': ui.ml = d.l; break;
     case 'goBuild': ui.bc = d.c; ui.tab = 'budowa'; break;
     case 'lic': {
-      const c = licCost(d.cc); if (S.lic[d.cc] || S.cash < c) return;
-      S.cash -= c; S.lic[d.cc] = true; S.c[LOC[ui.bl].c] = {}; addNews(S, `Licencja: ${cName(d.cc)}`); toast(`${flag(d.cc)} Licencja na ${cName(d.cc)}!`); break;
+      const c = licCost(d.cc), cu = curOfCC(d.cc); if (S.lic[d.cc] || !canC(S, cu, c)) return;
+      payC(S, cu, c); S.lic[d.cc] = true; S.c[LOC[ui.bl].c] = {}; addNews(S, `Licencja: ${cName(d.cc)}`); toast(`${flag(d.cc)} Licencja na ${cName(d.cc)}!`); break;
     }
     case 'buildPick': case 'garPick':
       ui.placeB = a === 'garPick' ? { k: 'g', lid: d.l } : { k: 'b', lid: d.l, b: d.b }; ui.flyB = d.l; window.scrollTo({ top: 0, behavior: 'smooth' }); break;
@@ -1357,54 +1441,54 @@ function act(a, d) {
     case 'pbOff': ui.placeB = null; break;
     case 'pbAuto': { const p = ui.placeB; ui.placeB = null; if (!p) break; act(p.k === 'g' ? 'garage' : 'build', { l: p.lid, b: p.b }); return; }
     case 'build': {
-      const def = B[d.b], ld = landOf(d.l), cost = def.cost + ld; if (!hasLic(d.l) || S.cash < cost || free(S, d.l) < 1) return;
+      const def = B[d.b], ld = landOf(d.l), cost = def.cost + ld; if (!hasLic(d.l) || !canL(d.l, cost) || free(S, d.l) < 1) return;
       const id = S.nid++, b = { id, t: d.b, l: 1, st: '', land: ld };
       if (isFinite(d.la) && isFinite(d.lo)) { b.la = +d.la; b.lo = +d.lo; } else posOf(d.l, b);
-      S.cash -= cost; ensureL(S, d.l).bld.push(b); toast(`${def.n} — ${LOC[d.l].n}`); break;
+      payC(S, curOf(d.l), cost); ensureL(S, d.l).bld.push(b); toast(`${def.n} — ${LOC[d.l].n}`); break;
     }
     case 'up': {
-      const b = S.L[d.l].bld.find(x => x.id == d.id), c = upCost(b); if (S.cash < c) return;
-      S.cash -= c; b.l++; toast(`${B[b.t].n}: poziom ${b.l}`); break;
+      const b = S.L[d.l].bld.find(x => x.id == d.id), c = upCost(b); if (!canL(d.l, c)) return;
+      payC(S, curOf(d.l), c); b.l++; toast(`${B[b.t].n}: poziom ${b.l}`); break;
     }
     case 'demo': {
       const L = S.L[d.l], i = L.bld.findIndex(x => x.id == d.id); if (i < 0) return;
-      S.cash += bldValue(L.bld[i]); L.bld.splice(i, 1); break;
+      earnC(S, curOf(d.l), bldValue(L.bld[i])); L.bld.splice(i, 1); break;
     }
     case 'expand': {
-      const L = ensureL(S, d.l), c = xCost(L, d.l); if (S.cash < c || L.x >= T(d.l).maxX) return;
-      S.cash -= c; L.x++; toast(`${LOC[d.l].n}: nowe działki`); break;
+      const L = ensureL(S, d.l), c = xCost(L, d.l); if (!canL(d.l, c) || L.x >= T(d.l).maxX) return;
+      payC(S, curOf(d.l), c); L.x++; toast(`${LOC[d.l].n}: nowe działki`); break;
     }
     case 'garage': {
-      const c = GARAGE_COST + landOf(d.l); if (!hasLic(d.l) || S.cash < c || free(S, d.l) < 1) return;
-      S.cash -= c; const GL = ensureL(S, d.l); GL.gar = 1; GL.gpos = isFinite(d.la) && isFinite(d.lo) ? [+d.la, +d.lo] : autoPos(d.l, 'gar'); ui.garAt = d.l; toast(`Garaż — ${LOC[d.l].n}`); break;
+      const c = GARAGE_COST + landOf(d.l); if (!hasLic(d.l) || !canL(d.l, c) || free(S, d.l) < 1) return;
+      payC(S, curOf(d.l), c); const GL = ensureL(S, d.l); GL.gar = 1; GL.gpos = isFinite(d.la) && isFinite(d.lo) ? [+d.la, +d.lo] : autoPos(d.l, 'gar'); ui.garAt = d.l; toast(`Garaż — ${LOC[d.l].n}`); break;
     }
-    case 'garUp': { const L = S.L[d.l], c = garUp(L); if (S.cash < c) return; S.cash -= c; L.gar++; toast(`Garaż poz. ${L.gar}`); break; }
+    case 'garUp': { const L = S.L[d.l], c = garUp(L); if (!canL(d.l, c)) return; payC(S, curOf(d.l), c); L.gar++; toast(`Garaż poz. ${L.gar}`); break; }
     case 'veh': {
-      const k = VEH[ui.vehK]; if (!k || !ui.garAt || S.cash < k.cost || garUsed(S, ui.garAt) >= garCap(S, ui.garAt)) return;
-      S.cash -= k.cost; S.veh.push({ id: S.nid++, k: ui.vehK, home: ui.garAt, at: ui.garAt, st: 'idle', from: null, to: null, g: null, q: 0, eta: 0, dur: 1 });
+      const k = VEH[ui.vehK]; if (!k || !ui.garAt || !canL(ui.garAt, k.cost) || garUsed(S, ui.garAt) >= garCap(S, ui.garAt)) return;
+      payC(S, curOf(ui.garAt), k.cost); S.veh.push({ id: S.nid++, k: ui.vehK, home: ui.garAt, at: ui.garAt, st: 'idle', from: null, to: null, g: null, q: 0, eta: 0, dur: 1 });
       toast(`${k.n} w garażu: ${LOC[ui.garAt].n}`); break;
     }
     case 'sell': {
       const q = Math.floor((S.L[d.l].inv[d.g] || 0) * +d.f); const r = sell(S, d.l, d.g, q);
-      if (r) toast(`Sprzedano ${qty(q)} ${G[d.g].n} za ${money(r)}`); break;
+      if (r) toast(`Sprzedano ${qty(q)} ${G[d.g].n} za ${mL(r, d.l)}`); break;
     }
     case 'auto': { const L = S.L[d.l]; L.auto[d.g] = !L.auto[d.g]; if (!L.auto[d.g]) delete L.auto[d.g]; break; }
     case 'buy': {
       const q = Math.max(1, Math.floor(ui.buyQ) || 1), c = buy(S, d.l, ui.buyG, q);
-      toast(c ? `Kupiono ${q} ${G[ui.buyG].n} za ${money(c)}` : 'Za mało gotówki'); break;
+      toast(c ? `Kupiono ${q} ${G[ui.buyG].n} za ${mL(c, d.l)}` : `Za mało ${curOf(d.l)} — wymień w kantorze`); break;
     }
-    case 'port': if (S.cash < PORT_COST || !hasLic(d.l)) return; S.cash -= PORT_COST; ensureL(S, d.l).port = true; addNews(S, `Port otwarty: ${LOC[d.l].n}`); break;
+    case 'port': if (!canL(d.l, PORT_COST) || !hasLic(d.l)) return; payC(S, curOf(d.l), PORT_COST); ensureL(S, d.l).port = true; addNews(S, `Port otwarty: ${LOC[d.l].n}`); break;
     case 'ship':
-      if (S.cash < SHIP_COST || !ui.shipAt) return;
-      S.cash -= SHIP_COST; S.ships.push({ id: S.nid++, st: 'idle', at: ui.shipAt, to: null, from: null, g: null, q: 0, eta: 0, dur: 1 }); toast('Nowy statek w porcie'); break;
+      if (!ui.shipAt || !canL(ui.shipAt, SHIP_COST)) return;
+      payC(S, curOf(ui.shipAt), SHIP_COST); S.ships.push({ id: S.nid++, st: 'idle', at: ui.shipAt, to: null, from: null, g: null, q: 0, eta: 0, dur: 1 }); toast('Nowy statek w porcie'); break;
     case 'send': case 'drive': {
       const isShip = a === 'send', list = isShip ? S.ships : S.veh, u = list.find(x => x.id == d.id);
       const f = (isShip ? ui.sf : ui.vf)[d.id] || {}; if (!u || u.st !== 'idle' || !f.to) return;
       const cap = isShip ? SHIP_CAP : VEH[u.k].cap, inv = ensureL(S, u.at).inv;
       const q = f.g ? clamp(Math.floor(f.q ?? Math.min(cap, inv[f.g] || 0)), 0, Math.min(cap, Math.floor(inv[f.g] || 0))) : 0;
-      const duty = dutyOf(u.at, f.to, f.g, q), fee = (isShip ? shipFee(u.at, f.to, q) : vehFee(u.k, u.at, f.to)) + duty; if (S.cash < fee) return;
-      if (duty) addNews(S, `Cło ${money(duty)}: ${cName(LOC[u.at].cc)} → ${cName(LOC[f.to].cc)}`);
-      S.cash -= fee;
+      const duty = dutyOf(u.at, f.to, f.g, q), fee = (isShip ? shipFee(u.at, f.to, q) : vehFee(u.k, u.at, f.to)) + duty; if (!canL(u.at, fee)) return;
+      if (duty) addNews(S, `Cło ${mL(duty, u.at)}: ${cName(LOC[u.at].cc)} → ${cName(LOC[f.to].cc)}`);
+      payC(S, curOf(u.at), fee);
       if (q) { inv[f.g] -= q; if (inv[f.g] < 1e-6) delete inv[f.g]; }
       const dur = isShip ? shipHours(S, u.at, f.to) : vehHours(S, u.k, u.at, f.to);
       Object.assign(u, { st: isShip ? 'sail' : 'go', from: u.at, to: f.to, g: q ? f.g : null, q, eta: S.hour + dur, dur });
@@ -1415,7 +1499,7 @@ function act(a, d) {
     case 'close': $('modal').hidden = true; return;
     case 'name': { const v = $('nm').value.trim().slice(0, 24), c = $('ceo').value.trim().slice(0, 20); if (v) S.name = v; S.ceo = c; $('modal').hidden = true; break; }
     case 'tutAgain': S.tut.step = 0; ui.tab = 'firma'; $('modal').hidden = true; break;
-    case 'tutNext': { const st = TUT[S.tut.step]; if (st && st.fin && !S.tut.rew) { S.tut.rew = true; S.cash += 5000; toast('+$5 tys. za samouczek'); } S.tut.step++; break; }
+    case 'tutNext': { const st = TUT[S.tut.step]; if (st && st.fin && !S.tut.rew) { S.tut.rew = true; earnC(S, homeCur(), 5000); toast(`+${mH(5000)} za samouczek`); } S.tut.step++; break; }
     case 'tutSkip': S.tut.step = TUT.length; break;
     case 'wzSet':
       if (d.k === 'hq') { wz.hq = d.v; wz.hl = ''; wz.cc = ''; wz.rg = null; wz.lvl = 'ctry'; wz.q = ''; }
@@ -1466,6 +1550,8 @@ document.addEventListener('change', e => {
   else if (k === 'buyQ') ui.buyQ = +t.value;
   else if (k === 'shipAt') ui.shipAt = t.value;
   else if (k === 'garAt') ui.garAt = t.value;
+  else if (k === 'exFrom') { ui.ex.from = t.value; ui.ex.amt = ''; }
+  else if (k === 'exTo') ui.ex.to = t.value;
   else if (k === 'bcc') { const cid = ui.bc, ls = BYC[cid].filter(l => l.cc === t.value); const own = ls.find(l => S.L[l.id]); ui.bl = (own || ls[0]).id; ui.rgSel = false; fitTo(ls); }
   else if (k === 'brg') { const cid = ui.bc, cc = LOC[ui.bl].cc;
     const ls = t.value === '' ? BYC[cid].filter(l => l.cc === cc) : BYC[cid].filter(l => l.rg === +t.value);
@@ -1580,7 +1666,7 @@ function cloudSave(now) {
     DB.collection('bld').doc(USER.uid).set({ uid: USER.uid, name: S.name, ceo: S.ceo, color: S.color, worth: Math.round(worth()), ts: now, items }).catch(() => {});
     // podsumowanie dla panelu admina (bez całego zapisu)
     DB.collection('stats').doc(USER.uid).set({ uid: USER.uid, email: USER.email || '', name: S.name, ceo: S.ceo, color: S.color, hq: S.hq, hl: S.hl, diff: S.diff ?? 1,
-      worth: Math.round(worth()), cash: Math.round(S.cash), inc: Math.round(S.inc), hour: S.hour, season: S.season, pp: S.pp,
+      worth: Math.round(worth()), cash: Math.round(totUSD(S)), inc: Math.round(S.inc), hour: S.hour, season: S.season, pp: S.pp,
       bld: Ls.reduce((a, L) => a + L.bld.length, 0), lvl: Ls.reduce((a, L) => a + L.bld.reduce((x, b) => x + b.l, 0), 0), locs: Object.keys(S.L).length,
       ports: Ls.filter(L => L.port).length, lic: Object.keys(S.lic || {}).length, veh: S.veh.length, ships: S.ships.length, conts: Object.keys(S.c).length,
       created: S.created, updated: now, ver: VERSION, plat: window.Capacitor && Capacitor.isNativePlatform && Capacitor.isNativePlatform() ? 'android' : 'web' }, { merge: true }).catch(() => {});
@@ -1685,9 +1771,9 @@ function startGame(s) {
   if (S.setup) {
     const off = Math.min(OFFLINE_MAX_H, Math.floor((Date.now() - (S.last || Date.now())) / HOUR_MS));
     if (off > 0) {
-      const c0 = S.cash;
+      const c0 = totUSD(S);
       for (let i = 0; i < off; i++) hour(S);
-      setTimeout(() => toast(`Offline minęło ${off} h gry · ${S.cash - c0 >= 0 ? '+' : ''}${money(S.cash - c0)}`), 400);
+      setTimeout(() => toast(`Offline minęło ${off} h gry · ${totUSD(S) - c0 >= 0 ? '+' : ''}${mH(totUSD(S) - c0)}`), 400);
     }
   }
   acc = 0; prev = performance.now();
@@ -1884,7 +1970,7 @@ document.addEventListener('visibilitychange', () => {
     acc = 0; prev = performance.now(); save(); render(true);
   }
 });
-if (VERSION === 'dev') window.__xyx = { get S() { return S; }, get LM() { return LM; }, hour: n => { for (let i = 0; i < n; i++) hour(S); render(true); } };
+if (VERSION === 'dev') window.__xyx = { get S() { return S; }, get LM() { return LM; }, parseSave, newState, LOCS, hour: n => { for (let i = 0; i < n; i++) hour(S); render(true); } };
 registerCustom(null);
 if (FB) { au.mode = 'wait'; renderAuth(); firebase.auth().onAuthStateChanged(onUser); listenPlaces(); listenBld(); }
 else if (localStorage.getItem('xyx_guest') === '1') startGame(load(SAVE) || newState());
