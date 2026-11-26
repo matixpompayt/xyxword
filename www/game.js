@@ -21,7 +21,7 @@ const CONT = [
 const CN = Object.fromEntries(CONT.map(c => [c.id, c]));
 
 // Miejscowości: t: 'm' miasto / 'w' wieś, la/lo: współrzędne, port: wybrzeże, ld: ląd (ciężarówki jeżdżą tylko po tym samym lądzie)
-const LOCS = [
+const LOCS_BASE = [
   ['hamburg', 'eu', 'Hamburg', 'm', 53.55, 9.99, 1], ['berlin', 'eu', 'Berlin', 'm', 52.52, 13.40], ['warszawa', 'eu', 'Warszawa', 'm', 52.23, 21.01],
   ['szczecin', 'eu', 'Szczecin', 'm', 53.43, 14.55, 1], ['debno', 'eu', 'Dębno', 'w', 52.74, 14.70], ['oberstdorf', 'eu', 'Oberstdorf', 'w', 47.41, 10.28],
   ['londyn', 'eu', 'Londyn', 'm', 51.51, -0.13, 1, 'gb'], ['paryz', 'eu', 'Paryż', 'm', 48.86, 2.35], ['rotterdam', 'eu', 'Rotterdam', 'm', 51.92, 4.48, 1],
@@ -41,7 +41,10 @@ const LOCS = [
   ['mumbaj', 'as', 'Mumbaj', 'm', 19.08, 72.88, 1], ['seul', 'as', 'Seul', 'm', 37.57, 126.98], ['ordos', 'as', 'Ordos', 'w', 39.60, 109.78],
   ['sydney', 'au', 'Sydney', 'm', -33.87, 151.21, 1], ['melbourne', 'au', 'Melbourne', 'm', -37.81, 144.96, 1], ['perth', 'au', 'Perth', 'm', -31.95, 115.86, 1],
   ['brisbane', 'au', 'Brisbane', 'm', -27.47, 153.03, 1], ['kalgoorlie', 'au', 'Kalgoorlie', 'w', -30.75, 121.47], ['dubbo', 'au', 'Dubbo', 'w', -32.25, 148.60],
-].map(([id, c, n, t, la, lo, port, ld]) => ({ id, c, n, t, la, lo, port: !!port, ld: ld || c }));
+];
+// pełna lista miejscowości generowana przez tools/build-maps.mjs (www/places.js); LOCS_BASE = polecane miejsca startowe
+const LOCS = (window.XYX_PLACES || LOCS_BASE).map(([id, c, n, t, la, lo, port, ld, pop, f]) =>
+  ({ id, c, n, t, la, lo, port: !!port, ld: ld || c, pop: pop || 0, f: window.XYX_PLACES ? !!f : true }));
 const LOC = Object.fromEntries(LOCS.map(l => [l.id, l]));
 const CAP = { eu: 'hamburg', na: 'nowyjork', sa: 'rio', af: 'lagos', as: 'szanghaj', au: 'sydney' };
 const TYPE = {
@@ -111,11 +114,15 @@ function fmt(n) {
 }
 const money = n => (n < 0 ? '−$' : '$') + fmt(Math.abs(n));
 const qty = n => n >= 100 ? Math.floor(n).toLocaleString('pl-PL') : (Math.floor(n * 10) / 10).toString().replace('.', ',');
-function km(a, b) {
-  const A = LOC[a], B = LOC[b], r = Math.PI / 180;
-  const h = Math.sin((B.la - A.la) * r / 2) ** 2 + Math.cos(A.la * r) * Math.cos(B.la * r) * Math.sin((B.lo - A.lo) * r / 2) ** 2;
+function kmLL(la1, lo1, la2, lo2) {
+  const r = Math.PI / 180;
+  const h = Math.sin((la2 - la1) * r / 2) ** 2 + Math.cos(la1 * r) * Math.cos(la2 * r) * Math.sin((lo2 - lo1) * r / 2) ** 2;
   return 2 * 6371 * Math.asin(Math.sqrt(h));
 }
+function km(a, b) { const A = LOC[a], B = LOC[b]; return kmLL(A.la, A.lo, B.la, B.lo); }
+const norm = t => t.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/ł/g, 'l');
+const popTxt = p => p >= 1e6 ? (p / 1e6).toFixed(1).replace('.', ',') + ' mln' : p >= 1000 ? Math.round(p / 1000) + ' tys.' : String(p);
+const FOUND = { w: 10000, m: 60000 };
 const kmTxt = k => Math.round(k).toLocaleString('pl-PL') + ' km';
 const SC = g => 3000 / Math.sqrt(G[g].p);  // skala nasycenia rynku
 
@@ -141,7 +148,7 @@ function newState(o = {}) {
   const s = {
     v: 2, setup: !!o.done, ceo: o.ceo || '', name: o.name || 'Moja Firma', color: o.color || COLORS[0], hq, hl, diff,
     cash, hour: 0, last: Date.now(),
-    c: { [hq]: {} }, L: { [hl]: newLoc() }, ships: [], veh: [], nid: 1, m, ai: mkAI(cash, diff),
+    c: { [hq]: {} }, L: { [hl]: newLoc() }, ships: [], veh: [], custom: [], nid: 1, m, ai: mkAI(cash, diff),
     season: 1, pp: 0, perk: { prod: 0, upk: 0, ship: 0, sell: 0 }, ev: [],
     news: [], inc: 0, upk: 0, lastSeason: null, tut: { step: o.tut === false ? 99 : 0, sold: false, rew: false },
   };
@@ -154,7 +161,7 @@ function migrate(s) {
   if (s.setup === undefined) s.setup = true;
   s.hq = s.hq || 'eu'; s.color = s.color || COLORS[0]; s.diff = s.diff ?? 1; s.ceo = s.ceo || '';
   s.tut = s.tut || { step: 99, sold: true, rew: true };
-  s.L = {}; s.veh = [];
+  s.L = {}; s.veh = []; s.custom = [];
   const nc = {};
   for (const cid in s.c) {
     const br = s.c[cid], lid = CAP[cid], L = newLoc();
@@ -174,7 +181,7 @@ function load() {
     const raw = localStorage.getItem(SAVE);
     if (raw) {
       const s = JSON.parse(raw);
-      if (s && s.v === 2) return s;
+      if (s && s.v === 2) { s.custom = s.custom || []; return s; }
       if (s && s.v === 1) return migrate(s);
     }
   } catch (e) {}
@@ -333,9 +340,9 @@ const TUT = [
   { t: 'Witaj, prezesie!', d: () => `${esc(S.name)} startuje w: ${LOC[S.hl].n} (${CN[S.hq].n}). Cel gry: zarabiać, budować coraz bardziej zaawansowane łańcuchy produkcji i wygrać sezon w rankingu. Pokażę Ci podstawy w kilku krokach.`, next: true },
   { t: 'Zakładka Budowa', d: 'Zakłady stawiasz w zakładce Budowa, na działkach w miastach i wsiach. Otwórz ją.', sel: () => ['[data-tab=budowa]'], done: () => ui.tab === 'budowa' },
   { t: 'Pierwsza farma', d: () => `Farma produkuje zboże — najtańszy surowiec. Zbuduj ją w: ${LOC[S.hl].n}. Cena = budynek + działka.`,
-    sel: () => ['[data-a=build][data-b=farma]', `[data-a=bl][data-l=${S.hl}]`, '[data-tab=budowa]'], done: () => hasB('farma') },
+    sel: () => ['[data-a=build][data-b=farma]', `.chips [data-a=bl][data-l=${S.hl}]`, '[data-tab=budowa]'], done: () => hasB('farma') },
   { t: 'Młyn', d: 'Młyn przerabia 10 zboża na 8 mąki, a mąka jest ponad 3× droższa. Tak działają łańcuchy produkcji. Zbuduj Młyn w tej samej miejscowości.',
-    sel: () => ['[data-a=build][data-b=mlyn]', `[data-a=bl][data-l=${S.hl}]`, '[data-tab=budowa]'], done: () => hasB('mlyn') },
+    sel: () => ['[data-a=build][data-b=mlyn]', `.chips [data-a=bl][data-l=${S.hl}]`, '[data-tab=budowa]'], done: () => hasB('mlyn') },
   { t: 'Produkcja trwa', d: () => `Zakłady pracują same: 1 godzina gry = 4 s. Każdy ma też koszt utrzymania co godzinę. Poczekaj na mąkę: ${qty(Math.min(5, hqInv('maka')))} / 5.`,
     done: () => hqInv('maka') >= 5 || S.tut.sold },
   { t: 'Rynek', d: 'Mąka gotowa! Otwórz zakładkę Rynek.', sel: () => ['[data-tab=magazyn]'], done: () => ui.tab === 'magazyn' },
@@ -393,7 +400,7 @@ function renderWiz() {
     b = `<h1>Siedziba firmy</h1><p class="mut">Wybierz kontynent i miejscowość startową. Inne miejsca otworzysz później.</p>
       <div class="chips">${CONT.map(c => `<button class="${wz.hq === c.id ? 'on' : ''}" data-a="wzSet" data-k="hq" data-v="${c.id}">${c.n}</button>`).join('')}</div>
       <div class="mut small" style="margin:0 2px 8px">Bonusy surowców: ${bonTxt(CN[wz.hq])}</div>
-      ${LOCS.filter(l => l.c === wz.hq).map(l => `<button class="wz-opt ${wz.hl === l.id ? 'on' : ''}" data-a="wzSet" data-k="hl" data-v="${l.id}">
+      ${LOCS.filter(l => l.c === wz.hq && l.f).map(l => `<button class="wz-opt ${wz.hl === l.id ? 'on' : ''}" data-a="wzSet" data-k="hl" data-v="${l.id}">
         <b>${l.n} <span class="ltag ${l.t}">${TYPE[l.t].n}</span>${l.port ? ' <span class="ltag p">Port</span>' : ''}</b><span>${TYPE[l.t].d}</span></button>`).join('')}`;
   } else if (wz.step === 2) {
     b = `<h1>Styl i trudność</h1><label class="f">Kolor firmy</label><div class="sw">${COLORS.map(c => `<button class="${wz.color === c ? 'on' : ''}" style="background:${c}" data-a="wzSet" data-k="color" data-v="${c}" aria-label="Kolor ${c}"></button>`).join('')}</div>
@@ -408,7 +415,11 @@ function renderWiz() {
   el.innerHTML = `<div class="wz-in"><div class="wz-dots">${dots}</div>${b}
     <div class="btns wz-nav">${wz.step ? '<button class="btn" data-a="wzBack">Wstecz</button>' : ''}<button class="btn p grow" data-a="wzNext">${wz.step === 3 ? 'Rozpocznij grę' : 'Dalej'}</button></div></div>`;
 }
-document.addEventListener('input', e => { const k = e.target.dataset.wz; if (k) wz[k] = e.target.value; });
+document.addEventListener('input', e => {
+  const t = e.target, k = t.dataset.wz; if (k) wz[k] = t.value;
+  if (t.dataset.q) { ui.locQ = t.value; const r = $('locRes'); if (r) r.innerHTML = locRes(ui.bc, ui.bl); }
+  if (t.dataset.np && ui.np) ui.np.n = t.value;
+});
 
 // ================== RENDER ==================
 function spark(h) {
@@ -483,7 +494,13 @@ function mapSvg() {
   return `<div class="map"><svg viewBox="0 0 ${m.w} ${m.h}">${mapBase(m, 'w')}${lines}${dots}</svg></div>`;
 }
 // mapa kontynentu z miejscowościami i jadącymi pojazdami; zoom/przesuwanie: ui.z[cid]
-const zOf = cid => ui.z[cid] || (ui.z[cid] = { k: 1, x: 0, y: 0 });
+function zOf(cid) {
+  if (ui.z[cid]) return ui.z[cid];
+  ui.z[cid] = { k: 1, x: 0, y: 0 };
+  const p = MAPS[cid] && MAPS[cid].pts[ui.bl];
+  if (p && LOC[ui.bl] && LOC[ui.bl].c === cid && cid === 'eu') zoomAt(cid, 3, p[0], p[1]);
+  return ui.z[cid];
+}
 function clampZ(cid) {
   const z = zOf(cid), m = MAPS[cid];
   z.k = clamp(z.k, 1, 12); z.x = clamp(z.x, 0, m.w - m.w / z.k); z.y = clamp(z.y, 0, m.h - m.h / z.k);
@@ -506,8 +523,8 @@ function locMap(cid, sel) {
   // etykiety: najpierw wybrana i Twoje, potem miasta, potem wsie; nachodzące się chowamy
   const fs = 28 * u, boxes = [], lab = {};
   const hit = b => boxes.some(o => b[0] < o[2] && b[2] > o[0] && b[1] < o[3] && b[3] > o[1]);
-  const order = [...ls].sort((a, b) => (b.id === sel) - (a.id === sel) || own(b) - own(a) || (a.t === 'm' ? -1 : 1) - (b.t === 'm' ? -1 : 1));
-  for (const l of ls) { const [x, y] = P(l); boxes.push([x - 12 * u, y - 12 * u, x + 12 * u, y + 12 * u]); }
+  const order = [...ls].sort((a, b) => (b.id === sel) - (a.id === sel) || own(b) - own(a) || !!b.u - !!a.u || (a.t === 'm' ? -1 : 1) - (b.t === 'm' ? -1 : 1) || b.pop - a.pop);
+  for (const l of ls) { const [x, y] = P(l), q = (l.t === 'm' ? 8 : 6) * u; boxes.push([x - q, y - q, x + q, y + q]); }
   for (const l of order) {
     const [x, y] = P(l), w = l.n.length * fs * .56, d = 16 * u;
     const opts = [[x, y + d + fs * .8, 'middle', x - w / 2, y + d, x + w / 2, y + d + fs], [x, y - d - fs * .2, 'middle', x - w / 2, y - d - fs, x + w / 2, y - d],
@@ -516,16 +533,16 @@ function locMap(cid, sel) {
     if (o) { boxes.push(o.slice(3)); lab[l.id] = o; }
   }
   for (const l of ls) {
-    const [x, y] = P(l), L = S.L[l.id], mine = own(l), on = l.id === sel, lb = lab[l.id], r = (l.t === 'm' ? 11 : 9) * u;
+    const [x, y] = P(l), L = S.L[l.id], mine = own(l), on = l.id === sel, lb = lab[l.id], r = ((l.t === 'm' ? 8 : 5.5) + (mine || on ? 3 : 0)) * u;
     const fill = mine ? S.color : (l.t === 'm' ? '#56677a' : '#4b6a4e');
     const shape = l.t === 'm' ? `<rect x="${x - r}" y="${y - r}" width="${2 * r}" height="${2 * r}" rx="${3 * u}"` : `<circle cx="${x}" cy="${y}" r="${r}"`;
-    g += `<g data-a="bl" data-l="${l.id}" data-from-map="1" style="cursor:pointer"><circle cx="${x}" cy="${y}" r="${24 * u}" fill="transparent"/>
+    g += `<g data-a="bl" data-l="${l.id}" data-from-map="1" style="cursor:pointer"><circle cx="${x}" cy="${y}" r="${16 * u}" fill="transparent"/>
       ${on ? `<circle cx="${x}" cy="${y}" r="${19 * u}" fill="none" stroke="#e0823f" stroke-width="2.5" vector-effect="non-scaling-stroke"/>` : ''}
       ${shape} fill="${fill}" stroke="${mine ? '#fff' : '#0b131b'}" stroke-width="1.5" vector-effect="non-scaling-stroke"/>
       ${L && L.port ? `<rect x="${x + 7 * u}" y="${y - 17 * u}" width="${10 * u}" height="${10 * u}" rx="${2 * u}" fill="#4aa3ff" stroke="#0b131b" stroke-width="1" vector-effect="non-scaling-stroke"/>` : ''}
       ${lb ? `<text x="${lb[0]}" y="${lb[1]}" text-anchor="${lb[2]}" font-size="${fs}" font-weight="${on || mine ? 700 : 500}" fill="${on ? '#fff' : mine ? '#eef0f3' : '#b4bcc6'}" class="lbl" style="stroke-width:${7 * u}px">${l.n}</text>` : ''}</g>`;
   }
-  return `<div class="map lmap" data-cid="${cid}" style="--ar:${m.w}/${m.h}"><svg viewBox="${z.x} ${z.y} ${m.w / z.k} ${m.h / z.k}" preserveAspectRatio="xMidYMid meet" class="${z.k > 1 ? 'zoomed' : ''}">${mapBase(m, cid)}${g}</svg>
+  return `<div class="map lmap${ui.place ? ' placing' : ''}" data-cid="${cid}" style="--ar:${m.w}/${m.h}"><svg viewBox="${z.x} ${z.y} ${m.w / z.k} ${m.h / z.k}" preserveAspectRatio="xMidYMid meet" class="${z.k > 1 ? 'zoomed' : ''}">${mapBase(m, cid)}${g}</svg>
     <div class="zbtn"><button data-a="zoom" data-z="1" aria-label="Przybliż">+</button><button data-a="zoom" data-z="-1" aria-label="Oddal">−</button>${z.k > 1 ? '<button data-a="zoom" data-z="0" aria-label="Cała mapa">⤢</button>' : ''}</div></div>`;
 }
 // gesty na mapie kontynentu: przeciąganie, szczypanie, kółko myszy
@@ -577,23 +594,88 @@ document.addEventListener('wheel', e => {
   clearTimeout(gs.wt); applyVB(svg, cid); gs.wt = setTimeout(() => render(true), 150);
 }, { passive: false });
 
+function locRes(cid, sel) {
+  const q = norm((ui.locQ || '').trim());
+  let list;
+  if (q) {
+    list = LOCS.filter(l => l.c === cid && norm(l.n).includes(q))
+      .sort((a, b) => (norm(b.n).startsWith(q) - norm(a.n).startsWith(q)) || b.pop - a.pop).slice(0, 16);
+    if (!list.length) return '<div class="mut small" style="padding:4px 4px 10px">Brak wyników. Możesz założyć własną miejscowość (+ Własna).</div>';
+  } else {
+    const ids = new Set([sel, ...Object.keys(S.L).filter(id => LOC[id].c === cid), ...LOCS.filter(l => l.c === cid && l.u).map(l => l.id),
+      ...LOCS.filter(l => l.c === cid && l.f).map(l => l.id)]);
+    list = [...ids].map(id => LOC[id]);
+  }
+  return locChips(list, sel, 'bl');
+}
+// rzuty map w przeglądarce (do zakładania własnych miejscowości)
+const PROJ = {};
+function projOf(cid) {
+  if (PROJ[cid]) return PROJ[cid];
+  const m = MAPS[cid], g = window.d3; if (!m || !m.proj || !g || !g.geoMercator) return null;
+  const p = g[m.proj.type]().rotate(m.proj.rotate);
+  if (m.proj.parallels) p.parallels(m.proj.parallels);
+  return PROJ[cid] = p.scale(m.proj.scale).translate(m.proj.translate);
+}
+function registerCustom(s) {
+  for (let i = LOCS.length - 1; i >= 0; i--) if (LOCS[i].u) { const l = LOCS[i]; delete LOC[l.id]; delete MAPS[l.c].pts[l.id]; LOCS.splice(i, 1); }
+  for (const c of s.custom || []) {
+    const l = { ...c, n: String(c.n).replace(/[<>&"'`\\]/g, ''), port: !!c.port, pop: 0, f: false, u: true }, pr = projOf(l.c);
+    if (!pr) continue;
+    LOCS.push(l); LOC[l.id] = l; MAPS[l.c].pts[l.id] = pr([l.lo, l.la]).map(v => Math.round(v * 10) / 10);
+  }
+}
+function placeAt(e, svg) {
+  const cid = svg.parentNode.dataset.cid, pr = projOf(cid); if (!pr) { toast('Mapa niedostępna'); return; }
+  const pt = svg.createSVGPoint(); pt.x = e.clientX; pt.y = e.clientY;
+  const u = pt.matrixTransform(svg.getScreenCTM().inverse()), ll = pr.invert([u.x, u.y]);
+  if (!ll) return;
+  const [lo, la] = ll;
+  let near = null, nd = 1e9;
+  for (const l of LOCS) if (l.c === cid) { const d = kmLL(la, lo, l.la, l.lo); if (d < nd) { nd = d; near = l; } }
+  if (!near || nd > 400) { toast('Za daleko od innych miejscowości'); return; }
+  if (nd < 6) { toast(`Za blisko: ${near.n}`); return; }
+  const coastNear = LOCS.some(l => l.c === cid && l.port && !l.u && kmLL(la, lo, l.la, l.lo) < 25);
+  ui.np = { c: cid, la: +la.toFixed(3), lo: +lo.toFixed(3), near: near.id, nd, ld: near.ld, port: coastNear, t: 'w', n: '' };
+  foundSheet();
+}
+function foundSheet() {
+  const p = ui.np, near = LOC[p.near];
+  $('modal').hidden = false;
+  $('modal').innerHTML = `<div class="sheet"><div class="row"><b class="grow" style="font-size:17px">Nowa miejscowość — ${CN[p.c].n}</b><button class="btn s" data-a="close">Anuluj</button></div>
+    <div class="mut small" style="margin-top:4px">${p.la.toFixed(2).replace('.', ',')}°, ${p.lo.toFixed(2).replace('.', ',')}° · najbliżej: ${esc(near.n)} (${kmTxt(p.nd)})${p.port ? ' · nad morzem' : ''}</div>
+    <label class="f" for="npName">Nazwa</label><input id="npName" data-np="n" maxlength="22" placeholder="np. Matiowo" value="${esc(p.n)}">
+    <label class="f">Typ</label>
+    ${['w', 'm'].map(t => `<button class="wz-opt ${p.t === t ? 'on' : ''}" data-a="npSet" data-v="${t}"><b>${TYPE[t].n} — ${money(FOUND[t])}</b><span>${TYPE[t].d}</span></button>`).join('')}
+    ${p.port ? '<div class="mut small">Leży nad morzem — będzie można zbudować port.</div>' : ''}
+    <div id="npErr" class="warn"></div>
+    <div class="btns"><button class="btn p" data-a="npFound" ${S.cash < FOUND[p.t] ? 'disabled' : ''}>Załóż — ${money(FOUND[p.t])}</button></div></div>`;
+}
+
 function vBudowa() {
   const cid = ui.bc, c = CN[cid];
   let h = contChips(cid);
   if (!S.c[cid]) {
     return h + `<div class="card"><div class="bname">${c.n}</div>
-      <div class="mut" style="margin:4px 0 8px">Nie masz tu oddziału. Bonusy surowców: ${bonTxt(c)}. Miejscowości: ${LOCS.filter(l => l.c === cid).map(l => l.n).join(', ')}.</div>
+      <div class="mut" style="margin:4px 0 8px">Nie masz tu oddziału. Bonusy surowców: ${bonTxt(c)}. Miejscowości: ${LOCS.filter(l => l.c === cid).length}, m.in. ${LOCS.filter(l => l.c === cid).sort((a, b) => b.pop - a.pop).slice(0, 6).map(l => l.n).join(', ')}.</div>
       <button class="btn p" data-a="branch" data-c="${cid}" ${S.cash < BRANCH_COST ? 'disabled' : ''}>Otwórz oddział — ${money(BRANCH_COST)}</button></div>`;
   }
   if (LOC[ui.bl].c !== cid) ui.bl = Object.keys(S.L).find(l => LOC[l].c === cid) || CAP[cid];
   const lid = ui.bl, l = LOC[lid], t = TYPE[l.t], L = S.L[lid] || newLoc(), fr = slots(L, lid) - used(L);
-  h += locMap(cid, lid) + locChips(LOCS.filter(x => x.c === cid), lid, 'bl');
-  h += `<div class="card"><div class="row"><div class="grow"><span class="bname">${l.n}</span> ${tag(l)}${l.port ? ' <span class="ltag p">Wybrzeże</span>' : ''}<div class="flow">${t.d}</div></div></div>
+  const nC = LOCS.filter(x => x.c === cid).length;
+  h += (ui.place ? `<div class="placebar"><span class="grow">Dotknij mapy w miejscu, gdzie ma powstać nowa miejscowość.</span><button class="btn s" data-a="placeOff">Anuluj</button></div>` : '')
+    + locMap(cid, lid)
+    + `<div class="lsearch"><input id="locQ" data-q="1" type="search" placeholder="Szukaj wśród ${nC} miejscowości…" value="${esc(ui.locQ || '')}" autocomplete="off">
+       ${ui.place ? '' : `<button class="btn s" data-a="placeMode">+ Własna</button>`}</div><div id="locRes">${locRes(cid, lid)}</div>`;
+  h += `<div class="card"><div class="row"><div class="grow"><span class="bname">${esc(l.n)}</span> ${tag(l)}${l.port ? ' <span class="ltag p">Wybrzeże</span>' : ''}${l.u ? ' <span class="ltag u">Twoja osada</span>' : ''}
+      <div class="flow">${l.pop ? `Ludność: ${popTxt(l.pop)} · ` : ''}${t.d}</div></div></div>
     <div class="row" style="margin-top:8px"><div class="grow">Działki: <b>${used(L)} / ${slots(L, lid)}</b> <span class="mut small">· działka ${money(t.land)}</span></div>
     ${L.x < t.maxX ? `<button class="btn s" data-a="expand" data-l="${lid}" ${S.cash < xCost(L, lid) ? 'disabled' : ''}>+${t.step} dział${t.step > 1 ? 'ki' : 'ka'} — ${money(xCost(L, lid))}</button>` : '<span class="mut small">maks. działek</span>'}</div>
     <div class="row" style="margin-top:8px"><div class="grow">Garaż: ${L.gar ? `<b>poz. ${L.gar}</b> <span class="mut small">· ${garUsed(S, lid)}/${garCap(S, lid)} pojazdów</span>` : '<span class="mut">brak</span>'}</div>
     ${L.gar ? `<button class="btn s" data-a="garUp" data-l="${lid}" ${S.cash < garUp(L) ? 'disabled' : ''}>Rozbuduj — ${money(garUp(L))}</button>`
-      : `<button class="btn s g" data-a="garage" data-l="${lid}" ${S.cash < GARAGE_COST + t.land || fr < 1 ? 'disabled' : ''}>Zbuduj — ${money(GARAGE_COST + t.land)}</button>`}</div></div>`;
+      : `<button class="btn s g" data-a="garage" data-l="${lid}" ${S.cash < GARAGE_COST + t.land || fr < 1 ? 'disabled' : ''}>Zbuduj — ${money(GARAGE_COST + t.land)}</button>`}</div>
+    ${l.port ? `<div class="row" style="margin-top:8px"><div class="grow">Port: ${L.port ? '<b class="pos">czynny</b>' : '<span class="mut">brak</span>'}</div>
+      ${L.port ? '' : `<button class="btn s p" data-a="port" data-l="${lid}" ${S.cash < PORT_COST ? 'disabled' : ''}>Zbuduj — ${money(PORT_COST)}</button>`}</div>` : ''}</div>`;
   h += `<h2>Zakłady — ${l.n}</h2>`;
   if (!L.bld.length) h += `<div class="card mut">Brak zakładów. Zbuduj coś poniżej.</div>`;
   for (const b of L.bld) {
@@ -685,15 +767,16 @@ function vLogistyka() {
         <div class="flow">${LOC[v.from].n} → ${LOC[v.to].n}${v.q ? ` · ${qty(v.q)} ${G[v.g].n}` : ' · pusty'}</div><div class="bar y"><i style="width:${p * 100}%"></i></div></div>`;
       continue;
     }
-    const dests = LOCS.filter(l => l.ld === LOC[v.at].ld && l.id !== v.at).map(l => l.id).sort((a, b) => (S.L[b] ? 1 : 0) - (S.L[a] ? 1 : 0) || km(v.at, a) - km(v.at, b));
+    const dests = LOCS.filter(l => l.ld === LOC[v.at].ld && l.id !== v.at).map(l => l.id).sort((a, b) => (S.L[b] ? 1 : 0) - (S.L[a] ? 1 : 0) || km(v.at, a) - km(v.at, b)).slice(0, 30);
     h += `<div class="card"><div class="row"><b class="grow">${k.n} #${v.id}</b><span class="mut small">stoi w: ${LOC[v.at].n}</span></div>
       ${sendForm('vf', v, dests, k.cap, to => vehHours(S, v.k, v.at, to), to => vehFee(v.k, v.at, to))}</div>`;
   }
   // --- porty ---
-  const coast = LOCS.filter(l => l.port && S.c[l.c]);
+  const coast = Object.keys(S.L).map(id => LOC[id]).filter(l => l.port);
   h += `<h2>Porty</h2><div class="card">${coast.map(l => { const L = S.L[l.id];
     return `<div class="row" style="padding:6px 0"><div class="grow">${l.n} <span class="mut small">${CN[l.c].n}</span></div>${L && L.port ? '<span class="pos small">Port czynny</span>' :
-      `<button class="btn s p" data-a="port" data-l="${l.id}" ${S.cash < PORT_COST ? 'disabled' : ''}>Zbuduj — ${money(PORT_COST)}</button>`}</div>`; }).join('')}</div>`;
+      `<button class="btn s p" data-a="port" data-l="${l.id}" ${S.cash < PORT_COST ? 'disabled' : ''}>Zbuduj — ${money(PORT_COST)}</button>`}</div>`; }).join('') ||
+      '<div class="mut small">Port zbudujesz w miejscowości nad morzem (oznaczonej „Wybrzeże” w Budowie), w której masz zakład lub magazyn.</div>'}</div>`;
   // --- statki ---
   const ports = Object.keys(S.L).filter(l => S.L[l].port);
   h += `<h2>Flota (${S.ships.length})</h2>`;
@@ -777,6 +860,20 @@ function act(a, d) {
       const z = zOf(ui.bc); if (z.k > 1 && !d.fromMap) { const [x, y] = MAPS[ui.bc].pts[d.l]; zoomAt(ui.bc, z.k, x, y); }
       break;
     }
+    case 'placeMode': ui.place = true; toast('Dotknij mapy, gdzie ma powstać miejscowość'); break;
+    case 'placeOff': ui.place = false; break;
+    case 'npSet': ui.np.t = d.v; foundSheet(); return;
+    case 'npFound': {
+      const p = ui.np, n = (p.n || '').replace(/[<>&"'`\\]/g, '').trim().slice(0, 22);
+      if (!n) { $('npErr').textContent = 'Wpisz nazwę.'; return; }
+      if (LOCS.some(l => l.c === p.c && norm(l.n) === norm(n))) { $('npErr').textContent = 'Taka miejscowość już istnieje.'; return; }
+      if (S.cash < FOUND[p.t]) return;
+      S.cash -= FOUND[p.t];
+      const id = 'u' + S.nid++;
+      S.custom.push({ id, c: p.c, n, t: p.t, la: p.la, lo: p.lo, port: p.port ? 1 : 0, ld: p.ld });
+      registerCustom(S); ensureL(S, id); ui.bl = id; ui.place = false; ui.np = null; $('modal').hidden = true;
+      addNews(S, `Założono ${p.t === 'm' ? 'miasto' : 'wieś'}: ${n}`); toast(`${n} założona!`); break;
+    }
     case 'zoom': {
       const cid = ui.bc, z = zOf(cid), m = MAPS[cid];
       if (+d.z === 0) { z.k = 1; z.x = z.y = 0; break; }
@@ -857,11 +954,11 @@ function act(a, d) {
         if (!wz.ceo || !wz.name) { $('wzErr').textContent = 'Wpisz imię prezesa i nazwę firmy.'; return; }
       }
       if (wz.step < 3) { wz.step++; renderWiz(); $('wiz').scrollTo(0, 0); return; }
-      S = newState({ done: true, ceo: wz.ceo, name: wz.name, hl: wz.hl, color: wz.color, diff: wz.diff, tut: wz.tut });
+      S = newState({ done: true, ceo: wz.ceo, name: wz.name, hl: wz.hl, color: wz.color, diff: wz.diff, tut: wz.tut }); registerCustom(S); ui.z = {};
       ui.bl = ui.ml = S.hl; ui.bc = S.hq; ui.tab = 'firma'; acc = 0; prev = performance.now(); renderWiz(); break;
     case 'reset':
       if (!ui.resetArm) { ui.resetArm = true; settings(); return; }
-      S = newState(); Object.assign(wz, { step: 0, ceo: '', name: '' }); ui.resetArm = false; $('modal').hidden = true; save(); renderWiz(); break;
+      S = newState(); registerCustom(S); ui.z = {}; Object.assign(wz, { step: 0, ceo: '', name: '' }); ui.resetArm = false; $('modal').hidden = true; save(); renderWiz(); break;
     case 'chkUpd': checkUpdate(true); return;
     case 'getUpd': openUrl(ui.update.url); return;
   }
@@ -869,6 +966,7 @@ function act(a, d) {
 }
 document.addEventListener('click', e => {
   if (gs.block && e.target.closest('.lmap')) return;
+  if (ui.place && e.target.closest('.lmap svg')) { placeAt(e, e.target.closest('.lmap svg')); return; }
   const t = e.target.closest('[data-a],[data-tab]');
   if (!t) { if (e.target.id === 'modal') $('modal').hidden = true; return; }
   if (t.dataset.tab) { ui.tab = t.dataset.tab; window.scrollTo(0, 0); render(true); return; }
@@ -912,6 +1010,7 @@ function openUrl(url) {
 
 // ================== PĘTLA ==================
 S = load();
+registerCustom(S);
 ui.bc = S.hq; ui.bl = ui.ml = S.hl;
 if (S.setup) {
   const off = Math.min(OFFLINE_MAX_H, Math.floor((Date.now() - (S.last || Date.now())) / HOUR_MS));

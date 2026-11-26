@@ -22,3 +22,7 @@ Każdy push do `main` → GitHub Actions buduje APK (Capacitor) → tworzy Relea
 
 ## Lokalnie
 Otwórz `www/index.html` w przeglądarce – gra działa bez instalacji.
+
+## Mapy i miejscowości
+`www/maps.js` i `www/places.js` generuje `tools/build-maps.mjs` (mapy: Natural Earth, domena publiczna; miejscowości: GeoNames, CC BY 4.0).
+Polecane miejsca startowe to `LOCS_BASE` w `www/game.js`. Gracz może też założyć własną miejscowość w grze (Budowa → „+ Własna”).

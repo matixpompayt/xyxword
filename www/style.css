@@ -132,3 +132,9 @@ body.tuton main{padding-bottom:calc(250px + var(--safe-b))}
 .lmap svg.zoomed{touch-action:none}
 .zbtn{position:absolute;right:8px;top:8px;display:flex;flex-direction:column;gap:6px}
 .zbtn button{width:40px;height:40px;border-radius:10px;border:1px solid #3a4d5c;background:rgba(18,24,31,.85);color:var(--ink);font-size:20px;font-weight:700;line-height:1}
+.lsearch{display:flex;gap:8px;margin:10px 0 2px}
+.lsearch input{flex:1}
+.placebar{display:flex;gap:8px;align-items:center;background:#1d3346;border:1px solid var(--blue);border-radius:12px;padding:8px 10px;margin-bottom:8px;font-size:14px}
+.placebar .grow{flex:1}
+.lmap.placing svg{cursor:crosshair;outline:2px solid var(--blue);outline-offset:-2px}
+.ltag.u{background:#3a2a12;color:#ffc98a}
