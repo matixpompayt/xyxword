@@ -697,7 +697,7 @@ function lmapOn() { return (!S || S.mapMode !== 'svg') && !ui.noGL && !!window.m
 function ensureLM() {
   if (LM) return LM;
   const el = document.createElement('div'); el.className = 'lmapL';
-  const sty = MSTYLES[S.mapStyle] ? S.mapStyle : 'fiord';
+  const sty = S && MSTYLES[S.mapStyle] ? S.mapStyle : 'fiord';
   let map;
   try {
     map = new maplibregl.Map({ container: el, style: 'https://tiles.openfreemap.org/styles/' + sty, center: [14.55, 53.43], zoom: 9,
@@ -1147,6 +1147,7 @@ function act(a, d) {
       S = newState(); registerCustom(S); ui.z = {}; Object.assign(wz, { step: 0, ceo: '', name: '' }); ui.resetArm = false; $('modal').hidden = true; save(); renderWiz(); break;
     case 'chkUpd': checkUpdate(true); return;
     case 'getUpd': openUrl(ui.update.url); return;
+    case 'reload': location.reload(); return;
   }
   save(); render(true);
 }
@@ -1177,13 +1178,26 @@ function cmpVer(a, b) {
   for (let i = 0; i < Math.max(pa.length, pb.length); i++) { const x = pa[i] || 0, y = pb[i] || 0; if (x !== y) return x > y ? 1 : -1; }
   return 0;
 }
+// wymuszona aktualizacja: zapis gry i blokada do czasu instalacji nowej wersji
+function forceUpdate() {
+  if (VERSION === 'dev' || !ui.update) return;
+  if (!ui.locked) { ui.locked = true; if (S) { save(); cloudSave(true); } }
+  const el = $('lock'), nat = window.Capacitor && Capacitor.isNativePlatform && Capacitor.isNativePlatform();
+  el.hidden = false;
+  el.innerHTML = `<div class="au-in lock-in"><div class="au-logo">${LOGO}</div>
+    <h1>Wymagana aktualizacja</h1>
+    <p class="mut au-sub">Dostępna jest nowa wersja <b>${esc(ui.update.v)}</b> (masz ${esc(VERSION)}).${S ? ' Twoja gra została zapisana.' : ''} Zainstaluj aktualizację, żeby grać dalej.</p>
+    ${ui.update.notes ? `<div class="card small mut lock-notes">${esc(ui.update.notes).slice(0, 400)}</div>` : ''}
+    <button class="btn p au-go" data-a="${nat ? 'getUpd' : 'reload'}">${nat ? 'Pobierz i zainstaluj' : 'Odśwież grę'}</button>
+    ${nat ? '<p class="mut small au-note">Po pobraniu otwórz plik i wybierz „Aktualizuj”. Zapis gry zostanie.</p>' : ''}</div>`;
+}
 async function checkUpdate(manual) {
   try {
     const r = await fetch(`https://api.github.com/repos/${REPO}/releases/latest`, { headers: { Accept: 'application/vnd.github+json' }, cache: 'no-store' });
     if (!r.ok) throw new Error(r.status);
     const j = await r.json(), v = String(j.tag_name || '').replace(/^v/, '');
     const apk = (j.assets || []).find(a => a.name.endsWith('.apk'));
-    if (v && cmpVer(v, VERSION) > 0) { ui.update = { v, url: apk ? apk.browser_download_url : j.html_url }; renderUpd(); if (manual) { $('modal').hidden = true; toast('Dostępna wersja ' + v); } }
+    if (v && cmpVer(v, VERSION) > 0) { ui.update = { v, url: apk ? apk.browser_download_url : j.html_url, notes: String(j.body || '').split(/\n\s*(Co-Authored-By|Claude-Session)/)[0].trim() }; renderUpd(); forceUpdate(); }
     else if (manual) toast('Masz najnowszą wersję');
   } catch (e) { if (manual) toast('Nie udało się połączyć z GitHub'); }
 }
@@ -1465,7 +1479,7 @@ initPts();
 let acc = 0, prev = performance.now(), n = 0;
 function loop() {
   const now = performance.now(); acc += Math.min(now - prev, 60000); prev = now;
-  if (!S || !S.setup) { acc = 0; return; }
+  if (!S || !S.setup || ui.locked) { acc = 0; return; }
   let ran = false;
   while (acc >= HOUR_MS) { acc -= HOUR_MS; hour(S); ran = true; }
   if (ran) {
@@ -1489,5 +1503,7 @@ if (FB) { au.mode = 'wait'; renderAuth(); firebase.auth().onAuthStateChanged(onU
 else if (localStorage.getItem('xyx_guest') === '1') startGame(load(SAVE) || newState());
 else renderAuth();
 setInterval(loop, 500);
-setTimeout(() => checkUpdate(false), 2000);
+checkUpdate(false);
+setInterval(() => checkUpdate(false), 5 * 60 * 1000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) checkUpdate(false); });
 })();

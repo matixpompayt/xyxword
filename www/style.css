@@ -231,3 +231,6 @@ nav button svg{transition:transform .2s}
 .hb .bar{margin:0;height:8px}.hb .bar i{background:var(--acc)}
 .hb b{text-align:right;font-variant-numeric:tabular-nums}
 .pl .grow{flex:1;min-width:0}
+.lock{z-index:60}
+.lock-in h1{font-size:28px}
+.lock-notes{white-space:pre-wrap;margin:8px 0 14px;max-height:30vh;overflow:auto}
