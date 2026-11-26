@@ -445,7 +445,25 @@ function renderTut() {
 }
 
 // ================== KREATOR KONTA ==================
-const wz = { step: 0, ceo: '', name: '', hq: 'eu', hl: CAP.eu, color: COLORS[0], diff: 1, tut: true };
+const wz = { step: 0, ceo: '', name: '', hq: 'eu', hl: '', cc: '', rg: null, lvl: 'ctry', q: '', color: COLORS[0], diff: 1, tut: true };
+function wzList() { // listy kreatora: państwa / regiony / miejscowości
+  const q = norm((wz.q || '').trim()), byc = BYC[wz.hq];
+  if (wz.lvl === 'ctry') {
+    const m = {}; for (const l of byc) if (l.cc) m[l.cc] = (m[l.cc] || 0) + 1;
+    const list = Object.keys(m).filter(cc => !q || norm(cName(cc)).includes(q)).sort((a, b) => m[b] - m[a]);
+    return list.map(cc => `<button class="wz-opt" data-a="wzCc" data-v="${cc}"><b>${flag(cc)} ${cName(cc)} <span class="mut small" style="font-weight:400">· ${m[cc].toLocaleString('pl-PL')} miejsc.</span></b>
+      <span>Bonusy: ${bonList(cRes(cc))} · podatek ${Math.round(TIERS[tierOf(cc)].tax * 100)}%${EU.has(cc) ? ' · UE' : ''}</span></button>`).join('') || '<div class="mut">Brak wyników.</div>';
+  }
+  if (wz.lvl === 'reg') {
+    const m = new Map(); for (const l of byc) if (l.cc === wz.cc && l.rg >= 0) m.set(l.rg, (m.get(l.rg) || 0) + 1);
+    return [...m.keys()].sort((a, b) => REG[a][0].localeCompare(REG[b][0], 'pl')).map(r => `<button class="wz-opt" data-a="wzRg" data-v="${r}"><b>${esc(REG[r][0])} <span class="mut small" style="font-weight:400">· ${m.get(r)} miejsc.</span></b>
+      <span>Bonus regionu: ${bonList(rRes(r))}</span></button>`).join('');
+  }
+  const list = [];
+  for (const l of byc) { if (l.cc !== wz.cc || (wz.rg != null && wz.rg >= 0 && l.rg !== wz.rg)) continue; if (q && !(l.nn || (l.nn = norm(l.n))).includes(q)) continue; list.push(l); if (list.length >= 80) break; }
+  return list.map(l => `<button class="wz-opt ${wz.hl === l.id ? 'on' : ''}" data-a="wzSet" data-k="hl" data-v="${l.id}"><b>${esc(l.n)} <span class="ltag ${l.t}">${TYPE[l.t].n}</span>${l.port ? ' <span class="ltag p">Port</span>' : ''}</b>
+    <span>${l.pop ? popTxt(l.pop) + ' mieszk. · ' : ''}${TYPE[l.t].d}</span></button>`).join('') + (list.length >= 80 ? '<div class="mut small">Pokazano 80 największych — wpisz nazwę, żeby znaleźć mniejsze.</div>' : '') || '<div class="mut">Brak wyników.</div>';
+}
 const bonTxt = c => Object.entries(c.r).filter(([, v]) => v >= 1.2).sort((a, b) => b[1] - a[1]).map(([g, v]) => `${G[g].n} ×${String(v).replace('.', ',')}`).join(' · ') || 'zrównoważony';
 function renderWiz() {
   const el = $('wiz');
@@ -460,11 +478,18 @@ function renderWiz() {
       <label class="f" for="wzName">Nazwa firmy</label><input id="wzName" data-wz="name" maxlength="24" placeholder="np. Mati Holding" value="${esc(wz.name)}">
       <div id="wzErr" class="warn"></div>`;
   } else if (wz.step === 1) {
-    b = `<h1>Siedziba firmy</h1><p class="mut">Wybierz kontynent i miejscowość startową. Inne miejsca otworzysz później.</p>
+    const cc = wz.cc, rg = wz.rg, l = LOC[wz.hl];
+    const crumbs = [[CN[wz.hq].n, 'ctry']];
+    if (cc) crumbs.push([`${flag(cc)} ${cName(cc)}`, 'reg']);
+    if (cc && rg != null && rg >= 0) crumbs.push([REG[rg][0], 'loc']);
+    const title = { ctry: 'Wybierz państwo', reg: 'Wybierz województwo / region', loc: 'Wybierz miasto lub wieś' }[wz.lvl];
+    b = `<h1>Siedziba firmy</h1><p class="mut">Kontynent → państwo → region → miejscowość. Inne miejsca otworzysz później.</p>
       <div class="chips">${CONT.map(c => `<button class="${wz.hq === c.id ? 'on' : ''}" data-a="wzSet" data-k="hq" data-v="${c.id}">${c.n}</button>`).join('')}</div>
-      <div class="mut small" style="margin:0 2px 8px">Bonusy surowców zależą od państwa i regionu.</div>
-      ${LOCS.filter(l => l.c === wz.hq && l.f).map(l => `<button class="wz-opt ${wz.hl === l.id ? 'on' : ''}" data-a="wzSet" data-k="hl" data-v="${l.id}">
-        <b>${flag(l.cc)} ${l.n} <span class="ltag ${l.t}">${TYPE[l.t].n}</span>${l.port ? ' <span class="ltag p">Port</span>' : ''}</b><span>${cName(l.cc)}${rName(l) ? ' · ' + esc(rName(l)) : ''} — ${bonList({ ...cRes(l.cc), ...rRes(l.rg) })}</span></button>`).join('')}`;
+      <div class="crumbs">${crumbs.map(([n, lv], i) => `${i ? '<span>›</span>' : ''}<button class="${wz.lvl === lv ? 'on' : ''}" data-a="wzLvl" data-v="${lv}">${esc(n)}</button>`).join('')}</div>
+      ${l ? `<div class="wz-pick"><span class="mut small">Wybrano:</span> <b>${flag(l.cc)} ${esc(l.n)}</b> <span class="ltag ${l.t}">${TYPE[l.t].n}</span>${l.port ? ' <span class="ltag p">Port</span>' : ''}</div>` : ''}
+      <h2>${title}</h2>
+      ${wz.lvl !== 'reg' ? `<input type="search" data-wzq="1" placeholder="${wz.lvl === 'ctry' ? 'Szukaj państwa…' : 'Szukaj miejscowości…'}" value="${esc(wz.q || '')}" autocomplete="off" style="margin-bottom:8px">` : ''}
+      <div id="wzList">${wzList()}</div>`;
   } else if (wz.step === 2) {
     b = `<h1>Styl i trudność</h1><label class="f">Kolor firmy</label><div class="sw">${COLORS.map(c => `<button class="${wz.color === c ? 'on' : ''}" style="background:${c}" data-a="wzSet" data-k="color" data-v="${c}" aria-label="Kolor ${c}"></button>`).join('')}</div>
       <label class="f">Poziom trudności</label>
@@ -481,6 +506,7 @@ function renderWiz() {
 }
 document.addEventListener('input', e => {
   const t = e.target, k = t.dataset.wz; if (k) wz[k] = t.value;
+  if (t.dataset.wzq) { wz.q = t.value; const r = $('wzList'); if (r) r.innerHTML = wzList(); }
   if (t.dataset.q) { ui.locQ = t.value; const r = $('locRes'); if (r) r.innerHTML = locRes(ui.bc, ui.bl); }
   if (t.dataset.np && ui.np) ui.np[t.dataset.np] = t.value;
 });
@@ -1288,21 +1314,30 @@ function act(a, d) {
     case 'tutNext': { const st = TUT[S.tut.step]; if (st && st.fin && !S.tut.rew) { S.tut.rew = true; S.cash += 5000; toast('+$5 tys. za samouczek'); } S.tut.step++; break; }
     case 'tutSkip': S.tut.step = TUT.length; break;
     case 'wzSet':
-      if (d.k === 'hq') { wz.hq = d.v; wz.hl = CAP[d.v]; }
+      if (d.k === 'hq') { wz.hq = d.v; wz.hl = ''; wz.cc = ''; wz.rg = null; wz.lvl = 'ctry'; wz.q = ''; }
       else wz[d.k] = d.k === 'diff' ? +d.v : d.k === 'tut' ? d.v === '1' : d.v;
       renderWiz(); return;
+    case 'wzCc': {
+      wz.cc = d.v; wz.rg = null; wz.q = '';
+      const regs = new Set(BYC[wz.hq].filter(l => l.cc === d.v && l.rg >= 0).map(l => l.rg));
+      wz.lvl = regs.size > 1 ? 'reg' : 'loc'; if (regs.size === 1) wz.rg = [...regs][0];
+      renderWiz(); $('wiz').scrollTo(0, 0); return;
+    }
+    case 'wzRg': wz.rg = +d.v; wz.lvl = 'loc'; wz.q = ''; renderWiz(); $('wiz').scrollTo(0, 0); return;
+    case 'wzLvl': wz.lvl = d.v; wz.q = ''; if (d.v === 'ctry') { wz.cc = ''; wz.rg = null; } if (d.v === 'reg') wz.rg = null; renderWiz(); return;
     case 'wzBack': wz.step = Math.max(0, wz.step - 1); renderWiz(); return;
     case 'wzNext':
       if (wz.step === 0) {
         wz.ceo = wz.ceo.trim(); wz.name = wz.name.trim();
         if (!wz.ceo || !wz.name) { $('wzErr').textContent = 'Wpisz imię prezesa i nazwę firmy.'; return; }
       }
+      if (wz.step === 1 && !LOC[wz.hl]) { toast('Wybierz miejscowość startową'); return; }
       if (wz.step < 3) { wz.step++; renderWiz(); $('wiz').scrollTo(0, 0); return; }
       S = newState({ done: true, ceo: wz.ceo, name: wz.name, hl: wz.hl, color: wz.color, diff: wz.diff, tut: wz.tut }); registerCustom(S); ui.z = {};
       ui.bl = ui.ml = S.hl; ui.bc = S.hq; ui.tab = 'firma'; acc = 0; prev = performance.now(); renderWiz(); break;
     case 'reset':
       if (!ui.resetArm) { ui.resetArm = true; settings(); return; }
-      S = newState(); registerCustom(S); ui.z = {}; Object.assign(wz, { step: 0, ceo: '', name: '' }); ui.resetArm = false; $('modal').hidden = true; save(); renderWiz(); break;
+      S = newState(); registerCustom(S); ui.z = {}; Object.assign(wz, { step: 0, ceo: '', name: '', hl: '', cc: '', rg: null, lvl: 'ctry', q: '' }); ui.resetArm = false; $('modal').hidden = true; save(); renderWiz(); break;
     case 'chkUpd': checkUpdate(true); return;
     case 'getUpd': if (ui.locked) runUpdate(); else openUrl(ui.update.url); return;
     case 'dlPerm': { const P = UPD(); if (P) P.openInstallSettings(); return; }
@@ -1536,7 +1571,7 @@ async function onUser(user) {
   toast(`Zalogowano: ${user.email}`);
 }
 function startGame(s) {
-  if (!s.setup) Object.assign(wz, { step: 0, ceo: '', name: '' });
+  if (!s.setup) Object.assign(wz, { step: 0, ceo: '', name: '', hl: '', cc: '', rg: null, lvl: 'ctry', q: '' });
   S = s; registerCustom(S); ui.z = {}; ui.animTab = null; ui.cashShown = null; ui.wzLast = null; if (LM) LM.cid = null;
   ui.bc = S.hq; ui.bl = ui.ml = S.hl; ui.tab = 'firma';
   if (S.setup) {

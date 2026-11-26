@@ -242,3 +242,8 @@ nav button svg{transition:transform .2s}
 .dlinfo{font-variant-numeric:tabular-nums}
 .dlinfo b{font-size:22px}
 .tiltbtn{font:700 13px system-ui,sans-serif!important;color:#eef0f3!important}
+.crumbs{display:flex;align-items:center;gap:4px;flex-wrap:wrap;margin:2px 0 8px}
+.crumbs span{color:var(--mut)}
+.crumbs button{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:0 10px;min-height:34px;font-size:13px;color:var(--mut)}
+.crumbs button.on{border-color:var(--acc);color:var(--ink)}
+.wz-pick{background:#1d2b1f;border:1px solid #3a6a43;border-radius:10px;padding:8px 12px;margin-bottom:4px;animation:rise .3s ease}
