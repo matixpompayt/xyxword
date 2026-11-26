@@ -47,6 +47,10 @@ jobs:
           npm install
           npx cap add android
           cp android-config/google-services.json android/app/google-services.json
+          D=$(dirname "$(find android/app/src/main/java -name MainActivity.java | head -1)")
+          cp android-config/MainActivity.java android-config/UpdaterPlugin.java "$D/"
+          sed -i 's#<uses-permission android:name="android.permission.INTERNET" />#<uses-permission android:name="android.permission.INTERNET" />\n    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />#' android/app/src/main/AndroidManifest.xml
+          grep -q REQUEST_INSTALL_PACKAGES android/app/src/main/AndroidManifest.xml
           printf '\next {\n    rgcfaIncludeGoogle = true\n}\n' >> android/variables.gradle
           npx cap sync android
 

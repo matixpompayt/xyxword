@@ -706,12 +706,20 @@ try { GLOBAL = JSON.parse(localStorage.getItem('xyx_places') || '[]'); } catch (
 const clean = t => String(t).replace(/[<>&"'`\\]/g, '');
 function registerCustom(s) {
   const touched = new Set();
+  for (const l of LOCS) if (l._o) { Object.assign(l, l._o); delete l._o; delete l.nn; MAPS[l.c].pts[l.id] = [l.x, l.y]; touched.add(l.c); } // cofnij poprzednie edycje admina
   for (let i = LOCS.length - 1; i >= 0; i--) if (LOCS[i].u || LOCS[i].g) { const l = LOCS[i]; touched.add(l.c); delete LOC[l.id]; delete MAPS[l.c].pts[l.id]; LOCS.splice(i, 1); }
   const add = l => { const pr = projOf(l.c); if (!pr || !CN[l.c]) return;
     if (!l.cc) { let nd = 1e9, nr = null; for (const o of BYC[l.c] || []) { if (o.u || o.g) continue; const d2 = kmLL(l.la, l.lo, o.la, o.lo); if (d2 < nd) { nd = d2; nr = o; } } if (nr) { l.cc = nr.cc; l.rg = nr.rg; } }
     const p = pr([l.lo, l.la]); l.x = p[0]; l.y = p[1]; LOCS.push(l); LOC[l.id] = l; MAPS[l.c].pts[l.id] = p; touched.add(l.c); };
   for (const c of (s && s.custom) || []) add({ ...c, n: clean(c.n), port: !!c.port, pop: 0, f: false, u: true });
-  for (const g of GLOBAL) if (!g.del || (s && s.L && s.L[g.id])) add({ id: g.id, c: g.c, n: clean(g.n), t: g.t === 'm' ? 'm' : 'w', la: +g.la, lo: +g.lo, port: !!g.port, ld: g.ld || g.c, pop: +g.pop || 0, f: false, g: true, hide: !!g.del });
+  for (const g of GLOBAL) if (g.ov) { // edycja / ukrycie miejscowości z bazy
+    const l = LOC[g.id]; if (!l || l.u || l.g) continue;
+    l._o = { n: l.n, t: l.t, pop: l.pop, port: l.port, la: l.la, lo: l.lo, x: l.x, y: l.y, hide: !!l.hide };
+    delete l.nn; if (g.n) l.n = clean(g.n); if (g.t) l.t = g.t === 'm' ? 'm' : 'w'; if (g.pop != null) l.pop = +g.pop || 0; if (g.port != null) l.port = !!g.port;
+    if (isFinite(g.la) && isFinite(g.lo) && (+g.la !== l.la || +g.lo !== l.lo)) { l.la = +g.la; l.lo = +g.lo; const pr = projOf(l.c); if (pr) { const p = pr([l.lo, l.la]); l.x = p[0]; l.y = p[1]; MAPS[l.c].pts[l.id] = p; } }
+    l.hide = !!g.del && !(s && s.L && s.L[g.id]); touched.add(l.c);
+  }
+  for (const g of GLOBAL) if (!g.ov && (!g.del || (s && s.L && s.L[g.id]))) add({ id: g.id, c: g.c, n: clean(g.n), t: g.t === 'm' ? 'm' : 'w', la: +g.la, lo: +g.lo, port: !!g.port, ld: g.ld || g.c, pop: +g.pop || 0, f: false, g: true, hide: !!g.del });
   for (const cid of touched) BYC[cid] = LOCS.filter(l => l.c === cid && !l.hide).sort((a, b) => b.pop - a.pop);
   if (LM) LM.srcCid = null;
 }
@@ -772,9 +780,10 @@ function ensureLM() {
   map.on('movestart', () => { ui.gesture = true; });
   map.on('moveend', () => { ui.gesture = false; });
   map.on('click', e => {
-    if (ui.place) { placeAtLL(LM.cid, e.lngLat.lat, e.lngLat.lng); return; }
     const f = map.queryRenderedFeatures([[e.point.x - 10, e.point.y - 10], [e.point.x + 10, e.point.y + 10]], { layers: PL_LAYERS.map(x => x[0]) })[0];
-    if (f) { if (!S) toast(LOC[f.properties.id] ? LOC[f.properties.id].n : ''); else act('bl', { l: f.properties.id, fromMap: '1' }); }
+    if (!S && ADM.on) { if (f) admEdit(f.properties.id); else placeAtLL(LM.cid, e.lngLat.lat, e.lngLat.lng); return; }
+    if (ui.place) { placeAtLL(LM.cid, e.lngLat.lat, e.lngLat.lng); return; }
+    if (f) act('bl', { l: f.properties.id, fromMap: '1' });
   });
   return LM;
 }
@@ -830,7 +839,7 @@ function drawLM() {
     const L = SS.L[id], mine = !!(L && (L.bld.length || L.gar || Object.keys(L.inv).length)), on = id === ui.bl;
     const d = document.createElement('div'); d.className = 'mk' + (on ? ' on' : '') + (mine ? ' mine' : '');
     d.innerHTML = `<i style="background:${mine ? SS.color : l.g ? '#ff8fe0' : l.u ? '#ffc98a' : l.t === 'm' ? '#a9bfd6' : '#86c98a'};${L && L.port ? 'box-shadow:0 0 0 3px #4aa3ff' : ''}"></i><span>${esc(l.n)}</span>`;
-    d.addEventListener('click', ev => { ev.stopPropagation(); if (!S) { toast(l.n); return; } if (!ui.place) act('bl', { l: id, fromMap: '1' }); });
+    d.addEventListener('click', ev => { ev.stopPropagation(); if (!S) { if (ADM.on) admEdit(id); return; } if (!ui.place) act('bl', { l: id, fromMap: '1' }); });
     lm.mk.push(new maplibregl.Marker({ element: d, anchor: 'bottom', offset: [0, on ? 9 : 7] }).setLngLat([l.lo, l.la]).addTo(map));
   }
   const lines = [];
@@ -1121,6 +1130,25 @@ function act(a, d) {
     case 'admTab': ADM.tab = d.v; if (d.v !== 'miejsca') ui.place = false; renderAdmin(); return;
     case 'admCont': ADM.cid = d.c; renderAdmin(); return;
     case 'admPl': admPlayer(d.id); return;
+    case 'admEd': admEdit(d.id); return;
+    case 'edSet': if (d.k === 'port') ui.ed.port = !ui.ed.port; else ui.ed[d.k] = d.v; edSheet(); return;
+    case 'edSave': {
+      const e = ui.ed, l = LOC[e.id], n = clean(e.n).trim().slice(0, 30), la = parseFloat(String(e.la).replace(',', '.')), lo = parseFloat(String(e.lo).replace(',', '.'));
+      if (!n) { $('edErr').textContent = 'Wpisz nazwę.'; return; }
+      if (!isFinite(la) || !isFinite(lo)) { $('edErr').textContent = 'Złe współrzędne.'; return; }
+      const b = MAPS[l.c].box; if (lo < b[0][0] || lo > b[1][0] || la < b[0][1] || la > b[1][1]) { $('edErr').textContent = 'Poza obszarem kontynentu.'; return; }
+      const data = { n, t: e.t, pop: Math.max(0, Math.round(+e.pop || 0)), port: e.port ? 1 : 0, la: +la.toFixed(4), lo: +lo.toFixed(4), ts: Date.now() };
+      edWrite(e.g ? data : { ...data, id: e.id, ov: true, c: l.c, del: !!e.hidden }, `Zapisano: ${n}`); return;
+    }
+    case 'edHide': edWrite({ id: ui.ed.id, ov: true, c: LOC[ui.ed.id].c, del: true, ts: Date.now() }, 'Ukryto u wszystkich graczy'); return;
+    case 'edDel': edWrite({ del: true }, 'Usunięto'); return;
+    case 'edRestore': {
+      if (!DB || !isAdmin()) return;
+      const id = ui.ed.id;
+      if (ui.ed.ov && !ui.ed.g) DB.collection('places').doc(id).delete().then(() => toast('Przywrócono oryginał')).catch(er => toast('Błąd: ' + (er.code || er.message)));
+      else DB.collection('places').doc(id).set({ del: false }, { merge: true }).then(() => toast('Przywrócono'));
+      $('modal').hidden = true; return;
+    }
     case 'admLL': {
       const la = parseFloat(String($('admLa').value).replace(',', '.')), lo = parseFloat(String($('admLo').value).replace(',', '.'));
       if (!isFinite(la) || !isFinite(lo)) { toast('Podaj współrzędne'); return; }
@@ -1228,7 +1256,10 @@ function act(a, d) {
       if (!ui.resetArm) { ui.resetArm = true; settings(); return; }
       S = newState(); registerCustom(S); ui.z = {}; Object.assign(wz, { step: 0, ceo: '', name: '' }); ui.resetArm = false; $('modal').hidden = true; save(); renderWiz(); break;
     case 'chkUpd': checkUpdate(true); return;
-    case 'getUpd': openUrl(ui.update.url); return;
+    case 'getUpd': if (ui.locked) runUpdate(); else openUrl(ui.update.url); return;
+    case 'dlPerm': { const P = UPD(); if (P) P.openInstallSettings(); return; }
+    case 'dlInstall': { const P = UPD(); if (P) P.install().catch(e => { ui.dl = { st: 'err', msg: e.message }; lockView(); }); return; }
+    case 'dlBrowser': openUrl(ui.update.url); return;
     case 'reload': location.reload(); return;
   }
   save(); render(true);
@@ -1267,15 +1298,50 @@ function cmpVer(a, b) {
 // wymuszona aktualizacja: zapis gry i blokada do czasu instalacji nowej wersji
 function forceUpdate() {
   if (VERSION === 'dev' || !ui.update) return;
+  if (ui.dl && ['dl', 'inst', 'perm'].includes(ui.dl.st)) return;
   if (!ui.locked) { ui.locked = true; if (S) { save(); cloudSave(true); } }
-  const el = $('lock'), nat = window.Capacitor && Capacitor.isNativePlatform && Capacitor.isNativePlatform();
+  lockView();
+}
+const UPD = () => window.Capacitor && Capacitor.Plugins && Capacitor.Plugins.XyxUpdater;
+const mb = b => (b / 1048576).toFixed(1).replace('.', ',') + ' MB';
+function lockView() {
+  const el = $('lock'), nat = window.Capacitor && Capacitor.isNativePlatform && Capacitor.isNativePlatform(), d = ui.dl || {};
   el.hidden = false;
-  el.innerHTML = `<div class="au-in lock-in"><div class="au-logo">${LOGO}</div>
-    <h1>Wymagana aktualizacja</h1>
+  let body;
+  if (d.st === 'dl') body = `<h1>Pobieranie…</h1><p class="mut au-sub">Wersja ${esc(ui.update.v)}</p>
+    <div class="dlbar"><i id="dlFill" style="width:${d.total ? d.loaded / d.total * 100 : 0}%"></i></div>
+    <div class="row dlinfo"><b id="dlPct" class="grow">${d.total ? Math.round(d.loaded / d.total * 100) : 0}%</b><span id="dlMb" class="mut">${mb(d.loaded || 0)}${d.total ? ' / ' + mb(d.total) : ''}</span></div>
+    <p class="mut small au-note">Nie zamykaj gry.</p>`;
+  else if (d.st === 'perm') body = `<h1>Jedno pozwolenie</h1><p class="mut au-sub">Android musi pozwolić XyxWord instalować aktualizacje. Włącz <b>„Zezwalaj z tego źródła”</b> i wróć do gry.</p>
+    <button class="btn p au-go" data-a="dlPerm">Otwórz ustawienia</button>`;
+  else if (d.st === 'inst') body = `<h1>Pobrano</h1><p class="mut au-sub">Zatwierdź instalację w oknie systemu (<b>„Aktualizuj”</b>). Zapis gry zostanie.</p>
+    <div class="dlbar"><i style="width:100%"></i></div><button class="btn p au-go" data-a="dlInstall" style="margin-top:16px">Zainstaluj</button>`;
+  else if (d.st === 'err') body = `<h1>Nie udało się</h1><p class="warn au-sub">${esc(d.msg || '')}</p>
+    <button class="btn p au-go" data-a="getUpd">Spróbuj ponownie</button><button class="btn au-guest" data-a="dlBrowser" style="margin-top:10px">Pobierz przez przeglądarkę</button>`;
+  else body = `<h1>Wymagana aktualizacja</h1>
     <p class="mut au-sub">Dostępna jest nowa wersja <b>${esc(ui.update.v)}</b> (masz ${esc(VERSION)}).${S ? ' Twoja gra została zapisana.' : ''} Zainstaluj aktualizację, żeby grać dalej.</p>
     ${ui.update.notes ? `<div class="card small mut lock-notes">${esc(ui.update.notes).slice(0, 400)}</div>` : ''}
-    <button class="btn p au-go" data-a="${nat ? 'getUpd' : 'reload'}">${nat ? 'Pobierz i zainstaluj' : 'Odśwież grę'}</button>
-    ${nat ? '<p class="mut small au-note">Po pobraniu otwórz plik i wybierz „Aktualizuj”. Zapis gry zostanie.</p>' : ''}</div>`;
+    <button class="btn p au-go" data-a="${nat ? 'getUpd' : 'reload'}">${nat ? 'Pobierz i zainstaluj' : 'Odśwież grę'}</button>`;
+  el.innerHTML = `<div class="au-in lock-in"><div class="au-logo">${LOGO}</div>${body}</div>`;
+}
+function dlProgress() {
+  const d = ui.dl, f = $('dlFill'); if (!f || !d) return;
+  const p = d.total ? d.loaded / d.total : 0;
+  f.style.width = (p * 100) + '%'; $('dlPct').textContent = Math.round(p * 100) + '%'; $('dlMb').textContent = mb(d.loaded) + (d.total ? ' / ' + mb(d.total) : '');
+}
+async function runUpdate() { // pobranie APK w aplikacji i uruchomienie instalatora (jak w CAR OS Connect)
+  const P = UPD();
+  if (!P) { openUrl(ui.update.url); return; }
+  if (ui.dl && ui.dl.st === 'dl') return;
+  try {
+    const ok = (await P.canInstall()).value;
+    if (!ok) { ui.dl = { st: 'perm' }; lockView(); return; }
+    ui.dl = { st: 'dl', loaded: 0, total: 0 }; lockView();
+    if (!ui.dlL) ui.dlL = await P.addListener('progress', e => { if (ui.dl && ui.dl.st === 'dl') { ui.dl.loaded = e.loaded; ui.dl.total = e.total; dlProgress(); } });
+    await P.download({ url: ui.update.url });
+    ui.dl = { st: 'inst' }; lockView();
+    await P.install();
+  } catch (e) { ui.dl = { st: 'err', msg: (e && e.message) || String(e) }; lockView(); }
 }
 async function checkUpdate(manual) {
   try {
@@ -1463,7 +1529,7 @@ function adminDel(id) {
 function listenPlaces() {
   if (!DB) return;
   DB.collection('places').onSnapshot(snap => {
-    GLOBAL = snap.docs.map(d => ({ ...d.data(), id: d.id })).filter(g => CN[g.c] && isFinite(g.la) && isFinite(g.lo));
+    GLOBAL = snap.docs.map(d => ({ ...d.data(), id: d.id })).filter(g => g.ov ? !!LOC[g.id] || CN[g.c] : CN[g.c] && isFinite(g.la) && isFinite(g.lo));
     try { localStorage.setItem('xyx_places', JSON.stringify(GLOBAL)); } catch (e) {}
     registerCustom(S);
     if (S) render(true);
@@ -1517,18 +1583,58 @@ function admStats() {
     <h2>Top 10 firm</h2><div class="card"><table><thead><tr><th>#</th><th>Firma</th><th class="n">Wartość</th></tr></thead><tbody>
     ${top.map((p, i) => `<tr><td>${i + 1}</td><td>${esc(p.name || '—')}<div class="mut small">${esc(p.email)}</div></td><td class="n">${money(p.worth || 0)}</td></tr>`).join('')}</tbody></table></div>`;
 }
+function admSearch() {
+  const q = norm((ADM.pq || '').trim()); if (q.length < 2) return '<div class="mut small">Wpisz min. 2 litery.</div>';
+  const out = [];
+  for (const l of LOCS) { if (l.c !== ADM.cid || l.u) continue; if ((l.nn || (l.nn = norm(l.n))).includes(q)) { out.push(l); if (out.length >= 20) break; } }
+  return out.map(l => `<button class="card pl" data-a="admEd" data-id="${esc(l.id)}"><span class="grow"><b>${esc(l.n)}</b>${l.hide ? ' <span class="ltag u">ukryta</span>' : ''}${l._o ? ' <span class="ltag g">edytowana</span>' : ''}<br>
+    <span class="mut small">${flag(l.cc)} ${cName(l.cc)}${rName(l) ? ' · ' + esc(rName(l)) : ''} · ${l.t === 'm' ? 'miasto' : 'wieś'}${l.pop ? ' · ' + popTxt(l.pop) : ''}</span></span><span class="mut small">Edytuj ›</span></button>`).join('') || '<div class="mut small">Brak wyników.</div>';
+}
 function admPlaces() {
-  const list = GLOBAL.filter(g => !g.del).sort((a, b) => (b.ts || 0) - (a.ts || 0));
+  const list = GLOBAL.filter(g => !g.del && !g.ov).sort((a, b) => (b.ts || 0) - (a.ts || 0)), ovs = GLOBAL.filter(g => g.ov && LOC[g.id]);
   return `<div class="chips">${CONT.map(c => `<button class="${c.id === ADM.cid ? 'on' : ''}" data-a="admCont" data-c="${c.id}">${c.n}</button>`).join('')}</div>
-    <div class="placebar"><span class="grow">Dotknij mapy, żeby dodać miejscowość dla wszystkich graczy.</span></div>
+    <div class="placebar"><span class="grow">Dotknij <b>miejscowości</b> na mapie, żeby ją edytować, albo <b>pustego miejsca</b>, żeby dodać nową.</span></div>
     ${lmapOn() ? '<div id="lmapSlot" class="lslot"></div>' : '<div class="card mut small">Mapa szczegółowa niedostępna (brak internetu / WebGL) — użyj współrzędnych poniżej.</div>'}
+    <h2>Edytuj miejscowość</h2><div class="card"><input id="admPQ" data-admpq="1" type="search" placeholder="Szukaj (${CN[ADM.cid].n}): np. Dębno" value="${esc(ADM.pq || '')}" autocomplete="off"><div id="admPR" style="margin-top:8px">${admSearch()}</div></div>
     <h2>Dodaj po współrzędnych</h2><div class="card"><div class="grid2">
       <div><label class="f" for="admLa">Szerokość (lat)</label><input id="admLa" type="number" inputmode="decimal" step="any" placeholder="52.7389"></div>
       <div><label class="f" for="admLo">Długość (lon)</label><input id="admLo" type="number" inputmode="decimal" step="any" placeholder="14.4521"></div></div>
       <div class="btns"><button class="btn p" data-a="admLL">Dalej</button><span class="mut small" style="align-self:center">z Google Maps: przytrzymaj punkt → skopiuj współrzędne</span></div></div>
     <h2>Dodane miejscowości (${list.length})</h2><div class="card">${list.map(g => `<div class="row" style="padding:6px 0;border-bottom:1px solid var(--line)"><div class="grow"><b>${esc(g.n)}</b> <span class="ltag ${g.t === 'm' ? 'm' : 'w'}">${g.t === 'm' ? 'Miasto' : 'Wieś'}</span>
       <div class="mut small">${CN[g.c] ? CN[g.c].n : g.c} · ${(+g.la).toFixed(4)}, ${(+g.lo).toFixed(4)}${g.pop ? ' · ' + popTxt(g.pop) : ''}${g.port ? ' · port' : ''}</div></div>
-      <button class="btn s" data-a="admDel" data-id="${esc(g.id)}">Usuń</button></div>`).join('') || '<div class="mut">Brak.</div>'}</div>`;
+      <button class="btn s" data-a="admEd" data-id="${esc(g.id)}">Edytuj</button></div>`).join('') || '<div class="mut">Brak.</div>'}</div>
+    <h2>Zmienione / ukryte z bazy (${ovs.length})</h2><div class="card">${ovs.map(g => { const l = LOC[g.id]; return `<div class="row" style="padding:6px 0;border-bottom:1px solid var(--line)"><div class="grow"><b>${esc(l.n)}</b>${g.del ? ' <span class="ltag u">ukryta</span>' : ' <span class="ltag g">edytowana</span>'}
+      <div class="mut small">${flag(l.cc)} ${cName(l.cc)} · oryginał: ${esc((l._o || l).n)}</div></div>
+      <button class="btn s" data-a="admEd" data-id="${esc(g.id)}">Edytuj</button></div>`; }).join('') || '<div class="mut">Brak.</div>'}</div>`;
+}
+// okno edycji miejscowości (admin): nazwa, typ, ludność, port, położenie; zapis widzą wszyscy gracze
+function admEdit(id) {
+  const l = LOC[id]; if (!l) return;
+  const ov = GLOBAL.find(g => g.id === id && g.ov);
+  ui.ed = { id, n: l.n, t: l.t, pop: l.pop || 0, port: !!l.port, la: l.la, lo: l.lo, g: !!l.g, ov: !!ov, hidden: !!(ov && ov.del) };
+  edSheet();
+}
+function edSheet() {
+  const e = ui.ed, l = LOC[e.id];
+  $('modal').hidden = false;
+  $('modal').innerHTML = `<div class="sheet"><div class="row"><b class="grow" style="font-size:17px">Edycja: ${esc(l.n)}</b><button class="btn s" data-a="close">Zamknij</button></div>
+    <div class="mut small" style="margin-top:4px">${flag(l.cc)} ${cName(l.cc)}${rName(l) ? ' · ' + esc(rName(l)) : ''} · ${e.g ? 'dodana przez admina' : 'z bazy' + (e.ov ? ' (zmieniona)' : '')}${e.hidden ? ' · UKRYTA' : ''}</div>
+    <label class="f" for="edN">Nazwa</label><input id="edN" data-ed="n" maxlength="30" value="${esc(e.n)}">
+    <label class="f">Typ</label><div class="grid2">${['w', 'm'].map(t => `<button class="wz-opt ${e.t === t ? 'on' : ''}" data-a="edSet" data-k="t" data-v="${t}"><b>${TYPE[t].n}</b></button>`).join('')}</div>
+    <div class="grid2"><div><label class="f" for="edP">Ludność</label><input id="edP" data-ed="pop" type="number" inputmode="numeric" min="0" value="${e.pop}"></div>
+      <div><label class="f">&nbsp;</label><button class="toggle ${e.port ? 'on' : ''}" data-a="edSet" data-k="port" style="width:100%;min-height:40px">Port: ${e.port ? 'tak' : 'nie'}</button></div></div>
+    <div class="grid2"><div><label class="f" for="edLa">Szerokość (lat)</label><input id="edLa" data-ed="la" type="number" inputmode="decimal" step="any" value="${e.la}"></div>
+      <div><label class="f" for="edLo">Długość (lon)</label><input id="edLo" data-ed="lo" type="number" inputmode="decimal" step="any" value="${e.lo}"></div></div>
+    <div id="edErr" class="warn"></div>
+    <div class="btns"><button class="btn p" data-a="edSave">Zapisz dla wszystkich</button>
+      ${e.g ? '<button class="btn" data-a="edDel">Usuń</button>' : e.hidden ? '<button class="btn" data-a="edRestore">Przywróć</button>' : '<button class="btn" data-a="edHide">Ukryj</button>'}
+      ${e.ov ? '<button class="btn" data-a="edRestore">Przywróć oryginał</button>' : ''}</div></div>`;
+}
+function edWrite(data, msg) {
+  if (!DB || !isAdmin()) return;
+  const e = ui.ed;
+  DB.collection('places').doc(e.id).set(data, { merge: true }).then(() => toast(msg)).catch(er => toast('Błąd zapisu: ' + (er.code || er.message)));
+  $('modal').hidden = true;
 }
 function renderAdmin() {
   if (!ADM.on) return;
@@ -1557,7 +1663,7 @@ function admPlayer(uid) {
   $('modal').innerHTML = `<div class="sheet"><div class="row"><span class="dot" style="background:${esc(p.color || '#888')}"></span><b class="grow" style="font-size:17px">${esc(p.name || 'Gracz')}</b><button class="btn s" data-a="close">Zamknij</button></div>
     <div class="card" style="margin-top:10px"><table><tbody>${rows.map(([k, v]) => `<tr><td class="mut">${k}</td><td class="n">${v}</td></tr>`).join('')}</tbody></table></div></div>`;
 }
-document.addEventListener('input', e => { if (e.target.dataset.admq) { ADM.q = e.target.value; renderAdminList(); } });
+document.addEventListener('input', e => { const t = e.target; if (t.dataset.admq) { ADM.q = t.value; renderAdminList(); } if (t.dataset.admpq) { ADM.pq = t.value; const r = $('admPR'); if (r) r.innerHTML = admSearch(); } if (t.dataset.ed && ui.ed) ui.ed[t.dataset.ed] = t.value; });
 document.addEventListener('change', e => { if (e.target.dataset.in === 'admSort') { ADM.sort = e.target.value; renderAdminList(); } });
 
 // ================== PĘTLA ==================
@@ -1591,5 +1697,5 @@ else renderAuth();
 setInterval(loop, 500);
 checkUpdate(false);
 setInterval(() => checkUpdate(false), 5 * 60 * 1000);
-document.addEventListener('visibilitychange', () => { if (!document.hidden) checkUpdate(false); });
+document.addEventListener('visibilitychange', () => { if (document.hidden) return; if (ui.dl && ui.dl.st === 'perm') runUpdate(); else checkUpdate(false); });
 })();

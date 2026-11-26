@@ -237,3 +237,7 @@ nav button svg{transition:transform .2s}
 .ctry{margin:2px 0 8px}
 .lic{display:flex;gap:10px;align-items:center;flex-wrap:wrap;background:#2e241c;border:1px solid var(--acc);border-radius:12px;padding:10px 12px;margin:-2px 0 10px;animation:rise .35s cubic-bezier(.2,.8,.2,1)}
 .lic .grow{flex:1;min-width:180px}
+.dlbar{height:12px;background:var(--line);border-radius:6px;overflow:hidden;margin:18px 0 8px}
+.dlbar i{display:block;height:100%;background:linear-gradient(90deg,var(--acc),#f5c542);border-radius:6px;transition:width .2s linear}
+.dlinfo{font-variant-numeric:tabular-nums}
+.dlinfo b{font-size:22px}
