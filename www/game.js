@@ -8,6 +8,7 @@ const OFFLINE_MAX_H = 24 * 10;   // max 10 dni symulacji offline
 const VERSION = window.XYX_VERSION || 'dev';
 const REPO = 'matixpompayt/xyxword';
 const BRANCH_COST = 25000, PORT_COST = 15000, SHIP_COST = 30000, SHIP_CAP = 300;
+const GARAGE_COST = 8000;
 
 const CONT = [
   { id: 'eu', n: 'Europa',      r: { zboze: 1.2, drewno: 1.1, wegiel: 1.2, ruda: .8,  ropa: .4,  krzem: .7,  miedz: .6 } },
@@ -18,6 +19,35 @@ const CONT = [
   { id: 'au', n: 'Australia',   r: { zboze: .9,  drewno: .7,  wegiel: 1.3, ruda: 1.7, ropa: .6,  krzem: 1.1, miedz: 1.2 } },
 ];
 const CN = Object.fromEntries(CONT.map(c => [c.id, c]));
+
+// Miejscowości: t: 'm' miasto / 'w' wieś, la/lo: współrzędne, port: wybrzeże, ld: ląd (ciężarówki jeżdżą tylko po tym samym lądzie)
+const LOCS = [
+  ['hamburg', 'eu', 'Hamburg', 'm', 53.55, 9.99, 1], ['berlin', 'eu', 'Berlin', 'm', 52.52, 13.40], ['warszawa', 'eu', 'Warszawa', 'm', 52.23, 21.01],
+  ['szczecin', 'eu', 'Szczecin', 'm', 53.43, 14.55, 1], ['debno', 'eu', 'Dębno', 'w', 52.74, 14.70], ['oberstdorf', 'eu', 'Oberstdorf', 'w', 47.41, 10.28],
+  ['nowyjork', 'na', 'Nowy Jork', 'm', 40.71, -74.0, 1], ['chicago', 'na', 'Chicago', 'm', 41.88, -87.63], ['houston', 'na', 'Houston', 'm', 29.76, -95.37, 1],
+  ['losangeles', 'na', 'Los Angeles', 'm', 34.05, -118.24, 1], ['fargo', 'na', 'Fargo', 'w', 46.88, -96.79], ['elko', 'na', 'Elko', 'w', 40.83, -115.76],
+  ['rio', 'sa', 'Rio de Janeiro', 'm', -22.91, -43.17, 1], ['saopaulo', 'sa', 'São Paulo', 'm', -23.55, -46.63], ['buenosaires', 'sa', 'Buenos Aires', 'm', -34.60, -58.38, 1],
+  ['santiago', 'sa', 'Santiago', 'm', -33.45, -70.67], ['pergamino', 'sa', 'Pergamino', 'w', -33.89, -60.57], ['calama', 'sa', 'Calama', 'w', -22.45, -68.93],
+  ['lagos', 'af', 'Lagos', 'm', 6.52, 3.38, 1], ['kair', 'af', 'Kair', 'm', 30.04, 31.24, 1], ['johannesburg', 'af', 'Johannesburg', 'm', -26.20, 28.05],
+  ['durban', 'af', 'Durban', 'm', -29.86, 31.02, 1], ['solwezi', 'af', 'Solwezi', 'w', -12.17, 26.39], ['oloibiri', 'af', 'Oloibiri', 'w', 4.67, 6.32],
+  ['szanghaj', 'as', 'Szanghaj', 'm', 31.23, 121.47, 1], ['tokio', 'as', 'Tokio', 'm', 35.68, 139.69, 1, 'jp'], ['shenzhen', 'as', 'Shenzhen', 'm', 22.54, 114.06, 1],
+  ['mumbaj', 'as', 'Mumbaj', 'm', 19.08, 72.88, 1], ['seul', 'as', 'Seul', 'm', 37.57, 126.98], ['ordos', 'as', 'Ordos', 'w', 39.60, 109.78],
+  ['sydney', 'au', 'Sydney', 'm', -33.87, 151.21, 1], ['melbourne', 'au', 'Melbourne', 'm', -37.81, 144.96, 1], ['perth', 'au', 'Perth', 'm', -31.95, 115.86, 1],
+  ['brisbane', 'au', 'Brisbane', 'm', -27.47, 153.03, 1], ['kalgoorlie', 'au', 'Kalgoorlie', 'w', -30.75, 121.47], ['dubbo', 'au', 'Dubbo', 'w', -32.25, 148.60],
+].map(([id, c, n, t, la, lo, port, ld]) => ({ id, c, n, t, la, lo, port: !!port, ld: ld || c }));
+const LOC = Object.fromEntries(LOCS.map(l => [l.id, l]));
+const CAP = { eu: 'hamburg', na: 'nowyjork', sa: 'rio', af: 'lagos', as: 'szanghaj', au: 'sydney' };
+const TYPE = {
+  m: { n: 'Miasto', slots: 6, step: 2, maxX: 5, land: 6000, xCost: 15000, raw: 1, fac: 1.15, sell: 1.05,
+       d: 'Droga ziemia, dużo działek. Fabryki +15%, sprzedaż +5%.' },
+  w: { n: 'Wieś', slots: 4, step: 1, maxX: 2, land: 1500, xCost: 5000, raw: 1.25, fac: 1, sell: .95,
+       d: 'Tania ziemia, mało działek. Farmy i kopalnie +25%, sprzedaż −5%.' },
+};
+const VEH = {
+  van:   { n: 'Dostawczy',     cap: 40,  spd: 90, cost: 9000,  fuel: .35 },
+  truck: { n: 'Ciężarówka',    cap: 160, spd: 75, cost: 28000, fuel: .8 },
+  tir:   { n: 'TIR z naczepą', cap: 400, spd: 70, cost: 70000, fuel: 1.6 },
+};
 const POS = { eu: [52, 24], na: [21, 26], sa: [31, 62], af: [53, 54], as: [77, 30], au: [86, 68] };
 
 const G = {
@@ -53,7 +83,7 @@ const AI_NAMES = ['Krupp & Syn', 'Nordic Grain', 'Pacific Motors', 'Sahara Oil',
 const PERKS = {
   prod: { n: 'Wydajność produkcji', d: '+8% produkcji na poziom' },
   upk:  { n: 'Niższe koszty',       d: '−7% kosztów utrzymania na poziom' },
-  ship: { n: 'Szybsze statki',      d: '+20% prędkości na poziom' },
+  ship: { n: 'Szybszy transport',   d: '+20% prędkości statków i pojazdów na poziom' },
   sell: { n: 'Negocjacje',          d: '+4% do cen sprzedaży na poziom' },
 };
 const SEASON_PP = [12, 8, 6, 4, 3, 2, 2, 1, 1];
@@ -74,11 +104,16 @@ function fmt(n) {
 }
 const money = n => (n < 0 ? '−$' : '$') + fmt(Math.abs(n));
 const qty = n => n >= 100 ? Math.floor(n).toLocaleString('pl-PL') : (Math.floor(n * 10) / 10).toString().replace('.', ',');
-const dist = (a, b) => Math.hypot(POS[a][0] - POS[b][0], POS[a][1] - POS[b][1]);
+function km(a, b) {
+  const A = LOC[a], B = LOC[b], r = Math.PI / 180;
+  const h = Math.sin((B.la - A.la) * r / 2) ** 2 + Math.cos(A.la * r) * Math.cos(B.la * r) * Math.sin((B.lo - A.lo) * r / 2) ** 2;
+  return 2 * 6371 * Math.asin(Math.sqrt(h));
+}
+const kmTxt = k => Math.round(k).toLocaleString('pl-PL') + ' km';
 const SC = g => 3000 / Math.sqrt(G[g].p);  // skala nasycenia rynku
 
 // ================== STAN ==================
-let S, ui = { tab: 'firma', bc: 'eu', mc: 'eu', buyG: 'zboze', buyQ: 100, sf: {}, resetArm: false, update: null };
+let S, ui = { tab: 'firma', bc: 'eu', bl: 'hamburg', ml: 'hamburg', buyG: 'zboze', buyQ: 100, sf: {}, vf: {}, resetArm: false, update: null };
 
 const COLORS = ['#e0823f', '#3fcf7f', '#4aa3ff', '#c77dff', '#ff5d8f', '#f5c542'];
 const DIFF = [
@@ -90,20 +125,41 @@ function mkAI(base, diff = 1) {
   const names = [...AI_NAMES].sort(() => Math.random() - .5).slice(0, 7), k = DIFF[diff].ai;
   return names.map(n => ({ n, w: base * rnd(.35, 1.15), r: rnd(.0022, .0042) * k }));
 }
-function newBranch() { return { bld: [], inv: {}, port: false, auto: {} }; }
+function newLoc() { return { bld: [], inv: {}, auto: {}, x: 0, port: false, gar: 0 }; }
+function ensureL(s, lid) { return s.L[lid] || (s.L[lid] = newLoc()); }
 function newState(o = {}) {
-  const hq = o.hq || 'eu', diff = o.diff ?? 1, cash = DIFF[diff].cash;
+  const hl = o.hl || CAP[o.hq || 'eu'], hq = LOC[hl].c, diff = o.diff ?? 1, cash = DIFF[diff].cash;
   const m = {};
   for (const g of GK) m[g] = { sat: 0, d: rnd(.9, 1.1), h: [] };
   const s = {
-    v: 1, setup: !!o.done, ceo: o.ceo || '', name: o.name || 'Moja Firma', color: o.color || COLORS[0], hq, diff,
+    v: 2, setup: !!o.done, ceo: o.ceo || '', name: o.name || 'Moja Firma', color: o.color || COLORS[0], hq, hl, diff,
     cash, hour: 0, last: Date.now(),
-    c: { [hq]: newBranch() }, ships: [], nid: 1, m, ai: mkAI(cash, diff),
+    c: { [hq]: {} }, L: { [hl]: newLoc() }, ships: [], veh: [], nid: 1, m, ai: mkAI(cash, diff),
     season: 1, pp: 0, perk: { prod: 0, upk: 0, ship: 0, sell: 0 }, ev: [],
     news: [], inc: 0, upk: 0, lastSeason: null, tut: { step: o.tut === false ? 99 : 0, sold: false, rew: false },
   };
   for (const g of GK) m[g].h = Array(8).fill(price(g, s));
-  addNews(s, `Start! ${s.ceo ? 'Prezes ' + s.ceo + ', masz' : 'Masz'} ${money(cash)} i siedzibę: ${CN[hq].n}.`);
+  addNews(s, `Start! ${s.ceo ? 'Prezes ' + s.ceo + ', masz' : 'Masz'} ${money(cash)} i siedzibę: ${LOC[hl].n} (${CN[hq].n}).`);
+  return s;
+}
+// zapis z 0.1–0.3 (kontynenty bez miejscowości) → wszystko trafia do stolicy kontynentu
+function migrate(s) {
+  if (s.setup === undefined) s.setup = true;
+  s.hq = s.hq || 'eu'; s.color = s.color || COLORS[0]; s.diff = s.diff ?? 1; s.ceo = s.ceo || '';
+  s.tut = s.tut || { step: 99, sold: true, rew: true };
+  s.L = {}; s.veh = [];
+  const nc = {};
+  for (const cid in s.c) {
+    const br = s.c[cid], lid = CAP[cid], L = newLoc();
+    L.bld = br.bld || []; L.inv = br.inv || {}; L.auto = br.auto || {}; L.port = !!br.port;
+    L.x = Math.max(0, Math.ceil((L.bld.length - TYPE.m.slots) / TYPE.m.step));
+    s.L[lid] = L; nc[cid] = {};
+  }
+  s.c = nc;
+  for (const sh of s.ships) for (const k of ['at', 'from', 'to']) if (sh[k] && CAP[sh[k]]) sh[k] = CAP[sh[k]];
+  s.hl = CAP[s.hq]; s.v = 2;
+  if (s.tut.step < 99 && s.tut.step > 0) s.tut.step = 99;
+  addNews(s, 'Aktualizacja: miasta i wsie! Twoje zakłady przeniesiono do stolic kontynentów.');
   return s;
 }
 function load() {
@@ -111,12 +167,8 @@ function load() {
     const raw = localStorage.getItem(SAVE);
     if (raw) {
       const s = JSON.parse(raw);
-      if (s && s.v === 1) { // starsze zapisy (0.1) – uzupełnij nowe pola
-        if (s.setup === undefined) s.setup = true;
-        s.hq = s.hq || 'eu'; s.color = s.color || COLORS[0]; s.diff = s.diff ?? 1; s.ceo = s.ceo || '';
-        s.tut = s.tut || { step: 99, sold: true, rew: true };
-        return s;
-      }
+      if (s && s.v === 2) return s;
+      if (s && s.v === 1) return migrate(s);
     }
   } catch (e) {}
   return newState();
@@ -128,41 +180,57 @@ function priceAt(g, sat, d) { return G[g].p * d * clamp(Math.exp(-sat / SC(g)), 
 function price(g, s = S) { const m = s.m[g]; return priceAt(g, m.sat, m.d); }
 function sellPrice(g, q, s = S) { const m = s.m[g]; return priceAt(g, m.sat + q / 2, m.d) * (1 + .04 * s.perk.sell); }
 function buyPrice(g, q, s = S) { const m = s.m[g]; return priceAt(g, m.sat - q / 2, m.d) * 1.15; }
-function add(br, g, q) { br.inv[g] = (br.inv[g] || 0) + q; }
+function add(L, g, q) { L.inv[g] = (L.inv[g] || 0) + q; }
+const T = lid => TYPE[LOC[lid].t];
+const slots = (L, lid) => T(lid).slots + L.x * T(lid).step;
+const used = L => L.bld.length + (L.gar ? 1 : 0);
+const free = (s, lid) => { const L = s.L[lid]; return L ? slots(L, lid) - used(L) : T(lid).slots; };
 
-function sell(s, cid, g, q) {
-  const br = s.c[cid]; q = Math.min(q, br.inv[g] || 0);
+function sell(s, lid, g, q) {
+  const L = s.L[lid]; q = Math.min(q, L.inv[g] || 0);
   if (q <= 0) return 0;
-  const rev = sellPrice(g, q, s) * q;
-  s.m[g].sat += q; br.inv[g] -= q; if (br.inv[g] < 1e-6) delete br.inv[g];
+  const rev = sellPrice(g, q, s) * T(lid).sell * q;
+  s.m[g].sat += q; L.inv[g] -= q; if (L.inv[g] < 1e-6) delete L.inv[g];
   s.cash += rev; if (s.tut) s.tut.sold = true; return rev;
 }
-function buy(s, cid, g, q) {
+function buy(s, lid, g, q) {
   const cost = buyPrice(g, q, s) * q;
   if (q <= 0 || cost > s.cash) return false;
-  s.cash -= cost; s.m[g].sat -= q; add(s.c[cid], g, q); return cost;
+  s.cash -= cost; s.m[g].sat -= q; add(ensureL(s, lid), g, q); return cost;
 }
 function resF(s, cid, g) {
   let f = CN[cid].r[g] || 1;
   for (const e of s.ev) if (e.c === cid && e.g === g) f *= e.f;
   return f;
 }
-function bldValue(b) { const d = B[b.t]; return d.cost * (1 + (b.l - 1) * .8) * .6; }
+// mnożnik wydajności zakładu w miejscowości (bez poziomu)
+function locF(s, lid, d, g) { const t = T(lid); return d.in ? t.fac : t.raw * resF(s, LOC[lid].c, g); }
+function bldValue(b) { const d = B[b.t]; return d.cost * (1 + (b.l - 1) * .8) * .6 + (b.land || 0) * .5; }
 function upCost(b) { return Math.round(B[b.t].cost * b.l * .8); }
+const garUp = L => GARAGE_COST * L.gar;
+const xCost = (L, lid) => T(lid).xCost * (L.x + 1);
 function worth(s = S) {
   let w = s.cash;
-  for (const cid in s.c) {
-    const br = s.c[cid];
-    if (cid !== s.hq) w += BRANCH_COST * .5;
-    if (br.port) w += PORT_COST * .5;
-    for (const b of br.bld) w += bldValue(b);
-    for (const g in br.inv) w += br.inv[g] * price(g, s) * .8;
+  for (const cid in s.c) if (cid !== s.hq) w += BRANCH_COST * .5;
+  for (const lid in s.L) {
+    const L = s.L[lid];
+    if (L.port) w += PORT_COST * .5;
+    if (L.gar) w += GARAGE_COST * L.gar * .5;
+    w += L.x * T(lid).xCost * .4;
+    for (const b of L.bld) w += bldValue(b);
+    for (const g in L.inv) w += L.inv[g] * price(g, s) * .8;
   }
   for (const sh of s.ships) { w += SHIP_COST * .5; if (sh.q) w += sh.q * price(sh.g, s) * .8; }
+  for (const v of s.veh) { w += VEH[v.k].cost * .5; if (v.q) w += v.q * price(v.g, s) * .8; }
   return w;
 }
-function shipHours(s, a, b) { return Math.max(4, Math.round(dist(a, b) * .8 / (1 + .2 * s.perk.ship))); }
-function shipFee(a, b, q) { return Math.round(dist(a, b) * 12 + q * .5); }
+const spdM = s => 1 + .2 * s.perk.ship;
+function shipHours(s, a, b) { return Math.max(6, Math.round(km(a, b) * 1.3 / (150 * spdM(s)))); }
+function shipFee(a, b, q) { return Math.round(km(a, b) * .6 + q * .5) + 100; }
+function vehHours(s, k, a, b) { return Math.ceil(km(a, b) * 1.25 / (VEH[k].spd * spdM(s))) + 1; }
+function vehFee(k, a, b) { return Math.round(km(a, b) * 1.25 * VEH[k].fuel) + 20; }
+const garCap = (s, lid) => (s.L[lid] ? s.L[lid].gar : 0) * 2;
+const garUsed = (s, lid) => s.veh.filter(v => v.home === lid).length;
 function addNews(s, t) { s.news.unshift({ h: s.hour, t }); s.news.length = Math.min(s.news.length, 30); }
 function tstr(h) { const d = Math.floor(h / 24) + 1, hh = h % 24; return `Dzień ${d}, ${String(hh).padStart(2, '0')}:00`; }
 
@@ -172,32 +240,39 @@ function hour(s) {
   const cash0 = s.cash;
   const prodM = 1 + .08 * s.perk.prod, upkM = Math.max(.3, 1 - .07 * s.perk.upk);
   let upk = 0;
-  for (const cid in s.c) {
-    const br = s.c[cid];
-    for (const b of br.bld) {
+  for (const lid in s.L) {
+    const L = s.L[lid];
+    for (const b of L.bld) {
       const d = B[b.t], k = b.l * prodM;
       upk += d.cost * .0012 * b.l * upkM;
       if (d.in) {
         let f = 1; const miss = [];
-        for (const g in d.in) { const r = (br.inv[g] || 0) / (d.in[g] * k); if (r < 1) miss.push(G[g].n); f = Math.min(f, r); }
+        for (const g in d.in) { const r = (L.inv[g] || 0) / (d.in[g] * k); if (r < 1) miss.push(G[g].n); f = Math.min(f, r); }
         if (f <= .001) { b.st = 'Stoi — brak: ' + miss.join(', '); continue; }
-        for (const g in d.in) { br.inv[g] -= d.in[g] * k * f; if (br.inv[g] < 1e-6) delete br.inv[g]; }
-        for (const g in d.out) add(br, g, d.out[g] * k * f);
+        for (const g in d.in) { L.inv[g] -= d.in[g] * k * f; if (L.inv[g] < 1e-6) delete L.inv[g]; }
+        for (const g in d.out) add(L, g, d.out[g] * k * f * locF(s, lid, d, g));
         b.st = f < .999 ? `Praca ${Math.round(f * 100)}% — mało: ${miss.join(', ')}` : '';
       } else {
-        for (const g in d.out) add(br, g, d.out[g] * k * resF(s, cid, g));
+        for (const g in d.out) add(L, g, d.out[g] * k * locF(s, lid, d, g));
         b.st = '';
       }
     }
-    if (br.port) upk += 30 * upkM;
-    for (const g in br.auto) if (br.auto[g] && (br.inv[g] || 0) >= 1) sell(s, cid, g, Math.floor(br.inv[g]));
+    if (L.port) upk += 30 * upkM;
+    if (L.gar) upk += 15 * L.gar * upkM;
+    for (const g in L.auto) if (L.auto[g] && (L.inv[g] || 0) >= 1) sell(s, lid, g, Math.floor(L.inv[g]));
   }
+  for (const v of s.veh) upk += VEH[v.k].cost * .001 * upkM;
   s.cash -= upk; s.upk = upk;
-  // statki
+  // statki i pojazdy
   for (const sh of s.ships) if (sh.st === 'sail' && s.hour >= sh.eta) {
-    if (sh.q) add(s.c[sh.to], sh.g, sh.q);
-    addNews(s, `Statek #${sh.id} dopłynął do: ${CN[sh.to].n}` + (sh.q ? ` (${qty(sh.q)} ${G[sh.g].n})` : ''));
+    if (sh.q) add(ensureL(s, sh.to), sh.g, sh.q);
+    addNews(s, `Statek #${sh.id} dopłynął do: ${LOC[sh.to].n}` + (sh.q ? ` (${qty(sh.q)} ${G[sh.g].n})` : ''));
     Object.assign(sh, { st: 'idle', at: sh.to, to: null, g: null, q: 0 });
+  }
+  for (const v of s.veh) if (v.st === 'go' && s.hour >= v.eta) {
+    if (v.q) add(ensureL(s, v.to), v.g, v.q);
+    addNews(s, `${VEH[v.k].n} #${v.id} dojechał do: ${LOC[v.to].n}` + (v.q ? ` (${qty(v.q)} ${G[v.g].n})` : ''));
+    Object.assign(v, { st: 'idle', at: v.to, to: null, g: null, q: 0 });
   }
   // rynek
   for (const g of GK) {
@@ -245,25 +320,26 @@ function endSeason(s) {
 }
 
 // ================== SAMOUCZEK ==================
-const hasB = t => Object.values(S.c).some(br => br.bld.some(b => b.t === t));
-const hqInv = g => (S.c[S.hq] && S.c[S.hq].inv[g]) || 0;
+const hasB = t => Object.values(S.L).some(L => L.bld.some(b => b.t === t));
+const hqInv = g => (S.L[S.hl] && S.L[S.hl].inv[g]) || 0;
 const TUT = [
-  { t: 'Witaj, prezesie!', d: () => `${esc(S.name)} startuje w: ${CN[S.hq].n}. Cel gry: zarabiać, budować coraz bardziej zaawansowane łańcuchy produkcji i wygrać sezon w rankingu. Pokażę Ci podstawy w kilku krokach.`, next: true },
-  { t: 'Zakładka Budowa', d: 'Wszystkie zakłady stawiasz w zakładce Budowa. Otwórz ją.', sel: () => ['[data-tab=budowa]'], done: () => ui.tab === 'budowa' },
-  { t: 'Pierwsza farma', d: 'Farma produkuje zboże — najtańszy surowiec. Kliknij cenę przy Farmie, żeby ją zbudować.',
-    sel: () => ['[data-a=build][data-b=farma]', `[data-a=bc][data-c=${S.hq}]`, '[data-tab=budowa]'], done: () => hasB('farma') },
-  { t: 'Młyn', d: 'Młyn przerabia 10 zboża na 8 mąki, a mąka jest ponad 3× droższa. Tak działają łańcuchy produkcji. Zbuduj Młyn.',
-    sel: () => ['[data-a=build][data-b=mlyn]', `[data-a=bc][data-c=${S.hq}]`, '[data-tab=budowa]'], done: () => hasB('mlyn') },
+  { t: 'Witaj, prezesie!', d: () => `${esc(S.name)} startuje w: ${LOC[S.hl].n} (${CN[S.hq].n}). Cel gry: zarabiać, budować coraz bardziej zaawansowane łańcuchy produkcji i wygrać sezon w rankingu. Pokażę Ci podstawy w kilku krokach.`, next: true },
+  { t: 'Zakładka Budowa', d: 'Zakłady stawiasz w zakładce Budowa, na działkach w miastach i wsiach. Otwórz ją.', sel: () => ['[data-tab=budowa]'], done: () => ui.tab === 'budowa' },
+  { t: 'Pierwsza farma', d: () => `Farma produkuje zboże — najtańszy surowiec. Zbuduj ją w: ${LOC[S.hl].n}. Cena = budynek + działka.`,
+    sel: () => ['[data-a=build][data-b=farma]', `[data-a=bl][data-l=${S.hl}]`, '[data-tab=budowa]'], done: () => hasB('farma') },
+  { t: 'Młyn', d: 'Młyn przerabia 10 zboża na 8 mąki, a mąka jest ponad 3× droższa. Tak działają łańcuchy produkcji. Zbuduj Młyn w tej samej miejscowości.',
+    sel: () => ['[data-a=build][data-b=mlyn]', `[data-a=bl][data-l=${S.hl}]`, '[data-tab=budowa]'], done: () => hasB('mlyn') },
   { t: 'Produkcja trwa', d: () => `Zakłady pracują same: 1 godzina gry = 4 s. Każdy ma też koszt utrzymania co godzinę. Poczekaj na mąkę: ${qty(Math.min(5, hqInv('maka')))} / 5.`,
     done: () => hqInv('maka') >= 5 || S.tut.sold },
   { t: 'Rynek', d: 'Mąka gotowa! Otwórz zakładkę Rynek.', sel: () => ['[data-tab=magazyn]'], done: () => ui.tab === 'magazyn' },
-  { t: 'Sprzedaż', d: 'Sprzedaj mąkę przyciskiem „Wszystko”. Uwaga: im więcej sprzedajesz naraz, tym niższa cena — rynek się nasyca i odbija z czasem.',
-    sel: () => ['[data-a=sell][data-g=maka][data-f="1"]', `[data-a=mc][data-c=${S.hq}]`, '[data-tab=magazyn]'], done: () => S.tut.sold },
+  { t: 'Sprzedaż', d: 'Sprzedaj mąkę przyciskiem „Wszystko”. Im więcej sprzedajesz naraz, tym niższa cena — rynek się nasyca i odbija z czasem.',
+    sel: () => ['[data-a=sell][data-g=maka][data-f="1"]', `[data-a=ml][data-l=${S.hl}]`, '[data-tab=magazyn]'], done: () => S.tut.sold },
   { t: 'Auto‑sprzedaż', d: 'Włącz „Auto” przy mące. Towar będzie sprzedawany co godzinę, także gdy gra jest zamknięta.',
-    sel: () => ['[data-a=auto][data-g=maka]', `[data-a=mc][data-c=${S.hq}]`, '[data-tab=magazyn]'], done: () => !!(S.c[S.hq].auto || {}).maka },
+    sel: () => ['[data-a=auto][data-g=maka]', `[data-a=ml][data-l=${S.hl}]`, '[data-tab=magazyn]'], done: () => !!((S.L[S.hl] || {}).auto || {}).maka },
   { t: 'Uważaj na surowce', d: 'Nie włączaj auto‑sprzedaży zboża, bo młyn stanie. Zakład bez surowców pokazuje czerwony napis „Stoi — brak”. Brakujące surowce możesz dokupić na rynku (marża 15%).', next: true },
-  { t: 'Ulepszenia', d: 'W Budowie ulepszasz zakłady: więcej produkcji, ale też większe zużycie surowców i koszty. Następny krok: Piekarnia (mąka → chleb).', next: true, sel: () => ['[data-tab=budowa]'] },
-  { t: 'Świat i statki', d: 'Każdy kontynent ma inne bonusy surowców. Otwórz tam oddział, postaw porty po obu stronach i przewoź towary statkami do swoich fabryk.', next: true, sel: () => ['[data-tab=logistyka]'] },
+  { t: 'Miasta i wsie', d: 'Wieś: tania działka, farmy i kopalnie +25%. Miasto: drogie działki, ale fabryki +15% i sprzedaż +5%. Działek jest ograniczona liczba — w miastach możesz dokupić kolejne.', next: true, sel: () => ['[data-tab=budowa]'] },
+  { t: 'Garaże i ciężarówki', d: 'Każda miejscowość ma własny magazyn. Zbuduj garaż (zajmuje działkę), kup dostawczak lub ciężarówkę i woź zboże ze wsi do młyna w mieście. Zakładka Transport.', next: true, sel: () => ['[data-tab=logistyka]'] },
+  { t: 'Porty i statki', d: 'Między kontynentami (i na wyspy, np. Tokio) wozisz towar statkami. Port możesz postawić tylko w miastach nad morzem.', next: true, sel: () => ['[data-tab=logistyka]'] },
   { t: 'Ranking i sezony', d: 'Sezon trwa 30 dni gry, ranking liczy wartość firmy. Za miejsce dostajesz punkty prestiżu na stałe ulepszenia.', next: true, sel: () => ['[data-tab=ranking]'] },
   { t: 'Gotowe!', d: () => S.tut.rew ? 'Samouczek ukończony. Powodzenia!' : 'Nagroda za ukończenie samouczka: $5 tys. Powodzenia!', next: true, btn: 'Zakończ', fin: true },
 ];
@@ -292,7 +368,8 @@ function renderTut() {
 }
 
 // ================== KREATOR KONTA ==================
-const wz = { step: 0, ceo: '', name: '', hq: 'eu', color: COLORS[0], diff: 1, tut: true };
+const wz = { step: 0, ceo: '', name: '', hq: 'eu', hl: CAP.eu, color: COLORS[0], diff: 1, tut: true };
+const bonTxt = c => Object.entries(c.r).filter(([, v]) => v >= 1.2).sort((a, b) => b[1] - a[1]).map(([g, v]) => `${G[g].n} ×${String(v).replace('.', ',')}`).join(' · ') || 'zrównoważony';
 function renderWiz() {
   const el = $('wiz');
   if (S.setup) { el.hidden = true; return; }
@@ -301,14 +378,16 @@ function renderWiz() {
   let b = '';
   if (wz.step === 0) {
     b = `<div class="wz-logo"><svg viewBox="0 0 64 64" width="72" height="72"><rect x="6" y="30" width="12" height="28" rx="2" fill="#e0823f"/><rect x="26" y="18" width="12" height="40" rx="2" fill="#4aa3ff"/><rect x="46" y="6" width="12" height="52" rx="2" fill="#3fcf7f"/></svg></div>
-      <h1>XyxWord</h1><p class="mut">Zbuduj imperium gospodarcze: od farmy i kopalni do fabryk komputerów i samochodów. Rywalizuj z konkurencją w sezonowym rankingu.</p>
+      <h1>XyxWord</h1><p class="mut">Zbuduj imperium gospodarcze: od farmy na wsi do fabryk komputerów i samochodów w wielkich miastach. Rywalizuj z konkurencją w sezonowym rankingu.</p>
       <label class="f" for="wzCeo">Imię prezesa</label><input id="wzCeo" data-wz="ceo" maxlength="20" placeholder="np. Mati" value="${esc(wz.ceo)}">
       <label class="f" for="wzName">Nazwa firmy</label><input id="wzName" data-wz="name" maxlength="24" placeholder="np. Mati Holding" value="${esc(wz.name)}">
       <div id="wzErr" class="warn"></div>`;
   } else if (wz.step === 1) {
-    b = `<h1>Siedziba firmy</h1><p class="mut">Tu zaczynasz. Każdy kontynent ma inne bonusy do wydobycia surowców. Inne kontynenty otworzysz później.</p>
-      ${CONT.map(c => { const bon = Object.entries(c.r).filter(([, v]) => v >= 1.2).sort((a, b) => b[1] - a[1]);
-        return `<button class="wz-opt ${wz.hq === c.id ? 'on' : ''}" data-a="wzSet" data-k="hq" data-v="${c.id}"><b>${c.n}</b><span>${bon.map(([g, v]) => `${G[g].n} ×${String(v).replace('.', ',')}`).join(' · ') || 'zrównoważony'}</span></button>`; }).join('')}`;
+    b = `<h1>Siedziba firmy</h1><p class="mut">Wybierz kontynent i miejscowość startową. Inne miejsca otworzysz później.</p>
+      <div class="chips">${CONT.map(c => `<button class="${wz.hq === c.id ? 'on' : ''}" data-a="wzSet" data-k="hq" data-v="${c.id}">${c.n}</button>`).join('')}</div>
+      <div class="mut small" style="margin:0 2px 8px">Bonusy surowców: ${bonTxt(CN[wz.hq])}</div>
+      ${LOCS.filter(l => l.c === wz.hq).map(l => `<button class="wz-opt ${wz.hl === l.id ? 'on' : ''}" data-a="wzSet" data-k="hl" data-v="${l.id}">
+        <b>${l.n} <span class="ltag ${l.t}">${TYPE[l.t].n}</span>${l.port ? ' <span class="ltag p">Port</span>' : ''}</b><span>${TYPE[l.t].d}</span></button>`).join('')}`;
   } else if (wz.step === 2) {
     b = `<h1>Styl i trudność</h1><label class="f">Kolor firmy</label><div class="sw">${COLORS.map(c => `<button class="${wz.color === c ? 'on' : ''}" style="background:${c}" data-a="wzSet" data-k="color" data-v="${c}" aria-label="Kolor ${c}"></button>`).join('')}</div>
       <label class="f">Poziom trudności</label>
@@ -316,7 +395,7 @@ function renderWiz() {
   } else {
     b = `<h1>Gotowe do startu</h1>
       <div class="card"><div class="row"><span class="dot" style="background:${wz.color}"></span><div class="grow"><b>${esc(wz.name)}</b><div class="mut small">Prezes: ${esc(wz.ceo)}</div></div></div>
-      <table style="margin-top:8px"><tr><td>Siedziba</td><td class="n">${CN[wz.hq].n}</td></tr><tr><td>Trudność</td><td class="n">${DIFF[wz.diff].n}</td></tr><tr><td>Gotówka</td><td class="n">${money(DIFF[wz.diff].cash)}</td></tr></table></div>
+      <table style="margin-top:8px"><tr><td>Siedziba</td><td class="n">${LOC[wz.hl].n} (${TYPE[LOC[wz.hl].t].n.toLowerCase()})</td></tr><tr><td>Kontynent</td><td class="n">${CN[wz.hq].n}</td></tr><tr><td>Trudność</td><td class="n">${DIFF[wz.diff].n}</td></tr><tr><td>Gotówka</td><td class="n">${money(DIFF[wz.diff].cash)}</td></tr></table></div>
       <button class="toggle ${wz.tut ? 'on' : ''}" data-a="wzSet" data-k="tut" data-v="${wz.tut ? 0 : 1}" style="width:100%;min-height:44px">Samouczek: ${wz.tut ? 'włączony' : 'wyłączony'}</button>`;
   }
   el.innerHTML = `<div class="wz-in"><div class="wz-dots">${dots}</div>${b}
@@ -332,22 +411,26 @@ function spark(h) {
   return `<svg class="spark" viewBox="0 0 64 20"><polyline fill="none" stroke="${up ? 'var(--ok)' : 'var(--bad)'}" stroke-width="1.5" points="${pts}"/></svg>`;
 }
 function chg(g) { const h = S.m[g].h, a = h[0], b = price(g); return (b - a) / a * 100; }
-function flowTxt(d, k, cid) {
-  const o = Object.entries(d.out).map(([g, v]) => `<em>${qty(v * k * (d.in ? 1 : (cid ? resF(S, cid, g) : 1)))}</em> ${G[g].n}`).join(', ');
+function flowTxt(d, k, lid) {
+  const o = Object.entries(d.out).map(([g, v]) => `<em>${qty(v * k * (lid ? locF(S, lid, d, g) : 1))}</em> ${G[g].n}`).join(', ');
   if (!d.in) return `→ ${o} /h`;
   return Object.entries(d.in).map(([g, v]) => `${qty(v * k)} ${G[g].n}`).join(' + ') + ` → ${o} /h`;
 }
-function chips(sel, act, onlyOwn) {
-  return `<div class="chips">${CONT.filter(c => !onlyOwn || S.c[c.id]).map(c =>
-    `<button class="${c.id === sel ? 'on' : ''} ${S.c[c.id] ? 'own' : ''}" data-a="${act}" data-c="${c.id}">${c.n}</button>`).join('')}</div>`;
+const tag = l => `<span class="ltag ${l.t}">${TYPE[l.t].n}</span>`;
+function contChips(sel) {
+  return `<div class="chips">${CONT.map(c => `<button class="${c.id === sel ? 'on' : ''} ${S.c[c.id] ? 'own' : ''}" data-a="bc" data-c="${c.id}">${c.n}</button>`).join('')}</div>`;
 }
+function locChips(list, sel, act) {
+  return `<div class="chips">${list.map(l => { const L = S.L[l.id];
+    return `<button class="${l.id === sel ? 'on' : ''} ${L && (L.bld.length || L.gar) ? 'own' : ''}" data-a="${act}" data-l="${l.id}">${l.n}<small>${l.t === 'w' ? 'wieś' : 'miasto'}</small></button>`; }).join('')}</div>`;
+}
+const bldCount = () => Object.values(S.L).reduce((a, L) => a + L.bld.length, 0);
 
 function vFirma() {
   const r = ranking(), pos = r.findIndex(x => x.me) + 1;
   const day = Math.floor((S.hour % SEASON_H) / 24) + 1;
-  const nb = Object.values(S.c).reduce((a, b) => a + b.bld.length, 0);
   let h = '';
-  if (!nb && S.tut.step >= TUT.length) h += `<div class="card hint"><b>Jak zacząć</b><div class="mut" style="margin-top:4px">Wejdź w <b>Budowa</b>, postaw Farmę (zboże) i Młyn (mąka), potem Piekarnię. W <b>Rynek</b> sprzedawaj towary albo włącz auto‑sprzedaż. Surowce z innych kontynentów przewozisz statkami.</div><div class="btns"><button class="btn p" data-a="tab" data-t="budowa">Do budowy</button></div></div>`;
+  if (!bldCount() && S.tut.step >= TUT.length) h += `<div class="card hint"><b>Jak zacząć</b><div class="mut" style="margin-top:4px">W <b>Budowa</b> postaw Farmę i Młyn w swojej siedzibie, potem Piekarnię. Na wsiach farmy i kopalnie dają więcej, w miastach fabryki. Towar między miejscowościami wożą ciężarówki, między kontynentami statki.</div><div class="btns"><button class="btn p" data-a="tab" data-t="budowa">Do budowy</button></div></div>`;
   h += mapSvg();
   h += `<div class="kpis">
     <div class="kpi"><span>Wartość firmy</span><b>${money(worth())}</b></div>
@@ -362,17 +445,18 @@ function mapSvg() {
   let lines = '', ships = '', dots = '';
   for (const sh of S.ships) {
     if (sh.st !== 'sail') continue;
-    const [x1, y1] = POS[sh.from], [x2, y2] = POS[sh.to];
+    const [x1, y1] = POS[LOC[sh.from].c], [x2, y2] = POS[LOC[sh.to].c];
     const p = clamp(1 - (sh.eta - S.hour) / sh.dur, 0, 1);
     lines += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="#4aa3ff" stroke-width=".4" stroke-dasharray="1.2 1" opacity=".7"/>`;
     ships += `<circle cx="${x1 + (x2 - x1) * p}" cy="${y1 + (y2 - y1) * p}" r="1.4" fill="#4aa3ff"/>`;
   }
   for (const c of CONT) {
-    const [x, y] = POS[c.id], own = !!S.c[c.id], br = S.c[c.id];
-    const n = own ? br.bld.length : 0;
+    const [x, y] = POS[c.id], own = !!S.c[c.id];
+    const ls = Object.keys(S.L).filter(l => LOC[l].c === c.id);
+    const n = ls.reduce((a, l) => a + S.L[l].bld.length, 0), port = ls.some(l => S.L[l].port);
     dots += `<g data-a="goBuild" data-c="${c.id}" style="cursor:pointer">
       <circle cx="${x}" cy="${y}" r="${own ? 4 + Math.min(n, 8) * .5 : 3}" fill="${own ? S.color : '#2d323b'}" stroke="${own ? '#fff' : '#4a525e'}" stroke-width=".5"/>
-      ${own && br.port ? `<rect x="${x + 3.5}" y="${y - 5.5}" width="3" height="3" rx=".6" fill="#4aa3ff"/>` : ''}
+      ${port ? `<rect x="${x + 3.5}" y="${y - 5.5}" width="3" height="3" rx=".6" fill="#4aa3ff"/>` : ''}
       <text x="${x}" y="${y + 9}" text-anchor="middle" font-size="3.6" fill="${own ? '#eef0f3' : '#9aa3af'}">${c.n}</text>
       ${own ? `<text x="${x}" y="${y + 1.3}" text-anchor="middle" font-size="3.4" font-weight="700" fill="#1b1006">${n}</text>` : ''}
     </g>`;
@@ -383,105 +467,175 @@ function mapSvg() {
     <path d="M62 12q18-6 30 6-2 14-14 18-12 0-16-8-2-8 0-16Z"/><path d="M78 62q8-4 14 2 0 8-8 10-8 0-6-12Z"/></g>`;
   return `<div class="map"><svg viewBox="0 0 100 80">${land}${lines}${dots}${ships}</svg></div>`;
 }
+// mapa kontynentu z miejscowościami i jadącymi pojazdami
+function locMap(cid, sel) {
+  const ls = LOCS.filter(l => l.c === cid);
+  const la = ls.map(l => l.la), lo = ls.map(l => l.lo);
+  const a0 = Math.min(...la), a1 = Math.max(...la), o0 = Math.min(...lo), o1 = Math.max(...lo);
+  const P = l => [10 + (l.lo - o0) / ((o1 - o0) || 1) * 80, 8 + (a1 - l.la) / ((a1 - a0) || 1) * 38];
+  let g = '';
+  for (const v of S.veh) {
+    if (v.st !== 'go' || LOC[v.to].c !== cid) continue;
+    const [x1, y1] = P(LOC[v.from]), [x2, y2] = P(LOC[v.to]), p = clamp(1 - (v.eta - S.hour) / v.dur, 0, 1);
+    g += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="#f5c542" stroke-width=".35" stroke-dasharray="1 .8" opacity=".8"/>
+      <rect x="${x1 + (x2 - x1) * p - 1.2}" y="${y1 + (y2 - y1) * p - .8}" width="2.4" height="1.6" rx=".3" fill="#f5c542"/>`;
+  }
+  const boxes = ls.map(l => { const [x, y] = P(l); return [x - 2.5, y - 2.5, x + 2.5, y + 2.5]; }), lab = {};
+  const hit = b => boxes.some(o => b[0] < o[2] && b[2] > o[0] && b[1] < o[3] && b[3] > o[1]);
+  for (const l of ls) { // etykiety bez nachodzenia: pod, nad, w prawo, w lewo
+    const [x, y] = P(l), w = l.n.length * 1.55;
+    const opts = [[x, y + 5.6, 'middle', x - w / 2, y + 3.4, x + w / 2, y + 6.4], [x, y - 3.4, 'middle', x - w / 2, y - 5.6, x + w / 2, y - 2.6],
+      [x + 3.2, y + 1, 'start', x + 3.2, y - 1.2, x + 3.2 + w, y + 1.8], [x - 3.2, y + 1, 'end', x - 3.2 - w, y - 1.2, x - 3.2, y + 1.8]];
+    const o = opts.find(o => !hit(o.slice(3))) || opts[0];
+    boxes.push(o.slice(3)); lab[l.id] = o;
+  }
+  for (const l of ls) {
+    const [x, y] = P(l), L = S.L[l.id], own = L && (L.bld.length || L.gar), on = l.id === sel, lb = lab[l.id];
+    const shape = l.t === 'm' ? `<rect x="${x - 2.2}" y="${y - 2.2}" width="4.4" height="4.4" rx=".8"` : `<circle cx="${x}" cy="${y}" r="2"`;
+    g += `<g data-a="bl" data-l="${l.id}" style="cursor:pointer">${on ? `<circle cx="${x}" cy="${y}" r="4.2" fill="none" stroke="#e0823f" stroke-width=".6"/>` : ''}
+      ${shape} fill="${own ? S.color : '#2d323b'}" stroke="${own ? '#fff' : '#5a6270'}" stroke-width=".4"/>
+      ${L && L.port ? `<rect x="${x + 2.4}" y="${y - 4}" width="2" height="2" rx=".4" fill="#4aa3ff"/>` : ''}
+      <text x="${lb[0]}" y="${lb[1]}" text-anchor="${lb[2]}" font-size="2.8" fill="${on ? '#eef0f3' : '#9aa3af'}">${l.n}</text></g>`;
+  }
+  return `<div class="map"><svg viewBox="0 0 100 52">${g}</svg></div>`;
+}
 
 function vBudowa() {
-  const cid = ui.bc, br = S.c[cid], c = CN[cid];
-  let h = chips(cid, 'bc');
-  if (!br) {
+  const cid = ui.bc, c = CN[cid];
+  let h = contChips(cid);
+  if (!S.c[cid]) {
     return h + `<div class="card"><div class="bname">${c.n}</div>
-      <div class="mut" style="margin:4px 0 8px">Nie masz tu oddziału. Bonusy surowców: ${Object.entries(c.r).filter(([, v]) => v >= 1.2).map(([g, v]) => `${G[g].n} ×${String(v).replace('.', ',')}`).join(', ') || 'brak'}.</div>
+      <div class="mut" style="margin:4px 0 8px">Nie masz tu oddziału. Bonusy surowców: ${bonTxt(c)}. Miejscowości: ${LOCS.filter(l => l.c === cid).map(l => l.n).join(', ')}.</div>
       <button class="btn p" data-a="branch" data-c="${cid}" ${S.cash < BRANCH_COST ? 'disabled' : ''}>Otwórz oddział — ${money(BRANCH_COST)}</button></div>`;
   }
-  h += `<h2>Twoje zakłady — ${c.n}</h2>`;
-  if (!br.bld.length) h += `<div class="card mut">Brak zakładów. Zbuduj coś poniżej.</div>`;
-  for (const b of br.bld) {
+  if (LOC[ui.bl].c !== cid) ui.bl = Object.keys(S.L).find(l => LOC[l].c === cid) || CAP[cid];
+  const lid = ui.bl, l = LOC[lid], t = TYPE[l.t], L = S.L[lid] || newLoc(), fr = slots(L, lid) - used(L);
+  h += locMap(cid, lid) + locChips(LOCS.filter(x => x.c === cid), lid, 'bl');
+  h += `<div class="card"><div class="row"><div class="grow"><span class="bname">${l.n}</span> ${tag(l)}${l.port ? ' <span class="ltag p">Wybrzeże</span>' : ''}<div class="flow">${t.d}</div></div></div>
+    <div class="row" style="margin-top:8px"><div class="grow">Działki: <b>${used(L)} / ${slots(L, lid)}</b> <span class="mut small">· działka ${money(t.land)}</span></div>
+    ${L.x < t.maxX ? `<button class="btn s" data-a="expand" data-l="${lid}" ${S.cash < xCost(L, lid) ? 'disabled' : ''}>+${t.step} dział${t.step > 1 ? 'ki' : 'ka'} — ${money(xCost(L, lid))}</button>` : '<span class="mut small">maks. działek</span>'}</div>
+    <div class="row" style="margin-top:8px"><div class="grow">Garaż: ${L.gar ? `<b>poz. ${L.gar}</b> <span class="mut small">· ${garUsed(S, lid)}/${garCap(S, lid)} pojazdów</span>` : '<span class="mut">brak</span>'}</div>
+    ${L.gar ? `<button class="btn s" data-a="garUp" data-l="${lid}" ${S.cash < garUp(L) ? 'disabled' : ''}>Rozbuduj — ${money(garUp(L))}</button>`
+      : `<button class="btn s g" data-a="garage" data-l="${lid}" ${S.cash < GARAGE_COST + t.land || fr < 1 ? 'disabled' : ''}>Zbuduj — ${money(GARAGE_COST + t.land)}</button>`}</div></div>`;
+  h += `<h2>Zakłady — ${l.n}</h2>`;
+  if (!L.bld.length) h += `<div class="card mut">Brak zakładów. Zbuduj coś poniżej.</div>`;
+  for (const b of L.bld) {
     const d = B[b.t], k = b.l * (1 + .08 * S.perk.prod), uc = upCost(b);
     h += `<div class="card"><div class="row"><div class="grow"><span class="tier t${d.t}">${TIER[d.t]}</span><span class="bname">${d.n}</span> <span class="mut">poz. ${b.l}</span></div></div>
-      <div class="flow">${flowTxt(d, k, cid)}</div>${b.st ? `<div class="warn">${esc(b.st)}</div>` : ''}
-      <div class="btns"><button class="btn s g" data-a="up" data-c="${cid}" data-id="${b.id}" ${S.cash < uc ? 'disabled' : ''}>Ulepsz — ${money(uc)}</button>
-      <button class="btn s" data-a="demo" data-c="${cid}" data-id="${b.id}">Sprzedaj za ${money(bldValue(b))}</button></div></div>`;
+      <div class="flow">${flowTxt(d, k, lid)}</div>${b.st ? `<div class="warn">${esc(b.st)}</div>` : ''}
+      <div class="btns"><button class="btn s g" data-a="up" data-l="${lid}" data-id="${b.id}" ${S.cash < uc ? 'disabled' : ''}>Ulepsz — ${money(uc)}</button>
+      <button class="btn s" data-a="demo" data-l="${lid}" data-id="${b.id}">Sprzedaj za ${money(bldValue(b))}</button></div></div>`;
   }
-  h += `<h2>Nowa inwestycja</h2>`;
-  for (let t = 0; t < 3; t++) {
-    for (const [id, d] of Object.entries(B).filter(([, d]) => d.t === t)) {
-      h += `<div class="card"><div class="row"><div class="grow"><span class="tier t${t}">${TIER[t]}</span><span class="bname">${d.n}</span></div>
-        <button class="btn s p" data-a="build" data-c="${cid}" data-b="${id}" ${S.cash < d.cost ? 'disabled' : ''}>${money(d.cost)}</button></div>
-        <div class="flow">${flowTxt(d, 1 + .08 * S.perk.prod, cid)}</div></div>`;
+  h += `<h2>Nowa inwestycja ${fr < 1 ? '— brak wolnych działek' : `— wolne działki: ${fr}`}</h2>`;
+  for (let ti = 0; ti < 3; ti++) {
+    for (const [id, d] of Object.entries(B).filter(([, d]) => d.t === ti)) {
+      const cost = d.cost + t.land, bon = d.in ? t.fac : t.raw;
+      h += `<div class="card"><div class="row"><div class="grow"><span class="tier t${ti}">${TIER[ti]}</span><span class="bname">${d.n}</span>${bon > 1 ? ` <span class="pos small">+${Math.round((bon - 1) * 100)}%</span>` : ''}</div>
+        <button class="btn s p" data-a="build" data-l="${lid}" data-b="${id}" ${S.cash < cost || fr < 1 ? 'disabled' : ''}>${money(cost)}</button></div>
+        <div class="flow">${flowTxt(d, 1 + .08 * S.perk.prod, lid)}</div></div>`;
     }
   }
   return h;
 }
 
 function vMagazyn() {
-  if (!S.c[ui.mc]) ui.mc = 'eu';
-  const cid = ui.mc, br = S.c[cid];
-  let h = chips(cid, 'mc', true);
-  const items = Object.entries(br.inv).filter(([, q]) => q >= .05);
-  h += `<h2>Magazyn — ${CN[cid].n}</h2><div class="card">`;
-  if (!items.length && !Object.values(br.auto).some(Boolean)) h += `<div class="mut">Magazyn pusty.</div>`;
+  const list = LOCS.filter(l => S.L[l.id]);
+  if (!S.L[ui.ml]) ui.ml = S.L[S.hl] ? S.hl : list[0].id;
+  const lid = ui.ml, L = S.L[lid], l = LOC[lid];
+  let h = locChips(list, lid, 'ml');
+  const items = Object.entries(L.inv).filter(([, q]) => q >= .05);
+  h += `<h2>Magazyn — ${l.n} · ceny ${l.t === 'm' ? '+5% (miasto)' : '−5% (wieś)'}</h2><div class="card">`;
+  if (!items.length && !Object.values(L.auto).some(Boolean)) h += `<div class="mut">Magazyn pusty.</div>`;
   const shown = new Set(items.map(([g]) => g));
-  for (const g in br.auto) if (br.auto[g] && !shown.has(g)) items.push([g, 0]);
+  for (const g in L.auto) if (L.auto[g] && !shown.has(g)) items.push([g, 0]);
   for (const [g, q] of items) {
-    const p = sellPrice(g, Math.max(q, 1));
+    const p = sellPrice(g, Math.max(q, 1)) * T(lid).sell;
     h += `<div style="padding:8px 0;border-bottom:1px solid var(--line)">
-      <div class="row"><div class="grow"><b>${G[g].n}</b> <span class="mut">· ${money(price(g))}/szt.</span></div><div class="q"><b>${qty(q)}</b></div></div>
+      <div class="row"><div class="grow"><b>${G[g].n}</b> <span class="mut">· ${money(price(g) * T(lid).sell)}/szt.</span></div><div class="q"><b>${qty(q)}</b></div></div>
       <div class="btns">
-        <button class="btn s g" data-a="sell" data-c="${cid}" data-g="${g}" data-f=".5" ${q < 1 ? 'disabled' : ''}>Sprzedaj ½</button>
-        <button class="btn s g" data-a="sell" data-c="${cid}" data-g="${g}" data-f="1" ${q < 1 ? 'disabled' : ''}>Wszystko ≈ ${money(p * Math.floor(q))}</button>
-        <button class="toggle ${br.auto[g] ? 'on' : ''}" data-a="auto" data-c="${cid}" data-g="${g}">Auto ${br.auto[g] ? 'wł.' : 'wył.'}</button>
+        <button class="btn s g" data-a="sell" data-l="${lid}" data-g="${g}" data-f=".5" ${q < 1 ? 'disabled' : ''}>Sprzedaj ½</button>
+        <button class="btn s g" data-a="sell" data-l="${lid}" data-g="${g}" data-f="1" ${q < 1 ? 'disabled' : ''}>Wszystko ≈ ${money(p * Math.floor(q))}</button>
+        <button class="toggle ${L.auto[g] ? 'on' : ''}" data-a="auto" data-l="${lid}" data-g="${g}">Auto ${L.auto[g] ? 'wł.' : 'wył.'}</button>
       </div></div>`;
   }
   h += `</div>`;
   const bq = Math.max(1, Math.floor(ui.buyQ) || 1), bc = buyPrice(ui.buyG, bq) * bq;
-  h += `<h2>Kup na rynku → ${CN[cid].n}</h2><div class="card"><div class="grid2">
+  h += `<h2>Kup na rynku → ${l.n}</h2><div class="card"><div class="grid2">
     <div><label class="f" for="buyG">Towar</label><select id="buyG" data-in="buyG">${GK.map(g => `<option value="${g}" ${g === ui.buyG ? 'selected' : ''}>${G[g].n}</option>`).join('')}</select></div>
     <div><label class="f" for="buyQ">Ilość</label><input id="buyQ" data-in="buyQ" type="number" inputmode="numeric" min="1" value="${bq}"></div></div>
-    <div class="btns"><button class="btn p" data-a="buy" data-c="${cid}" ${bc > S.cash ? 'disabled' : ''}>Kup za ${money(bc)}</button><span class="mut small" style="align-self:center">marża rynku 15%</span></div></div>`;
+    <div class="btns"><button class="btn p" data-a="buy" data-l="${lid}" ${bc > S.cash ? 'disabled' : ''}>Kup za ${money(bc)}</button><span class="mut small" style="align-self:center">marża rynku 15%</span></div></div>`;
   h += `<h2>Ceny rynkowe (ostatnie 2 dni)</h2><div class="card"><table><thead><tr><th>Towar</th><th class="n">Cena</th><th class="n">Zmiana</th><th></th></tr></thead><tbody>
     ${GK.map(g => { const c = chg(g); return `<tr><td>${G[g].n}</td><td class="n">${money(price(g))}</td><td class="n ${c >= 0 ? 'pos' : 'neg'}">${c >= 0 ? '+' : ''}${c.toFixed(1).replace('.', ',')}%</td><td>${spark([...S.m[g].h, price(g)])}</td></tr>`; }).join('')}
     </tbody></table></div>`;
   return h;
 }
 
+// formularz wysyłki (statek albo pojazd)
+function sendForm(kind, u, dests, cap, hrsF, feeF) {
+  const st = ui[kind], f = st[u.id] || (st[u.id] = {});
+  if (!dests.includes(f.to)) f.to = dests[0];
+  const inv = (S.L[u.at] || newLoc()).inv, goods = Object.keys(inv).filter(g => inv[g] >= 1);
+  if (!f.gs ? !goods.includes(f.g) : (f.g && !goods.includes(f.g))) f.g = f.gs ? '' : (goods[0] || '');
+  const maxQ = f.g ? Math.min(cap, Math.floor(inv[f.g])) : 0;
+  const q = f.g ? clamp(Math.floor(f.q ?? maxQ), 0, maxQ) : 0;
+  const hrs = hrsF(f.to), fee = feeF(f.to, q);
+  return `<div class="grid2"><div><label class="f">Cel</label><select data-in="${kind}" data-s="${u.id}" data-k="to">${dests.map(d => `<option value="${d}" ${d === f.to ? 'selected' : ''}>${LOC[d].n} · ${kmTxt(km(u.at, d))}</option>`).join('')}</select></div>
+    <div><label class="f">Ładunek</label><select data-in="${kind}" data-s="${u.id}" data-k="g"><option value="">— pusty —</option>${goods.map(g => `<option value="${g}" ${g === f.g ? 'selected' : ''}>${G[g].n} (${qty(inv[g])})</option>`).join('')}</select></div></div>
+    ${f.g ? `<label class="f">Ilość (max ${maxQ})</label><input type="number" inputmode="numeric" data-in="${kind}" data-s="${u.id}" data-k="q" value="${q}" min="0" max="${maxQ}">` : ''}
+    <div class="btns"><button class="btn p" data-a="${kind === 'sf' ? 'send' : 'drive'}" data-id="${u.id}" ${S.cash < fee ? 'disabled' : ''}>Wyślij · ${hrs} h · ${money(fee)}</button></div>`;
+}
 function vLogistyka() {
-  let h = `<h2>Porty</h2><div class="card">`;
-  for (const cid in S.c) {
-    const br = S.c[cid];
-    h += `<div class="row" style="padding:6px 0"><div class="grow">${CN[cid].n}</div>${br.port ? '<span class="pos small">Port czynny</span>' :
-      `<button class="btn s p" data-a="port" data-c="${cid}" ${S.cash < PORT_COST ? 'disabled' : ''}>Zbuduj port — ${money(PORT_COST)}</button>`}</div>`;
+  let h = '';
+  // --- garaże i pojazdy ---
+  const gars = Object.keys(S.L).filter(l => S.L[l].gar);
+  h += `<h2>Garaże i pojazdy (${S.veh.length})</h2>`;
+  if (!gars.length) h += `<div class="card mut">Nie masz garażu. Zbuduj go w zakładce Budowa w wybranej miejscowości (zajmuje 1 działkę). Pojazdy wożą towar między miejscowościami na tym samym lądzie.</div>`;
+  else {
+    if (!gars.includes(ui.garAt)) ui.garAt = gars[0];
+    if (!VEH[ui.vehK]) ui.vehK = 'van';
+    const vk = VEH[ui.vehK], full = garUsed(S, ui.garAt) >= garCap(S, ui.garAt);
+    h += `<div class="card"><div class="grid2">
+      <div><label class="f">Garaż</label><select data-in="garAt">${gars.map(l => `<option value="${l}" ${l === ui.garAt ? 'selected' : ''}>${LOC[l].n} (${garUsed(S, l)}/${garCap(S, l)})</option>`).join('')}</select></div>
+      <div><label class="f">Pojazd</label><select data-in="vehK">${Object.entries(VEH).map(([k, v]) => `<option value="${k}" ${k === ui.vehK ? 'selected' : ''}>${v.n}</option>`).join('')}</select></div></div>
+      <div class="flow">${vk.n}: ładowność ${vk.cap} szt. · ${vk.spd} km/h · paliwo ${String(vk.fuel).replace('.', ',')} $/km</div>
+      <div class="btns"><button class="btn p" data-a="veh" ${S.cash < vk.cost || full ? 'disabled' : ''}>${full ? 'Garaż pełny — rozbuduj' : `Kup — ${money(vk.cost)}`}</button></div></div>`;
   }
-  h += `</div>`;
-  const ports = Object.keys(S.c).filter(c => S.c[c].port);
+  for (const v of S.veh) {
+    const k = VEH[v.k];
+    if (v.st === 'go') {
+      const p = clamp(1 - (v.eta - S.hour) / v.dur, 0, 1);
+      h += `<div class="card"><div class="row"><b class="grow">${k.n} #${v.id}</b><span class="mut small">${v.eta - S.hour} h do celu</span></div>
+        <div class="flow">${LOC[v.from].n} → ${LOC[v.to].n}${v.q ? ` · ${qty(v.q)} ${G[v.g].n}` : ' · pusty'}</div><div class="bar y"><i style="width:${p * 100}%"></i></div></div>`;
+      continue;
+    }
+    const dests = LOCS.filter(l => l.ld === LOC[v.at].ld && l.id !== v.at).map(l => l.id).sort((a, b) => (S.L[b] ? 1 : 0) - (S.L[a] ? 1 : 0) || km(v.at, a) - km(v.at, b));
+    h += `<div class="card"><div class="row"><b class="grow">${k.n} #${v.id}</b><span class="mut small">stoi w: ${LOC[v.at].n}</span></div>
+      ${sendForm('vf', v, dests, k.cap, to => vehHours(S, v.k, v.at, to), to => vehFee(v.k, v.at, to))}</div>`;
+  }
+  // --- porty ---
+  const coast = LOCS.filter(l => l.port && S.c[l.c]);
+  h += `<h2>Porty</h2><div class="card">${coast.map(l => { const L = S.L[l.id];
+    return `<div class="row" style="padding:6px 0"><div class="grow">${l.n} <span class="mut small">${CN[l.c].n}</span></div>${L && L.port ? '<span class="pos small">Port czynny</span>' :
+      `<button class="btn s p" data-a="port" data-l="${l.id}" ${S.cash < PORT_COST ? 'disabled' : ''}>Zbuduj — ${money(PORT_COST)}</button>`}</div>`; }).join('')}</div>`;
+  // --- statki ---
+  const ports = Object.keys(S.L).filter(l => S.L[l].port);
   h += `<h2>Flota (${S.ships.length})</h2>`;
   if (ports.length) {
     if (!ports.includes(ui.shipAt)) ui.shipAt = ports[0];
-    h += `<div class="card"><div class="row"><div class="grow"><select data-in="shipAt">${ports.map(c => `<option value="${c}" ${c === ui.shipAt ? 'selected' : ''}>Port: ${CN[c].n}</option>`).join('')}</select></div>
+    h += `<div class="card"><div class="row"><div class="grow"><select data-in="shipAt">${ports.map(l => `<option value="${l}" ${l === ui.shipAt ? 'selected' : ''}>Port: ${LOC[l].n}</option>`).join('')}</select></div>
       <button class="btn p" data-a="ship" ${S.cash < SHIP_COST ? 'disabled' : ''}>Kup statek — ${money(SHIP_COST)}</button></div>
       <div class="mut small" style="margin-top:6px">Ładowność ${SHIP_CAP} szt. Port wymagany w obu miejscach.</div></div>`;
-  } else h += `<div class="card mut">Zbuduj port, żeby kupić statek. Statki przewożą surowce między kontynentami.</div>`;
+  } else h += `<div class="card mut">Zbuduj port, żeby kupić statek. Statki wożą towar między portami (inne kontynenty, wyspy).</div>`;
   for (const sh of S.ships) {
     if (sh.st === 'sail') {
       const p = clamp(1 - (sh.eta - S.hour) / sh.dur, 0, 1);
       h += `<div class="card"><div class="row"><b class="grow">Statek #${sh.id}</b><span class="mut small">${sh.eta - S.hour} h do celu</span></div>
-        <div class="flow">${CN[sh.from].n} → ${CN[sh.to].n}${sh.q ? ` · ${qty(sh.q)} ${G[sh.g].n}` : ' · pusty'}</div><div class="bar"><i style="width:${p * 100}%"></i></div></div>`;
+        <div class="flow">${LOC[sh.from].n} → ${LOC[sh.to].n}${sh.q ? ` · ${qty(sh.q)} ${G[sh.g].n}` : ' · pusty'}</div><div class="bar"><i style="width:${p * 100}%"></i></div></div>`;
       continue;
     }
-    const f = ui.sf[sh.id] || (ui.sf[sh.id] = {});
-    const dests = ports.filter(c => c !== sh.at);
-    if (!dests.includes(f.to)) f.to = dests[0];
-    const inv = S.c[sh.at].inv, goods = Object.keys(inv).filter(g => inv[g] >= 1);
-    if (f.g !== '' && !goods.includes(f.g)) f.g = goods[0] || '';
-    const maxQ = f.g ? Math.min(SHIP_CAP, Math.floor(inv[f.g])) : 0;
-    const q = f.g ? clamp(Math.floor(f.q ?? maxQ), 0, maxQ) : 0;
-    h += `<div class="card"><div class="row"><b class="grow">Statek #${sh.id}</b><span class="mut small">w porcie: ${CN[sh.at].n}</span></div>`;
-    if (!dests.length) h += `<div class="mut small" style="margin-top:6px">Zbuduj port na innym kontynencie, żeby wysłać statek.</div></div>`;
-    else {
-      const hrs = shipHours(S, sh.at, f.to), fee = shipFee(sh.at, f.to, q);
-      h += `<div class="grid2"><div><label class="f">Cel</label><select data-in="sf" data-s="${sh.id}" data-k="to">${dests.map(c => `<option value="${c}" ${c === f.to ? 'selected' : ''}>${CN[c].n}</option>`).join('')}</select></div>
-        <div><label class="f">Ładunek</label><select data-in="sf" data-s="${sh.id}" data-k="g"><option value="">— pusty —</option>${goods.map(g => `<option value="${g}" ${g === f.g ? 'selected' : ''}>${G[g].n} (${qty(inv[g])})</option>`).join('')}</select></div></div>
-        ${f.g ? `<label class="f">Ilość (max ${maxQ})</label><input type="number" inputmode="numeric" data-in="sf" data-s="${sh.id}" data-k="q" value="${q}" min="0" max="${maxQ}">` : ''}
-        <div class="btns"><button class="btn p" data-a="send" data-id="${sh.id}" ${S.cash < fee ? 'disabled' : ''}>Wyślij · ${hrs} h · ${money(fee)}</button></div></div>`;
-    }
+    const dests = ports.filter(l => l !== sh.at);
+    h += `<div class="card"><div class="row"><b class="grow">Statek #${sh.id}</b><span class="mut small">w porcie: ${LOC[sh.at].n}</span></div>
+      ${dests.length ? sendForm('sf', sh, dests, SHIP_CAP, to => shipHours(S, sh.at, to), (to, q) => shipFee(sh.at, to, q)) : '<div class="mut small" style="margin-top:6px">Zbuduj drugi port, żeby wysłać statek.</div>'}</div>`;
   }
   return h;
 }
@@ -541,46 +695,62 @@ function act(a, d) {
   switch (a) {
     case 'tab': ui.tab = d.t; window.scrollTo(0, 0); break;
     case 'bc': ui.bc = d.c; break;
-    case 'mc': ui.mc = d.c; break;
+    case 'bl': ui.bl = d.l; ui.bc = LOC[d.l].c; break;
+    case 'ml': ui.ml = d.l; break;
     case 'goBuild': ui.bc = d.c; ui.tab = 'budowa'; break;
     case 'branch':
       if (S.cash < BRANCH_COST || S.c[d.c]) return;
-      S.cash -= BRANCH_COST; S.c[d.c] = newBranch(); addNews(S, `Nowy oddział: ${CN[d.c].n}`); break;
+      S.cash -= BRANCH_COST; S.c[d.c] = {}; ui.bl = CAP[d.c]; addNews(S, `Nowy oddział: ${CN[d.c].n}`); break;
     case 'build': {
-      const def = B[d.b]; if (S.cash < def.cost) return;
-      S.cash -= def.cost; S.c[d.c].bld.push({ id: S.nid++, t: d.b, l: 1, st: '' }); toast(def.n + ' zbudowana'); break;
+      const def = B[d.b], t = T(d.l), cost = def.cost + t.land; if (S.cash < cost || free(S, d.l) < 1) return;
+      S.cash -= cost; ensureL(S, d.l).bld.push({ id: S.nid++, t: d.b, l: 1, st: '', land: t.land }); toast(`${def.n} — ${LOC[d.l].n}`); break;
     }
     case 'up': {
-      const b = S.c[d.c].bld.find(x => x.id == d.id), c = upCost(b); if (S.cash < c) return;
+      const b = S.L[d.l].bld.find(x => x.id == d.id), c = upCost(b); if (S.cash < c) return;
       S.cash -= c; b.l++; toast(`${B[b.t].n}: poziom ${b.l}`); break;
     }
     case 'demo': {
-      const br = S.c[d.c], i = br.bld.findIndex(x => x.id == d.id); if (i < 0) return;
-      S.cash += bldValue(br.bld[i]); br.bld.splice(i, 1); break;
+      const L = S.L[d.l], i = L.bld.findIndex(x => x.id == d.id); if (i < 0) return;
+      S.cash += bldValue(L.bld[i]); L.bld.splice(i, 1); break;
+    }
+    case 'expand': {
+      const L = ensureL(S, d.l), c = xCost(L, d.l); if (S.cash < c || L.x >= T(d.l).maxX) return;
+      S.cash -= c; L.x++; toast(`${LOC[d.l].n}: nowe działki`); break;
+    }
+    case 'garage': {
+      const c = GARAGE_COST + T(d.l).land; if (S.cash < c || free(S, d.l) < 1) return;
+      S.cash -= c; ensureL(S, d.l).gar = 1; ui.garAt = d.l; toast(`Garaż — ${LOC[d.l].n}`); break;
+    }
+    case 'garUp': { const L = S.L[d.l], c = garUp(L); if (S.cash < c) return; S.cash -= c; L.gar++; toast(`Garaż poz. ${L.gar}`); break; }
+    case 'veh': {
+      const k = VEH[ui.vehK]; if (!k || !ui.garAt || S.cash < k.cost || garUsed(S, ui.garAt) >= garCap(S, ui.garAt)) return;
+      S.cash -= k.cost; S.veh.push({ id: S.nid++, k: ui.vehK, home: ui.garAt, at: ui.garAt, st: 'idle', from: null, to: null, g: null, q: 0, eta: 0, dur: 1 });
+      toast(`${k.n} w garażu: ${LOC[ui.garAt].n}`); break;
     }
     case 'sell': {
-      const q = Math.floor((S.c[d.c].inv[d.g] || 0) * +d.f); const r = sell(S, d.c, d.g, q);
+      const q = Math.floor((S.L[d.l].inv[d.g] || 0) * +d.f); const r = sell(S, d.l, d.g, q);
       if (r) toast(`Sprzedano ${qty(q)} ${G[d.g].n} za ${money(r)}`); break;
     }
-    case 'auto': { const br = S.c[d.c]; br.auto[d.g] = !br.auto[d.g]; if (!br.auto[d.g]) delete br.auto[d.g]; break; }
+    case 'auto': { const L = S.L[d.l]; L.auto[d.g] = !L.auto[d.g]; if (!L.auto[d.g]) delete L.auto[d.g]; break; }
     case 'buy': {
-      const q = Math.max(1, Math.floor(ui.buyQ) || 1), c = buy(S, d.c, ui.buyG, q);
+      const q = Math.max(1, Math.floor(ui.buyQ) || 1), c = buy(S, d.l, ui.buyG, q);
       toast(c ? `Kupiono ${q} ${G[ui.buyG].n} za ${money(c)}` : 'Za mało gotówki'); break;
     }
-    case 'port': if (S.cash < PORT_COST) return; S.cash -= PORT_COST; S.c[d.c].port = true; addNews(S, `Port otwarty: ${CN[d.c].n}`); break;
+    case 'port': if (S.cash < PORT_COST) return; S.cash -= PORT_COST; ensureL(S, d.l).port = true; addNews(S, `Port otwarty: ${LOC[d.l].n}`); break;
     case 'ship':
       if (S.cash < SHIP_COST || !ui.shipAt) return;
       S.cash -= SHIP_COST; S.ships.push({ id: S.nid++, st: 'idle', at: ui.shipAt, to: null, from: null, g: null, q: 0, eta: 0, dur: 1 }); toast('Nowy statek w porcie'); break;
-    case 'send': {
-      const sh = S.ships.find(x => x.id == d.id), f = ui.sf[sh.id] || {}; if (!sh || sh.st !== 'idle' || !f.to) return;
-      const inv = S.c[sh.at].inv;
-      const q = f.g ? clamp(Math.floor(f.q ?? Math.min(SHIP_CAP, inv[f.g] || 0)), 0, Math.min(SHIP_CAP, Math.floor(inv[f.g] || 0))) : 0;
-      const fee = shipFee(sh.at, f.to, q); if (S.cash < fee) return;
+    case 'send': case 'drive': {
+      const isShip = a === 'send', list = isShip ? S.ships : S.veh, u = list.find(x => x.id == d.id);
+      const f = (isShip ? ui.sf : ui.vf)[d.id] || {}; if (!u || u.st !== 'idle' || !f.to) return;
+      const cap = isShip ? SHIP_CAP : VEH[u.k].cap, inv = ensureL(S, u.at).inv;
+      const q = f.g ? clamp(Math.floor(f.q ?? Math.min(cap, inv[f.g] || 0)), 0, Math.min(cap, Math.floor(inv[f.g] || 0))) : 0;
+      const fee = isShip ? shipFee(u.at, f.to, q) : vehFee(u.k, u.at, f.to); if (S.cash < fee) return;
       S.cash -= fee;
       if (q) { inv[f.g] -= q; if (inv[f.g] < 1e-6) delete inv[f.g]; }
-      const dur = shipHours(S, sh.at, f.to);
-      Object.assign(sh, { st: 'sail', from: sh.at, to: f.to, g: q ? f.g : null, q, eta: S.hour + dur, dur });
-      delete ui.sf[sh.id]; toast(`Statek #${sh.id} wypłynął (${dur} h)`); break;
+      const dur = isShip ? shipHours(S, u.at, f.to) : vehHours(S, u.k, u.at, f.to);
+      Object.assign(u, { st: isShip ? 'sail' : 'go', from: u.at, to: f.to, g: q ? f.g : null, q, eta: S.hour + dur, dur });
+      delete (isShip ? ui.sf : ui.vf)[d.id]; toast(`${isShip ? 'Statek' : VEH[u.k].n} #${u.id} w drodze (${dur} h)`); break;
     }
     case 'perk': { const c = S.perk[d.k] + 1; if (S.pp < c || S.perk[d.k] >= 10) return; S.pp -= c; S.perk[d.k]++; break; }
     case 'settings': ui.resetArm = false; settings(); return;
@@ -589,7 +759,10 @@ function act(a, d) {
     case 'tutAgain': S.tut.step = 0; ui.tab = 'firma'; $('modal').hidden = true; break;
     case 'tutNext': { const st = TUT[S.tut.step]; if (st && st.fin && !S.tut.rew) { S.tut.rew = true; S.cash += 5000; toast('+$5 tys. za samouczek'); } S.tut.step++; break; }
     case 'tutSkip': S.tut.step = TUT.length; break;
-    case 'wzSet': wz[d.k] = d.k === 'diff' ? +d.v : d.k === 'tut' ? d.v === '1' : d.v; renderWiz(); return;
+    case 'wzSet':
+      if (d.k === 'hq') { wz.hq = d.v; wz.hl = CAP[d.v]; }
+      else wz[d.k] = d.k === 'diff' ? +d.v : d.k === 'tut' ? d.v === '1' : d.v;
+      renderWiz(); return;
     case 'wzBack': wz.step = Math.max(0, wz.step - 1); renderWiz(); return;
     case 'wzNext':
       if (wz.step === 0) {
@@ -597,8 +770,8 @@ function act(a, d) {
         if (!wz.ceo || !wz.name) { $('wzErr').textContent = 'Wpisz imię prezesa i nazwę firmy.'; return; }
       }
       if (wz.step < 3) { wz.step++; renderWiz(); $('wiz').scrollTo(0, 0); return; }
-      S = newState({ done: true, ceo: wz.ceo, name: wz.name, hq: wz.hq, color: wz.color, diff: wz.diff, tut: wz.tut });
-      ui.bc = ui.mc = S.hq; ui.tab = 'firma'; acc = 0; prev = performance.now(); renderWiz(); break;
+      S = newState({ done: true, ceo: wz.ceo, name: wz.name, hl: wz.hl, color: wz.color, diff: wz.diff, tut: wz.tut });
+      ui.bl = ui.ml = S.hl; ui.bc = S.hq; ui.tab = 'firma'; acc = 0; prev = performance.now(); renderWiz(); break;
     case 'reset':
       if (!ui.resetArm) { ui.resetArm = true; settings(); return; }
       S = newState(); Object.assign(wz, { step: 0, ceo: '', name: '' }); ui.resetArm = false; $('modal').hidden = true; save(); renderWiz(); break;
@@ -619,7 +792,9 @@ document.addEventListener('change', e => {
   if (k === 'buyG') ui.buyG = t.value;
   else if (k === 'buyQ') ui.buyQ = +t.value;
   else if (k === 'shipAt') ui.shipAt = t.value;
-  else if (k === 'sf') { const f = ui.sf[t.dataset.s] || (ui.sf[t.dataset.s] = {}); f[t.dataset.k] = t.dataset.k === 'q' ? +t.value : t.value; if (t.dataset.k === 'g') delete f.q; }
+  else if (k === 'garAt') ui.garAt = t.value;
+  else if (k === 'sf' || k === 'vf') { const o = ui[k], f = o[t.dataset.s] || (o[t.dataset.s] = {}); f[t.dataset.k] = t.dataset.k === 'q' ? +t.value : t.value; if (t.dataset.k === 'g') { delete f.q; f.gs = true; } }
+  else if (k === 'vehK') ui.vehK = t.value;
   t.blur(); render(true);
 });
 
@@ -649,7 +824,7 @@ function openUrl(url) {
 
 // ================== PĘTLA ==================
 S = load();
-ui.bc = ui.mc = S.hq;
+ui.bc = S.hq; ui.bl = ui.ml = S.hl;
 if (S.setup) {
   const off = Math.min(OFFLINE_MAX_H, Math.floor((Date.now() - (S.last || Date.now())) / HOUR_MS));
   if (off > 0) {
