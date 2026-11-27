@@ -150,9 +150,9 @@ const licCost = cc => Math.round(TIERS[tierOf(cc)].lic * (1 + Math.min(1, (CTRY_
 const CAP = { eu: 'hamburg', na: 'nowyjork', sa: 'rio', af: 'lagos', as: 'szanghaj', au: 'sydney' };
 const TYPE = {
   m: { n: 'Miasto', slots: 6, step: 2, maxX: 5, land: 6000, xCost: 15000, raw: 1, fac: 1.15, sell: 1.05,
-       d: 'Droga ziemia, dużo działek. Fabryki +15%, sprzedaż +5%.' },
+       d: 'Drogie działki, dużo małych i mało dużych. Fabryki +15%, sprzedaż +5%.' },
   w: { n: 'Wieś', slots: 4, step: 1, maxX: 2, land: 1500, xCost: 5000, raw: 1.25, fac: 1, sell: .95,
-       d: 'Tania ziemia, mało działek. Farmy i kopalnie +25%, sprzedaż −5%.' },
+       d: 'Tanie działki, dużo średnich i dużych. Farmy i kopalnie +25%, sprzedaż −5%.' },
 };
 const VEH = {
   van:   { n: 'Dostawczy',     cap: 40,  spd: 90, cost: 9000,  fuel: .35 },
@@ -287,6 +287,7 @@ const B = {
   fab_aut:   { n: 'Fabryka samochodów',   d: 'mech', t: 2, cost: 120000, in: { stal: 4, plastik: 3, chipy: 2 }, out: { auta: .2 } },
 };
 // gdzie powstaje towar (do przepisów i kategorii)
+B.drukarnia.sz = 1; B.kartonow.sz = 1; // lżejsze zakłady papiernicze na średniej działce
 const MADE = {}; for (const [id, d] of Object.entries(B)) for (const g in d.out) (MADE[g] = MADE[g] || []).push(id);
 const USED = {}; for (const [id, d] of Object.entries(B)) for (const g in d.in || {}) (USED[g] = USED[g] || []).push(id);
 const GDEP = g => MADE[g] ? B[MADE[g][0]].d : 'uprawa';
@@ -353,7 +354,7 @@ function newState(o = {}) {
     v: 2, created: Date.now(), setup: !!o.done, ceo: o.ceo || '', name: o.name || 'Moja Firma', color: o.color || COLORS[0], hq, hl, diff,
     w: { [curOfCC(LOC[hl].cc)]: cash * (FX0[curOfCC(LOC[hl].cc)] || 1) }, fx: {}, fxp: {}, hour: 0, last: Date.now(),
     c: { [hq]: {} }, lic: { [LOC[hl].cc]: true }, L: { [hl]: newLoc() }, ships: [], veh: [], custom: [], nid: 1, m, ai: mkAI(cash, diff),
-    season: 1, pp: 0, perk: { prod: 0, upk: 0, ship: 0, sell: 0 }, ev: [],
+    pl: 1, season: 1, pp: 0, perk: { prod: 0, upk: 0, ship: 0, sell: 0 }, ev: [],
     news: [], inc: 0, upk: 0, lastSeason: null, tut: { step: o.tut === false ? 99 : 0, sold: false, rew: false },
   };
   for (const g of GK) m[g].h = Array(8).fill(price(g, s));
@@ -391,6 +392,7 @@ function parseSave(raw) {
         const hc = curOfCC((LOC[s.hl] || {}).cc); s.w = { [hc]: (s.cash || 0) * (FX0[hc] || 1) }; s.fx = {}; s.fxp = {}; delete s.cash;
         s.news = s.news || []; s.news.unshift({ h: s.hour || 0, t: `Aktualizacja: waluty! Gotówka przeliczona na ${curName(hc)}. Kantor jest w zakładce Rynek.` });
       }
+      if (!s.pl) migPlots(s);
       if (!s.lic) { // zapis sprzed państw: licencje tam, gdzie gracz już działa, + stolice opłaconych kontynentów
         s.lic = {};
         const add = id => { const l = LOC[id]; if (l && l.cc) s.lic[l.cc] = true; };
@@ -413,9 +415,50 @@ function sellPrice(g, q, s = S) { const m = s.m[g]; return priceAt(g, m.sat + q 
 function buyPrice(g, q, s = S) { const m = s.m[g]; return priceAt(g, m.sat - q / 2, m.d) * 1.15; }
 function add(L, g, q) { L.inv[g] = (L.inv[g] || 0) + q; }
 const T = lid => TYPE[LOC[lid].t];
-const slots = (L, lid) => T(lid).slots + L.x * T(lid).step;
-const used = L => L.bld.length + (L.gar ? 1 : 0);
-const free = (s, lid) => { const L = s.L[lid]; return L ? slots(L, lid) - used(L) : T(lid).slots; };
+// ===== DZIAŁKI =====
+const PSZ = [{ n: 'Mała', k: 1, m: 25, i: '▫️' }, { n: 'Średnia', k: 3, m: 60, i: '◻️' }, { n: 'Duża', k: 8, m: 150, i: '⬜' }];
+const PLIM = { w: [6, 10, 5], m: [14, 6, 2] }; // limit działek gracza w jednej miejscowości: małe / średnie / duże
+const PMAX = 5;                                  // maks. poziom działki = maks. liczba budynków
+const HEAVY = new Set(['drzew', 'metal', 'plast', 'chem', 'papier', 'elektr', 'mech']);
+const REQ = t => t === 'gar' ? 0 : (B[t].sz ?? (HEAVY.has(B[t].d) ? 2 : 1)); // minimalny rozmiar działki
+const VCLS = { van: 0, truck: 1, tir: 2 };     // pojazd → minimalny rozmiar działki z garażem
+const plots = L => L.P || (L.P = []);
+const pSide = p => PSZ[p.sz].m * (1 + .25 * ((p.lv || 1) - 1)); // bok działki w metrach
+const plotCost = (lid, sz) => landOf(lid) * PSZ[sz].k;
+const pSizeCost = (lid, p) => plotCost(lid, p.sz + 1) - plotCost(lid, p.sz);
+const pLvCost = (lid, p) => Math.round(plotCost(lid, p.sz) * .6 * p.lv);
+const pVal = (lid, p) => plotCost(lid, p.sz) * (.5 + .3 * (p.lv - 1));
+const pItems = (L, p) => [...(p.g ? ['gar'] : []), ...L.bld.filter(b => b.p === p.id)];
+const pUsed = (L, p) => pItems(L, p).length;
+const pFree = (L, p) => p.lv - pUsed(L, p);
+const pCount = (L, sz) => L ? plots(L).filter(p => p.sz === sz).length : 0;
+const pName = p => `${PSZ[p.sz].n} działka`;
+function syncGar(L) { L.gar = plots(L).reduce((a, p) => a + (p.g || 0), 0); }
+const garCls = (s, lid) => { const L = s.L[lid]; return L ? plots(L).filter(p => p.g).reduce((a, p) => Math.max(a, p.sz), -1) : -1; };
+const garUpP = p => GARAGE_COST * p.g;
+function pickPlot(L, t, want) { // działka na nowy budynek: wybrana albo najmniejsza pasująca z wolnym miejscem
+  if (!L) return null; const r = REQ(t), ok = p => p.sz >= r && pFree(L, p) > 0;
+  const w = plots(L).find(p => p.id == want); if (w && ok(w)) return w;
+  return plots(L).filter(ok).sort((a, b) => a.sz - b.sz)[0] || null;
+}
+// zapis sprzed działek: każdy budynek dostaje działkę pasującą do swojego rozmiaru, garaż — wg największego pojazdu
+function migPlots(s) {
+  for (const lid in s.L) {
+    const L = s.L[lid], P = L.P = []; if (!LOC[lid]) continue;
+    for (const b of L.bld) {
+      if (!B[b.t]) continue;
+      if (!(isFinite(b.la) && isFinite(b.lo))) [b.la, b.lo] = autoPos(lid, b.id);
+      const p = { id: s.nid++, sz: REQ(b.t), lv: 1, la: b.la, lo: b.lo, g: 0 }; P.push(p); b.p = p.id;
+    }
+    if (L.gar) {
+      const gp = L.gpos || autoPos(lid, 'gar'), cls = s.veh.filter(v => v.home === lid).reduce((a, v) => Math.max(a, VCLS[v.k] || 0), 0);
+      P.push({ id: s.nid++, sz: cls, lv: 1, la: gp[0], lo: gp[1], g: L.gar });
+    }
+    L.x = 0; delete L.gpos; syncGar(L);
+  }
+  s.pl = 1;
+  s.news = s.news || []; s.news.unshift({ h: s.hour || 0, t: 'Aktualizacja: działki! Każdy zakład i garaż stoi teraz na własnej działce z płotem. Nowe budynki stawiasz na kupionych działkach.' });
+}
 
 // mnożnik ceny towaru w danym państwie (surowce tańsze tam, gdzie ich dużo; produkty droższe w bogatych krajach)
 const CPF = {};
@@ -461,7 +504,7 @@ function worth(s = S) {
     const L = s.L[lid];
     if (L.port) w += PORT_COST * .5;
     if (L.gar) w += GARAGE_COST * L.gar * .5;
-    w += L.x * T(lid).xCost * .4;
+    for (const p of plots(L)) w += pVal(lid, p);
     for (const b of L.bld) w += bldValue(b);
     for (const g in L.inv) w += L.inv[g] * price(g, s) * .8;
   }
@@ -504,6 +547,7 @@ function hour(s) {
     }
     if (L.port) u += 30 * upkM;
     if (L.gar) u += 15 * L.gar * upkM;
+    for (const p of plots(L)) u += plotCost(lid, p.sz) * .0003 * p.lv * upkM;
     payC(s, cur, u); upk += u;
     for (const g in L.auto) if (L.auto[g] && (L.inv[g] || 0) >= 1) sell(s, lid, g, Math.floor(L.inv[g]));
   }
@@ -575,10 +619,14 @@ const hqInv = g => (S.L[S.hl] && S.L[S.hl].inv[g]) || 0;
 const TUT = [
   { t: 'Witaj, prezesie!', d: () => `${esc(S.name)} startuje w: ${LOC[S.hl].n} (${CN[S.hq].n}). Cel gry: zarabiać, budować coraz bardziej zaawansowane łańcuchy produkcji i wygrać sezon w rankingu. Pokażę Ci podstawy w kilku krokach.`, next: true },
   { t: 'Zakładka Budowa', d: 'Zakłady stawiasz w zakładce Budowa, na działkach w miastach i wsiach. Otwórz ją.', sel: () => ['[data-tab=budowa]'], done: () => ui.tab === 'budowa' },
-  { t: 'Pierwsza farma', d: () => `Farma produkuje zboże — najtańszy surowiec. Zbuduj ją w: ${LOC[S.hl].n}. Cena = budynek + działka.`,
-    sel: () => ['[data-a=build][data-b=farma]', `.chips [data-a=bl][data-l=${S.hl}]`, '[data-tab=budowa]'], done: () => hasB('farma') },
-  { t: 'Młyn', d: 'Młyn przerabia 10 zboża na 8 mąki, a mąka jest ponad 3× droższa. Tak działają łańcuchy produkcji. Zbuduj Młyn w tej samej miejscowości.',
-    sel: () => ['[data-a=build][data-b=mlyn]', `.chips [data-a=bl][data-l=${S.hl}]`, '[data-tab=budowa]'], done: () => hasB('mlyn') },
+  { t: 'Kup działkę', d: () => `Bez działki nic nie zbudujesz. Kup <b>średnią</b> działkę w: ${LOC[S.hl].n} i dotknij mapy, gdzie ma być (albo „Losowo”). Pojawi się płot.`,
+    sel: () => ['[data-a=pbAuto]', '[data-a=plotPick][data-sz="1"]', '[data-a=plotBuy][data-sz="1"]', `.chips [data-a=bl][data-l=${S.hl}]`, '[data-tab=budowa]'], done: () => Object.values(S.L).some(L => (L.P || []).some(p => p.sz >= 1)) || hasB('farma') },
+  { t: 'Pierwsza farma', d: () => `Farma produkuje zboże — najtańszy surowiec. Otwórz dział „Uprawa roślin” i zbuduj Farmę zboża na swojej działce.`,
+    sel: () => ['[data-a=build][data-b=farma]', '[data-a=dep][data-v=uprawa]', '[data-a=dep][data-v=""]', `.chips [data-a=bl][data-l=${S.hl}]`, '[data-tab=budowa]'], done: () => hasB('farma') },
+  { t: 'Poziom działki', d: 'Działka poziomu 1 mieści 1 budynek. Podnieś ją na poziom 2 — zmieści się drugi zakład.',
+    sel: () => ['[data-a=pLv]', '[data-tab=budowa]'], done: () => Object.values(S.L).some(L => (L.P || []).some(p => p.lv >= 2)) || hasB('mlyn') },
+  { t: 'Młyn', d: 'Młyn przerabia 10 zboża na 8 mąki, a mąka jest ponad 3× droższa. Tak działają łańcuchy produkcji. Zbuduj Młyn (Branża spożywcza) na tej samej działce.',
+    sel: () => ['[data-a=build][data-b=mlyn]', '[data-a=dep][data-v=spoz]', '[data-a=dep][data-v=""]', `.chips [data-a=bl][data-l=${S.hl}]`, '[data-tab=budowa]'], done: () => hasB('mlyn') },
   { t: 'Produkcja trwa', d: () => `Zakłady pracują same: 1 godzina gry = 4 s. Każdy ma też koszt utrzymania co godzinę. Poczekaj na mąkę: ${qty(Math.min(5, hqInv('maka')))} / 5.`,
     done: () => hqInv('maka') >= 5 || S.tut.sold },
   { t: 'Rynek', d: 'Mąka gotowa! Otwórz zakładkę Rynek.', sel: () => ['[data-tab=magazyn]'], done: () => ui.tab === 'magazyn' },
@@ -587,8 +635,8 @@ const TUT = [
   { t: 'Auto‑sprzedaż', d: 'Włącz „Auto” przy mące. Towar będzie sprzedawany co godzinę, także gdy gra jest zamknięta.',
     sel: () => ['[data-a=auto][data-g=maka]', `[data-a=ml][data-l=${S.hl}]`, '[data-tab=magazyn]'], done: () => !!((S.L[S.hl] || {}).auto || {}).maka },
   { t: 'Uważaj na surowce', d: 'Nie włączaj auto‑sprzedaży zboża, bo młyn stanie. Zakład bez surowców pokazuje czerwony napis „Stoi — brak”. Brakujące surowce możesz dokupić na rynku (marża 15%).', next: true },
-  { t: 'Miasta i wsie', d: 'Wieś: tania działka, farmy i kopalnie +25%. Miasto: drogie działki, ale fabryki +15% i sprzedaż +5%. Działek jest ograniczona liczba — w miastach możesz dokupić kolejne.', next: true, sel: () => ['[data-tab=budowa]'] },
-  { t: 'Garaże i ciężarówki', d: 'Każda miejscowość ma własny magazyn. Zbuduj garaż (zajmuje działkę), kup dostawczak lub ciężarówkę i woź zboże ze wsi do młyna w mieście. Zakładka Transport.', next: true, sel: () => ['[data-tab=logistyka]'] },
+  { t: 'Działki, miasta i wsie', d: 'Mała działka — garaż. Średnia — farmy, hodowla, kopalnie, lekkie przetwórstwo. Duża — fabryki i huty. Wieś: tanie działki, dużo dużych, farmy i kopalnie +25%. Miasto: drogie działki, mało dużych, fabryki +15% i sprzedaż +5%.', next: true, sel: () => ['[data-tab=budowa]'] },
+  { t: 'Garaże i ciężarówki', d: 'Każda miejscowość ma własny magazyn. Postaw garaż na działce (mała — dostawczaki, średnia — ciężarówki, duża — TIR-y), kup pojazd lub ciężarówkę i woź zboże ze wsi do młyna w mieście. Zakładka Transport.', next: true, sel: () => ['[data-tab=logistyka]'] },
   { t: 'Porty i statki', d: 'Między kontynentami (i na wyspy, np. Tokio) wozisz towar statkami. Port możesz postawić tylko w miastach nad morzem.', next: true, sel: () => ['[data-tab=logistyka]'] },
   { t: 'Ranking i sezony', d: 'Sezon trwa 30 dni gry, ranking liczy wartość firmy. Za miejsce dostajesz punkty prestiżu na stałe ulepszenia.', next: true, sel: () => ['[data-tab=ranking]'] },
   { t: 'Gotowe!', d: () => S.tut.rew ? 'Samouczek ukończony. Powodzenia!' : 'Nagroda za ukończenie samouczka: $5 tys. Powodzenia!', next: true, btn: 'Zakończ', fin: true },
@@ -705,7 +753,7 @@ function contChips(sel) {
 }
 function locChips(list, sel, act) {
   return `<div class="chips">${list.map(l => { const L = S.L[l.id];
-    return `<button class="${l.id === sel ? 'on' : ''} ${L && (L.bld.length || L.gar) ? 'own' : ''}" data-a="${act}" data-l="${l.id}">${l.n}<small>${flag(l.cc)} ${l.t === 'w' ? 'wieś' : 'miasto'}</small></button>`; }).join('')}</div>`;
+    return `<button class="${l.id === sel ? 'on' : ''} ${L && (L.bld.length || L.gar || (L.P && L.P.length)) ? 'own' : ''}" data-a="${act}" data-l="${l.id}">${l.n}<small>${flag(l.cc)} ${l.t === 'w' ? 'wieś' : 'miasto'}</small></button>`; }).join('')}</div>`;
 }
 const bldCount = () => Object.values(S.L).reduce((a, L) => a + L.bld.length, 0);
 
@@ -785,7 +833,7 @@ function zoomAt(cid, k, ux, uy) { // ux,uy: punkt mapy, który ma zostać w miej
 }
 function locMap(cid, sel) {
   const m = MAPS[cid], z = zOf(cid), u = 1 / z.k, P = l => [l.x, l.y];
-  const own = l => { const L = S.L[l.id]; return !!(L && (L.bld.length || L.gar || Object.keys(L.inv).length)); };
+  const own = l => { const L = S.L[l.id]; return !!(L && (L.bld.length || L.gar || (L.P && L.P.length) || Object.keys(L.inv).length)); };
   let g = '';
   for (const v of S.veh) {
     if (v.st !== 'go' || LOC[v.to].c !== cid) continue;
@@ -1032,6 +1080,8 @@ function ensureLM() {
     const bb = [[e.point.x - 12, e.point.y - 12], [e.point.x + 12, e.point.y + 12]];
     const fb = map.getLayer('xy-bld-c') && map.queryRenderedFeatures(bb, { layers: ['xy-bld-c', 'xy-bld-s'] })[0];
     if (fb && S) { bldSheet(fb.properties); return; }
+    const fp = S && map.getLayer('xy-plot-f') && map.queryRenderedFeatures(bb, { layers: ['xy-3d-e', 'xy-plot-f'] })[0];
+    if (fp) { bldSheet(fp.properties); return; }
     const f = map.queryRenderedFeatures([[e.point.x - 10, e.point.y - 10], [e.point.x + 10, e.point.y + 10]], { layers: PL_LAYERS.map(x => x[0]) })[0];
     if (!S && ADM.on) { if (f) admEdit(f.properties.id); else placeAtLL(LM.cid, e.lngLat.lat, e.lngLat.lng); return; }
     if (ui.place) { placeAtLL(LM.cid, e.lngLat.lat, e.lngLat.lng); return; }
@@ -1048,10 +1098,71 @@ function autoPos(lid, key) { // stałe „losowe” miejsce w obrębie miejscowo
   const l = LOC[lid], h = hashS(String(key) + lid), R = townR(l);
   return offLL(l.la, l.lo, R * (.15 + ((h >>> 8) % 1000) / 1000 * .6), h % 360).map(v => +v.toFixed(5));
 }
-function posOf(lid, b) { if (!(isFinite(b.la) && isFinite(b.lo))) [b.la, b.lo] = autoPos(lid, b.id); return [b.la, b.lo]; }
-function garPos(lid, L) { if (!L.gpos) L.gpos = autoPos(lid, 'gar'); return L.gpos; }
+const M2LA = m => m / 111320, M2LO = (m, la) => m / (111320 * Math.cos(la * Math.PI / 180));
+const PSLOT = [[], [[0, 0]], [[-.25, 0], [.25, 0]], [[-.25, -.22], [.25, -.22], [0, .24]], [[-.25, -.25], [.25, -.25], [-.25, .25], [.25, .25]], [[-.29, -.29], [.29, -.29], [-.29, .29], [.29, .29], [0, 0]]];
+function pLayout(p, n) { // pozycje elementów na działce: [la, lo, bok komórki w m]
+  const s = pSide(p), sl = PSLOT[clamp(n, 1, 5)], cell = s * (n <= 1 ? .6 : n === 2 ? .4 : .34);
+  return sl.map(([fx, fy]) => [p.la - M2LA(fy * s), p.lo + M2LO(fx * s, p.la), cell]);
+}
+function posOf(lid, b) {
+  const L = S && S.L[lid], p = L && b.p && plots(L).find(x => x.id === b.p);
+  if (p) { const it = pItems(L, p), q = pLayout(p, it.length)[it.indexOf(b)]; if (q) return [q[0], q[1]]; }
+  if (!(isFinite(b.la) && isFinite(b.lo))) [b.la, b.lo] = autoPos(lid, b.id); return [b.la, b.lo];
+}
+function rectsNear(lid, skip) { // działki (Twoje i innych graczy) w tej miejscowości
+  const R = [], L = S.L[lid], me = USER && USER.uid;
+  if (L) for (const p of plots(L)) if (p.id !== skip) R.push({ la: p.la, lo: p.lo, s: pSide(p) });
+  for (const o of OTH) if (o.uid !== me) for (const p of o.p || []) if (p.lid === lid) R.push({ la: p.la, lo: p.lo, s: pSide(p) });
+  return R;
+}
+function spotErr(lid, la, lo, side, skip) {
+  const l = LOC[lid], R = townR(l);
+  if (kmLL(la, lo, l.la, l.lo) + side * .71 / 1000 > R) return `Za daleko od centrum: ${l.n} (max ${String(+R.toFixed(1)).replace('.', ',')} km)`;
+  const c = Math.cos(la * Math.PI / 180);
+  for (const r of rectsNear(lid, skip)) { const h = (side + r.s) / 2 + 4;
+    if (Math.abs(lo - r.lo) * 111320 * c < h && Math.abs(la - r.la) * 111320 < h) return 'Tu już jest działka — wybierz wolne miejsce'; }
+  return '';
+}
+function findSpot(lid, side, skip) {
+  for (let i = 0; i < 120; i++) { const [la, lo] = autoPos(lid, `p${i}_${skip || ''}_${side}`); if (!spotErr(lid, la, lo, side, skip)) return [la, lo]; }
+  return null;
+}
+const DCOL = { uprawa: '#c2a23a', hodowla: '#9c5a3c', lesn: '#2f7d4a', wydob: '#6b7280', pasza: '#b58b3d', spoz: '#d08a4a', slod: '#a0522d', alko: '#7c4a8c', odziez: '#4a7bc8',
+  tekst: '#5a8fb8', mieso: '#b04848', papier: '#8c9a5a', drzew: '#8a6a44', metal: '#7d8590', plast: '#3fa3a8', chem: '#c8a52a', elektr: '#3a6fd8', mech: '#56606e' };
+function boxF(la, lo, cx, cy, w, d, h, c, b0 = 0, pr = {}) { // prostokąt w metrach względem (la, lo); y rośnie na południe
+  const P = (x, y) => [lo + M2LO(x, la), la - M2LA(y)], x0 = cx - w / 2, x1 = cx + w / 2, y0 = cy - d / 2, y1 = cy + d / 2;
+  return { type: 'Feature', geometry: { type: 'Polygon', coordinates: [[P(x0, y0), P(x1, y0), P(x1, y1), P(x0, y1), P(x0, y0)]] }, properties: { h, b: b0, c, ...pr } };
+}
+function shape3d(t, la, lo, c, pr) { // bryły budynku na komórce o boku c metrów
+  const F = [], k = clamp(c / 40, .6, 1.8), bx = (x, y, w, d, h, col, b0 = 0) => F.push(boxF(la, lo, x * c, y * c, w * c, d * c, h * k, col, b0 * k, pr));
+  if (t === 'gar') { bx(0, 0, .95, .62, 6, '#3b4a5c'); bx(0, .31, .7, .02, 4.6, '#d6dde5'); bx(-.3, -.33, .25, .04, 1, '#e0823f'); return F; }
+  const d = B[t] ? B[t].d : 'mech', col = DCOL[d] || '#777';
+  if (d === 'uprawa' || d === 'pasza') { bx(0, 0, 1, 1, .3, d === 'pasza' ? '#8a7a3a' : '#6b8a2a'); bx(-.15, .1, .5, .38, 8, '#8b3a2b'); bx(.3, -.2, .16, .16, 16, '#c9ccd1'); bx(.3, .05, .16, .16, 14, '#c9ccd1'); }
+  else if (d === 'hodowla') { bx(0, -.2, .9, .24, 6, col); bx(0, .14, .9, .24, 6, col); bx(.38, .4, .14, .14, 13, '#c9ccd1'); }
+  else if (d === 'lesn') { for (const [x, y, h] of [[-.3, -.3, 14], [0, -.32, 17], [.3, -.28, 13], [-.32, .02, 16], [.02, 0, 19], [.3, .04, 15], [-.28, .32, 13], [.04, .3, 16], [.32, .32, 14]]) bx(x, y, .2, .2, h, t === 'pl_kau' ? '#3e7d3a' : '#25643a'); }
+  else if (d === 'wydob') { bx(-.15, .1, .6, .45, 8, '#4b5563'); bx(.3, -.25, .14, .14, 32, '#9aa3ad'); bx(.28, .28, .34, .3, 5, '#5b4a3a'); }
+  else if (HEAVY.has(d)) { bx(-.08, -.08, .78, .55, 15, col); bx(-.08, -.08, .6, .1, 3, '#c9ccd1', 15); bx(.36, .3, .1, .1, 48, '#9ca3af'); bx(-.3, .32, .22, .22, 11, '#8a939e'); }
+  else { bx(-.05, -.05, .8, .55, 10, col); bx(-.32, .3, .3, .25, 14, '#cfd6de'); bx(.3, .32, .26, .2, 4, '#e3e7ec'); }
+  return F;
+}
+function fence(p, col, pr) { const s = pSide(p), t = .7, F = [];
+  for (const [x, y, w, d] of [[0, -s / 2, s, t], [0, s / 2, s, t], [-s / 2, 0, t, s], [s / 2, 0, t, s]]) F.push(boxF(p.la, p.lo, x, y, w, d, 2.2, col, 0, pr));
+  return F; }
+function plotGeo() { // ziemia + płot + budynki 3D (Twoje i innych)
+  const G2 = [], E = [], me = USER && USER.uid;
+  const one = (p, items, col, pr) => {
+    const s = pSide(p); G2.push(boxF(p.la, p.lo, 0, 0, s, s, 0, col, 0, pr)); E.push(...fence(p, col, pr));
+    const ly = pLayout(p, items.length); items.forEach((t, i) => { const q = ly[i]; if (q) E.push(...shape3d(t, q[0], q[1], q[2], pr)); });
+  };
+  if (S) for (const lid in S.L) { const L = S.L[lid]; if (!LOC[lid]) continue;
+    for (const p of plots(L)) one(p, pItems(L, p).map(x => x === 'gar' ? 'gar' : x.t), S.color, { own: 1, lid, pid: p.id }); }
+  for (const o of OTH) { if (o.uid === me) continue;
+    for (const p of o.p || []) if (isFinite(p.la) && isFinite(p.lo) && PSZ[p.sz]) one(p, [...(p.g ? ['gar'] : []), ...(p.b || [])].filter(t => t === 'gar' || B[t]), '#9aa4ae',
+      { own: 0, uid: o.uid, lid: p.lid || '', t: (p.b && p.b[0]) || 'plot', l: p.lv || 1 }); }
+  return { ground: G2, ext: E };
+}
 const KIND = t => { if (t === 'gar') return 'garage'; const d = B[t] && B[t].d; return d === 'uprawa' || d === 'hodowla' ? 'farm' : d === 'lesn' ? 'tree' : d === 'wydob' ? 'mine' : 'factory'; };
-const bName = t => t === 'gar' ? 'Garaż' : B[t] ? B[t].n : t;
+const bName = t => t === 'gar' ? 'Garaż' : t === 'plot' ? 'Działka' : B[t] ? B[t].n : t;
 let OTH = []; // budynki innych graczy (Firestore /bld)
 function iconImg(kind) { // białe ikonki rysowane na płótnie
   const n = 64, c = document.createElement('canvas'); c.width = c.height = n; const g = c.getContext('2d');
@@ -1068,11 +1179,14 @@ function bldFeatures() {
   if (S) for (const lid in S.L) {
     const L = S.L[lid], l = LOC[lid]; if (!l) continue;
     for (const b of L.bld) { const [la, lo] = posOf(lid, b); F.push({ type: 'Feature', geometry: { type: 'Point', coordinates: [lo, la] },
-      properties: { own: 1, ic: 'ic-' + KIND(b.t), col: S.color, lb: `${bName(b.t)} ${b.l}`, lid, bid: b.id } }); }
-    if (L.gar) { const [la, lo] = garPos(lid, L); F.push({ type: 'Feature', geometry: { type: 'Point', coordinates: [lo, la] },
-      properties: { own: 1, ic: 'ic-garage', col: S.color, lb: `Garaż ${L.gar}`, lid, bid: 'gar' } }); }
+      properties: { own: 1, ic: 'ic-' + KIND(b.t), col: S.color, lb: `${bName(b.t)} ${b.l}`, lid, pid: b.p || '' } }); }
+    for (const p of plots(L)) if (p.g) { const [la, lo] = pLayout(p, pUsed(L, p))[0]; F.push({ type: 'Feature', geometry: { type: 'Point', coordinates: [lo, la] },
+      properties: { own: 1, ic: 'ic-garage', col: S.color, lb: `Garaż ${p.g}`, lid, pid: p.id } }); }
   }
   for (const p of OTH) { if (p.uid === me) continue;
+    if (p.p) { for (const q of p.p) { const its = [...(q.g ? ['gar'] : []), ...(q.b || [])], ly = pLayout(q, its.length);
+      its.forEach((t, i) => { const z = ly[i]; if (z) F.push({ type: 'Feature', geometry: { type: 'Point', coordinates: [z[1], z[0]] },
+        properties: { own: 0, ic: 'ic-' + KIND(t), col: p.color || '#8aa0b6', lb: `${bName(t)} · ${clean(p.name || '?')}`, uid: p.uid, t, l: q.lv || 1, lid: q.lid || '' } }); }); } continue; }
     for (const it of p.items || []) { if (!isFinite(it.la) || !isFinite(it.lo)) continue; F.push({ type: 'Feature', geometry: { type: 'Point', coordinates: [it.lo, it.la] },
       properties: { own: 0, ic: 'ic-' + KIND(it.t), col: p.color || '#8aa0b6', lb: `${bName(it.t)} · ${clean(p.name || '?')}`, uid: p.uid, t: it.t, l: it.l || 1, lid: it.lid || '' } }); } }
   return F;
@@ -1081,6 +1195,7 @@ function circleGeo(la, lo, km) { const c = []; for (let i = 0; i <= 64; i++) { c
 // okienko po dotknięciu budynku
 function bldSheet(p) {
   $('modal').hidden = false;
+  if (p.own && p.pid) { plotSheet(p.lid, p.pid); return; }
   if (p.own) {
     const L = S.L[p.lid], l = LOC[p.lid], b = p.bid === 'gar' ? null : L.bld.find(x => x.id == p.bid);
     const d = b && B[b.t];
@@ -1099,6 +1214,27 @@ function bldSheet(p) {
   }
 }
 
+function plotSheet(lid, pid) {
+  const L = S.L[lid], p = L && plots(L).find(x => x.id == pid); if (!p) return;
+  const l = LOC[lid], it = pItems(L, p), fr = pFree(L, p), s = Math.round(pSide(p));
+  $('modal').hidden = false;
+  $('modal').innerHTML = `<div class="sheet"><div class="row"><span class="dot" style="background:${esc(S.color)}"></span><b class="grow" style="font-size:17px">${pName(p)} · poz. ${p.lv}</b><button class="btn s" data-a="close">Zamknij</button></div>
+    <div class="mut small" style="margin:4px 0 8px">${flag(l.cc)} ${esc(l.n)} · ${s}×${s} m · zajęte ${it.length}/${p.lv}</div>
+    <div class="card">${it.length ? it.map(x => x === 'gar'
+        ? `<div class="row pit"><span class="grow">🚚 <b>Garaż</b> poz. ${p.g} <span class="mut small">· ${garUsed(S, lid)}/${garCap(S, lid)} pojazdów · do: ${['dostawczaków', 'ciężarówek', 'TIR-ów'][p.sz]}</span></span>
+           <button class="btn s g" data-a="garUp" data-l="${lid}" data-p="${p.id}" ${!canL(lid, garUpP(p)) ? 'disabled' : ''}>+2 miejsca — ${mL(garUpP(p), lid)}</button></div>`
+        : `<div class="row pit"><span class="grow"><b>${B[x.t].n}</b> poz. ${x.l}${x.st ? ` <span class="neg small">${esc(x.st)}</span>` : ''}<div class="flow">${flowTxt(B[x.t], x.l * (1 + .08 * S.perk.prod), lid)}</div></span></div>`).join('')
+      : '<span class="mut">Pusta działka.</span>'}</div>
+    <div class="btns">
+      ${fr > 0 ? `<button class="btn p" data-a="pBuild" data-l="${lid}" data-p="${p.id}">Buduj tutaj (${fr} wolne)</button>` : ''}
+      ${fr > 0 && !p.g ? `<button class="btn g" data-a="pGar" data-l="${lid}" data-p="${p.id}" ${!canL(lid, GARAGE_COST) ? 'disabled' : ''}>Garaż — ${mL(GARAGE_COST, lid)}</button>` : ''}
+      ${p.lv < PMAX ? `<button class="btn" data-a="pLv" data-l="${lid}" data-p="${p.id}" ${!canL(lid, pLvCost(lid, p)) ? 'disabled' : ''}>Poziom ${p.lv + 1} — ${mL(pLvCost(lid, p), lid)}</button>` : ''}
+      ${p.sz < 2 ? `<button class="btn" data-a="pSize" data-l="${lid}" data-p="${p.id}" ${!canL(lid, pSizeCost(lid, p)) ? 'disabled' : ''}>Powiększ do ${['', 'średniej', 'dużej'][p.sz + 1]} — ${mL(pSizeCost(lid, p), lid)}</button>` : ''}
+      ${lmapOn() ? `<button class="btn" data-a="pMove" data-l="${lid}" data-p="${p.id}">Przenieś działkę</button>` : ''}
+      ${!it.length ? `<button class="btn" data-a="pSell" data-l="${lid}" data-p="${p.id}">Sprzedaj za ${mL(pVal(lid, p), lid)}</button>` : ''}
+    </div>
+    <div class="mut small" style="margin-top:8px">Poziom = liczba budynków na działce (maks. ${PMAX}). ${['Mała: tylko garaż na dostawczaki.', 'Średnia: farmy, hodowla, las, kopalnie, lekkie przetwórstwo, garaż na ciężarówki.', 'Duża: wszystko, także fabryki i huty, garaż na TIR-y.'][p.sz]}</div></div>`;
+}
 function setupLayers() {
   const map = LM.map;
   if ((S && S.mapStyle ? S.mapStyle : 'caros') === 'caros' || (!S && LM.sty === 'caros')) applyCaros(map);
@@ -1121,14 +1257,20 @@ function setupLayers() {
   map.addLayer({ id: 'xy-rad-f', type: 'fill', source: 'xy-rad', paint: { 'fill-color': '#e0823f', 'fill-opacity': .08 } });
   map.addLayer({ id: 'xy-rad-l', type: 'line', source: 'xy-rad', paint: { 'line-color': '#e0823f', 'line-width': 2, 'line-dasharray': [2, 2] } });
   for (const k of ['factory', 'farm', 'tree', 'mine', 'garage']) if (!map.hasImage('ic-' + k)) map.addImage('ic-' + k, iconImg(k), { pixelRatio: 2 });
+  map.addSource('xy-plot', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+  map.addSource('xy-3d', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+  map.addLayer({ id: 'xy-plot-f', type: 'fill', source: 'xy-plot', minzoom: 11, paint: { 'fill-color': ['get', 'c'], 'fill-opacity': ['case', ['==', ['get', 'own'], 1], .2, .1] } });
+  map.addLayer({ id: 'xy-plot-l', type: 'line', source: 'xy-plot', minzoom: 11, paint: { 'line-color': ['get', 'c'], 'line-width': ['interpolate', ['linear'], ['zoom'], 11, .8, 15, 1.6, 18, 3] } });
+  map.addLayer({ id: 'xy-3d-e', type: 'fill-extrusion', source: 'xy-3d', minzoom: 13.5,
+    paint: { 'fill-extrusion-color': ['get', 'c'], 'fill-extrusion-height': ['get', 'h'], 'fill-extrusion-base': ['get', 'b'], 'fill-extrusion-opacity': .96, 'fill-extrusion-vertical-gradient': true } });
   map.addSource('xy-bld', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
-  map.addLayer({ id: 'xy-bld-c', type: 'circle', source: 'xy-bld', minzoom: 10,
+  map.addLayer({ id: 'xy-bld-c', type: 'circle', source: 'xy-bld', minzoom: 10, maxzoom: 15,
     paint: { 'circle-radius': ['interpolate', ['linear'], ['zoom'], 10, 5, 13, 10, 16, 15], 'circle-color': ['get', 'col'],
       'circle-stroke-color': ['case', ['==', ['get', 'own'], 1], '#ffffff', '#0b131b'], 'circle-stroke-width': 2, 'circle-pitch-alignment': 'viewport' } });
   map.addLayer({ id: 'xy-bld-s', type: 'symbol', source: 'xy-bld', minzoom: 10,
     layout: { 'icon-image': ['get', 'ic'], 'icon-size': ['interpolate', ['linear'], ['zoom'], 10, .28, 13, .5, 16, .75], 'icon-allow-overlap': true,
       'text-field': ['step', ['zoom'], '', 12.5, ['get', 'lb']], 'text-font': ['Noto Sans Regular'], 'text-size': 11, 'text-offset': [0, 1.5], 'text-anchor': 'top', 'text-optional': true },
-    paint: { 'text-color': '#eef0f3', 'text-halo-color': '#0a0c0f', 'text-halo-width': 1.4 } });
+    paint: { 'text-color': '#eef0f3', 'text-halo-color': '#0a0c0f', 'text-halo-width': 1.4, 'icon-opacity': ['step', ['zoom'], 1, 15, 0] } });
 }
 function mountLM(cid, sel) {
   const slot = $('lmapSlot'), lm = ensureLM();
@@ -1140,7 +1282,8 @@ function mountLM(cid, sel) {
     lm.cid = cid;
     if (l && l.c === cid) lm.map.jumpTo({ center: [l.lo, l.la], zoom: 10.5, pitch: 50 });
     else { const b = MAPS[cid].box; lm.map.fitBounds([b[0], b[1]], { animate: false }); }
-  } else if (ui.flyB) { const t = LOC[ui.flyB]; lm.map.flyTo({ center: [t.lo, t.la], zoom: t.t === 'm' ? 13 : 14.5, pitch: 50, duration: 900 }); ui.flyB = null; }
+  } else if (ui.flyP) { lm.map.flyTo({ center: [ui.flyP[1], ui.flyP[0]], zoom: 16, pitch: 55, duration: 900 }); ui.flyP = null; }
+  else if (ui.flyB) { const t = LOC[ui.flyB]; lm.map.flyTo({ center: [t.lo, t.la], zoom: t.t === 'm' ? 13 : 14.5, pitch: 50, duration: 900 }); ui.flyB = null; }
   else if (ui.fitB) lm.map.fitBounds(ui.fitB, { padding: 30, maxZoom: 11 });
   else if (ui.panTo && l) lm.map.easeTo({ center: [l.lo, l.la], zoom: Math.max(lm.map.getZoom(), 9.5) });
   ui.panTo = false; ui.fitB = null;
@@ -1160,7 +1303,7 @@ function drawLM() {
   const ids = new Set([ui.bl, ...Object.keys(SS.L), ...LOCS.filter(l => l.u || (!S && l.g)).map(l => l.id)]);
   for (const id of ids) {
     const l = LOC[id]; if (!l || l.c !== cid) continue;
-    const L = SS.L[id], mine = !!(L && (L.bld.length || L.gar || Object.keys(L.inv).length)), on = id === ui.bl;
+    const L = SS.L[id], mine = !!(L && (L.bld.length || L.gar || (L.P && L.P.length) || Object.keys(L.inv).length)), on = id === ui.bl;
     const d = document.createElement('div'); d.className = 'mk' + (on ? ' on' : '') + (mine ? ' mine' : '');
     d.innerHTML = `<i style="background:${mine ? SS.color : l.g ? '#ff8fe0' : l.u ? '#ffc98a' : l.t === 'm' ? '#a9bfd6' : '#86c98a'};${L && L.port ? 'box-shadow:0 0 0 3px #4aa3ff' : ''}"></i><span>${esc(l.n)}</span>`;
     d.addEventListener('click', ev => {
@@ -1181,7 +1324,7 @@ function drawLM() {
     lm.mk.push(new maplibregl.Marker({ element: d, anchor: 'bottom', offset: [0, 6] }).setLngLat([a.lo + (c.lo - a.lo) * p, a.la + (c.la - a.la) * p]).addTo(map));
   }
   map.getSource('xy-veh').setData({ type: 'FeatureCollection', features: lines });
-  try { map.getSource('xy-bld').setData({ type: 'FeatureCollection', features: bldFeatures() }); } catch (e) {}
+  try { map.getSource('xy-bld').setData({ type: 'FeatureCollection', features: bldFeatures() }); const pg = plotGeo(); map.getSource('xy-plot').setData({ type: 'FeatureCollection', features: pg.ground }); map.getSource('xy-3d').setData({ type: 'FeatureCollection', features: pg.ext }); } catch (e) {}
   const pb = ui.placeB, pl = pb && LOC[pb.lid];
   try { map.getSource('xy-rad').setData({ type: 'FeatureCollection', features: pl ? [circleGeo(pl.la, pl.lo, townR(pl))] : [] }); } catch (e) {}
 }
@@ -1201,10 +1344,18 @@ function fitTo(ls) { // pokaż obszar (państwo/region) na mapie
   if (pr) { const p0 = pr([o0, a1]), p1 = pr([o1, a0]); const w = Math.max(20, p1[0] - p0[0]), hgt = Math.max(20, p1[1] - p0[1]);
     zoomAt(cid, Math.min(m.w / w, m.h / hgt) * .8, (p0[0] + p1[0]) / 2, (p0[1] + p1[1]) / 2); }
 }
-function placeBld(la, lo) { // postawienie / przeniesienie budynku w klikniętym miejscu
+function placeBld(la, lo) { // kupno / przeniesienie działki w klikniętym miejscu
   const p = ui.placeB, l = LOC[p.lid], dk = kmLL(la, lo, l.la, l.lo), R = townR(l);
+  const pos = { la: +la.toFixed(6), lo: +lo.toFixed(6) };
+  if (p.k === 'plot' || p.k === 'mvp') {
+    const L = S.L[p.lid], pl = p.k === 'mvp' && plots(L).find(x => x.id == p.id), side = pl ? pSide(pl) : PSZ[p.sz].m;
+    const er = spotErr(p.lid, pos.la, pos.lo, side, pl ? pl.id : null); if (er) { toast(er); return; }
+    ui.placeB = null;
+    if (pl) { pl.la = pos.la; pl.lo = pos.lo; toast('Działka przeniesiona'); save(); render(true); }
+    else act('plotBuy', { l: p.lid, sz: p.sz, ...pos });
+    return;
+  }
   if (dk > R) { toast(`Za daleko od centrum: ${l.n} (max ${String(+R.toFixed(1)).replace('.', ',')} km)`); return; }
-  const pos = { la: +la.toFixed(5), lo: +lo.toFixed(5) };
   ui.placeB = null;
   if (p.k === 'b') act('build', { l: p.lid, b: p.b, ...pos });
   else if (p.k === 'g') act('garage', { l: p.lid, ...pos });
@@ -1214,14 +1365,14 @@ function vBudowa() {
   const cid = ui.bc, c = CN[cid];
   let h = contChips(cid);
   if (!LOC[ui.bl] || LOC[ui.bl].c !== cid) ui.bl = Object.keys(S.L).find(l => LOC[l] && LOC[l].c === cid) || CAP[cid];
-  const lid = ui.bl, l = LOC[lid], t = TYPE[l.t], L = S.L[lid] || newLoc(), fr = slots(L, lid) - used(L), lic = hasLic(lid), land = landOf(lid);
+  const lid = ui.bl, l = LOC[lid], t = TYPE[l.t], L = S.L[lid] || newLoc(), lic = hasLic(lid), lim = PLIM[l.t];
   const cl = ctryList(cid), rl = regList(l.cc, cid);
   h += `<div class="grid2 ctry"><div><label class="f">Państwo</label><select data-in="bcc">${cl.map(cc => `<option value="${cc}" ${cc === l.cc ? 'selected' : ''}>${flag(cc)} ${cName(cc)}${S.lic[cc] ? ' ✓' : ''}</option>`).join('')}</select></div>
     <div><label class="f">Region</label><select data-in="brg"><option value="">— cały kraj —</option>${rl.map(r => `<option value="${r}" ${r === l.rg && ui.rgSel ? 'selected' : ''}>${esc(REG[r][0])}</option>`).join('')}</select></div></div>`;
   const nC = BYC[cid].length;
   h += (ui.place ? `<div class="placebar"><span class="grow">${isAdmin() ? 'ADMIN: dotknij mapy — miejscowość pojawi się u wszystkich graczy.' : 'Dotknij mapy w miejscu, gdzie ma powstać nowa miejscowość.'}</span><button class="btn s" data-a="placeOff">Anuluj</button></div>` : '')
-    + (ui.placeB ? `<div class="placebar"><span class="grow">Dotknij mapy w obrębie <b>${esc(LOC[ui.placeB.lid].n)}</b> (pomarańczowy okrąg), gdzie postawić: <b>${ui.placeB.k === 'mv' ? 'nowe miejsce' : ui.placeB.k === 'g' ? 'Garaż' : B[ui.placeB.b].n}</b></span>
-        ${ui.placeB.k !== 'mv' ? '<button class="btn s" data-a="pbAuto">Losowo</button>' : ''}<button class="btn s" data-a="pbOff">Anuluj</button></div>` : '')
+    + (ui.placeB ? `<div class="placebar"><span class="grow">Dotknij mapy w obrębie <b>${esc(LOC[ui.placeB.lid].n)}</b> (pomarańczowy okrąg): <b>${ui.placeB.k === 'mvp' ? 'nowe miejsce działki' : ui.placeB.k === 'plot' ? PSZ[ui.placeB.sz].n.toLowerCase() + ' działka' : 'nowe miejsce'}</b></span>
+        ${ui.placeB.k === 'plot' ? '<button class="btn s" data-a="pbAuto">Losowo</button>' : ''}<button class="btn s" data-a="pbOff">Anuluj</button></div>` : '')
     + (lmapOn() ? '<div id="lmapSlot" class="lslot"></div>' : locMap(cid, lid))
     + `<div class="lsearch"><input id="locQ" data-q="1" type="search" placeholder="Szukaj wśród ${nC.toLocaleString('pl-PL')} miejscowości…" value="${esc(ui.locQ || '')}" autocomplete="off">
        </div><div id="locRes">${locRes(cid, lid)}</div>`;
@@ -1233,11 +1384,15 @@ function vBudowa() {
     ${lic ? '' : `<div class="lic"><div class="grow"><b>Brak licencji: ${flag(l.cc)} ${cName(l.cc)}</b><div class="mut small">Państwo ${TIERS[tierOf(l.cc)].n} — bez licencji nie zbudujesz tu nic.</div></div>
       <button class="btn p" data-a="lic" data-cc="${l.cc}" ${!canC(S, curOfCC(l.cc), licCost(l.cc)) ? 'disabled' : ''}>Kup licencję — ${mC(licCost(l.cc), curOfCC(l.cc))}</button>
       ${!canC(S, curOfCC(l.cc), licCost(l.cc)) ? `<div class="mut small" style="flex-basis:100%">Płacisz w walucie: ${curName(curOfCC(l.cc))}. Masz ${fmtC(wal(S, curOfCC(l.cc)), curOfCC(l.cc))} — wymień w kantorze (Rynek).</div>` : ''}</div>`}
-    <div class="row" style="margin-top:8px"><div class="grow">Działki: <b>${used(L)} / ${slots(L, lid)}</b> <span class="mut small">· działka ${mL(land, lid)}</span></div>
-    ${L.x < t.maxX ? `<button class="btn s" data-a="expand" data-l="${lid}" ${!canL(lid, xCost(L, lid)) || !lic ? 'disabled' : ''}>+${t.step} dział${t.step > 1 ? 'ki' : 'ka'} — ${mL(xCost(L, lid), lid)}</button>` : '<span class="mut small">maks. działek</span>'}</div>
-    <div class="row" style="margin-top:8px"><div class="grow">Garaż: ${L.gar ? `<b>poz. ${L.gar}</b> <span class="mut small">· ${garUsed(S, lid)}/${garCap(S, lid)} pojazdów</span>` : '<span class="mut">brak</span>'}</div>
-    ${L.gar ? `<button class="btn s" data-a="garUp" data-l="${lid}" ${!canL(lid, garUp(L)) ? 'disabled' : ''}>Rozbuduj — ${mL(garUp(L), lid)}</button>`
-      : `<button class="btn s g" data-a="${lmapOn() ? 'garPick' : 'garage'}" data-l="${lid}" ${!canL(lid, GARAGE_COST + land) || fr < 1 || !lic ? 'disabled' : ''}>Zbuduj — ${mL(GARAGE_COST + land, lid)}</button>`}</div>
+    <div class="plots"><div class="row"><b class="grow">Twoje działki tutaj (${plots(L).length})</b></div>
+    ${plots(L).map(p => { const it = pItems(L, p), fr = pFree(L, p);
+      return `<div class="prow ${ui.plot == p.id ? 'on' : ''}"><button class="pmain" data-a="pSel" data-l="${lid}" data-p="${p.id}"><span class="psz s${p.sz}"></span>
+        <span class="grow"><b>${pName(p)}</b> <span class="mut small">poz. ${p.lv} · ${it.length}/${p.lv}</span><div class="mut small">${it.length ? it.map(x => x === 'gar' ? 'Garaż' : B[x.t].n).join(', ') : 'pusta'}</div></span></button>
+        <div class="pbtn">${p.lv < PMAX ? `<button class="btn s" data-a="pLv" data-l="${lid}" data-p="${p.id}" ${!canL(lid, pLvCost(lid, p)) ? 'disabled' : ''}>Poziom +1 · ${mL(pLvCost(lid, p), lid)}</button>` : ''}
+        <button class="btn s" data-a="pInfo" data-l="${lid}" data-p="${p.id}">Więcej</button></div></div>`; }).join('') || '<div class="mut small" style="margin:4px 0">Nie masz tu działki. Kup ją, żeby coś zbudować.</div>'}
+    <div class="mut small" style="margin:10px 0 6px">Kup działkę ${lmapOn() ? '(potem dotknij mapy)' : ''}:</div>
+    <div class="pbuy">${PSZ.map((z, sz) => { const n = pCount(L, sz), c = plotCost(lid, sz), full = n >= lim[sz];
+      return `<button class="btn s ${sz === 1 ? 'p' : ''}" data-a="${lmapOn() ? 'plotPick' : 'plotBuy'}" data-l="${lid}" data-sz="${sz}" ${!lic || full || !canL(lid, c) ? 'disabled' : ''}><b>${z.n}</b><small>${full ? 'limit' : mL(c, lid)} · ${n}/${lim[sz]}</small></button>`; }).join('')}</div></div>
     ${l.port ? `<div class="row" style="margin-top:8px"><div class="grow">Port: ${L.port ? '<b class="pos">czynny</b>' : '<span class="mut">brak</span>'}</div>
       ${L.port ? '' : `<button class="btn s p" data-a="port" data-l="${lid}" ${!canL(lid, PORT_COST) || !lic ? 'disabled' : ''}>Zbuduj — ${mL(PORT_COST, lid)}</button>`}</div>` : ''}</div>`;
   h += `<h2>Zakłady — ${l.n}</h2>`;
@@ -1247,11 +1402,12 @@ function vBudowa() {
     h += `<div class="card"><div class="row"><div class="grow"><span class="tier t${d.t}">${TIER[d.t]}</span><span class="bname">${d.n}</span> <span class="mut">poz. ${b.l}</span></div></div>
       <div class="flow">${flowTxt(d, k, lid)}</div>${b.st ? `<div class="warn">${esc(b.st)}</div>` : ''}
       <div class="btns"><button class="btn s g" data-a="up" data-l="${lid}" data-id="${b.id}" ${!canL(lid, uc) ? 'disabled' : ''}>Ulepsz — ${mL(uc, lid)}</button>
-      ${lmapOn() ? `<button class="btn s" data-a="bMove" data-l="${lid}" data-id="${b.id}">Przenieś</button>` : ''}
+      ${b.p ? `<button class="btn s" data-a="pInfo" data-l="${lid}" data-p="${b.p}">Działka</button>` : ''}
       <button class="btn s" data-a="demo" data-l="${lid}" data-id="${b.id}">Sprzedaj za ${mL(bldValue(b), lid)}</button></div></div>`;
   }
   const dep = DEP.find(x => x.id === ui.dep);
-  h += `<div class="deph"><h2 class="grow">${dep ? `${dep.i} ${dep.n}` : `Wybierz dział przemysłu`}<span class="mut small"> · ${fr < 1 ? 'brak wolnych działek' : `wolne działki: ${fr}`}</span></h2>
+  const selP = plots(L).find(p => p.id == ui.plot);
+  h += `<div class="deph"><h2 class="grow">${dep ? `${dep.i} ${dep.n}` : `Wybierz dział przemysłu`}<span class="mut small"> · ${selP ? `budujesz na: ${pName(selP).toLowerCase()} (wolne ${pFree(L, selP)})` : plots(L).some(p => pFree(L, p) > 0) ? 'na pierwszej pasującej działce' : 'najpierw kup działkę'}</span></h2>
     <div class="depbtns"><button class="btn s b" data-a="recipes">☰ Przepisy</button><button class="btn s b" data-a="priceMap">🗺 Mapa cen</button>${dep ? `<button class="btn s b" data-a="dep" data-v="">‹</button>` : ''}</div></div>`;
   if (!dep) {
     h += `<div class="deps">${DEP.map(x => { const n = L ? L.bld.filter(b => B[b.t].d === x.id).length : 0, k = Object.values(B).filter(d => d.d === x.id).length;
@@ -1259,11 +1415,11 @@ function vBudowa() {
     return h;
   }
   for (const [id, d] of Object.entries(B).filter(([, d]) => d.d === dep.id)) {
-    const ti = d.t, cost = d.cost + land, bon = d.in ? t.fac : t.raw;
+    const ti = d.t, cost = d.cost, bon = d.in ? t.fac : t.raw, tp = pickPlot(L, id, ui.plot), r = REQ(id);
     const rb = !d.in ? Object.keys(d.out).map(g => resF(S, lid, g)).reduce((a, b) => Math.max(a, b), 0) : 1, tot = bon * rb;
     h += `<div class="card rise"><div class="row"><div class="grow"><span class="tier t${ti}">${TIER[ti]}</span><span class="bname">${d.n}</span>${Math.abs(tot - 1) > .005 ? ` <span class="${tot > 1 ? 'pos' : 'neg'} small">${tot > 1 ? '+' : '−'}${Math.round(Math.abs(tot - 1) * 100)}%</span>` : ''}</div>
-      <button class="btn s p" data-a="${lmapOn() ? 'buildPick' : 'build'}" data-l="${lid}" data-b="${id}" ${!canL(lid, cost) || fr < 1 || !lic ? 'disabled' : ''}>${mL(cost, lid)}</button></div>
-      <div class="flow">${flowTxt(d, 1 + .08 * S.perk.prod, lid)}</div></div>`;
+      <button class="btn s p" data-a="build" data-l="${lid}" data-b="${id}" data-p="${tp ? tp.id : ''}" ${!canL(lid, cost) || !tp || !lic ? 'disabled' : ''}>${mL(cost, lid)}</button></div>
+      <div class="flow">${flowTxt(d, 1 + .08 * S.perk.prod, lid)}</div><div class="mut small" style="margin-top:4px"><span class="psz s${r}"></span> ${PSZ[r].n} działka${r < 2 ? ' lub większa' : ''}${tp ? '' : ' — <span class="neg">brak wolnego miejsca</span>'}</div></div>`;
   }
   return h;
 }
@@ -1412,16 +1568,16 @@ function vLogistyka() {
   // --- garaże i pojazdy ---
   const gars = Object.keys(S.L).filter(l => S.L[l].gar);
   h += `<h2>Garaże i pojazdy (${S.veh.length})</h2>`;
-  if (!gars.length) h += `<div class="card mut">Nie masz garażu. Zbuduj go w zakładce Budowa w wybranej miejscowości (zajmuje 1 działkę). Pojazdy wożą towar między miejscowościami na tym samym lądzie.</div>`;
+  if (!gars.length) h += `<div class="card mut">Nie masz garażu. Kup działkę w zakładce Budowa i postaw na niej garaż (mała — dostawczaki, średnia — ciężarówki, duża — TIR-y). Pojazdy wożą towar między miejscowościami na tym samym lądzie.</div>`;
   else {
     if (!gars.includes(ui.garAt)) ui.garAt = gars[0];
     if (!VEH[ui.vehK]) ui.vehK = 'van';
-    const vk = VEH[ui.vehK], full = garUsed(S, ui.garAt) >= garCap(S, ui.garAt);
+    const vk = VEH[ui.vehK], full = garUsed(S, ui.garAt) >= garCap(S, ui.garAt), gc = garCls(S, ui.garAt), big = VCLS[ui.vehK] > gc;
     h += `<div class="card"><div class="grid2">
       <div><label class="f">Garaż</label><select data-in="garAt">${gars.map(l => `<option value="${l}" ${l === ui.garAt ? 'selected' : ''}>${LOC[l].n} (${garUsed(S, l)}/${garCap(S, l)})</option>`).join('')}</select></div>
-      <div><label class="f">Pojazd</label><select data-in="vehK">${Object.entries(VEH).map(([k, v]) => `<option value="${k}" ${k === ui.vehK ? 'selected' : ''}>${v.n}</option>`).join('')}</select></div></div>
+      <div><label class="f">Pojazd</label><select data-in="vehK">${Object.entries(VEH).map(([k, v]) => `<option value="${k}" ${k === ui.vehK ? 'selected' : ''}>${v.n}${VCLS[k] > gc ? ' 🔒' : ''}</option>`).join('')}</select></div></div>
       <div class="flow">${vk.n}: ładowność ${vk.cap} szt. · ${vk.spd} km/h · paliwo ${mL(vk.fuel, ui.garAt)}/km</div>
-      <div class="btns"><button class="btn p" data-a="veh" ${!canL(ui.garAt, vk.cost) || full ? 'disabled' : ''}>${full ? 'Garaż pełny — rozbuduj' : `Kup — ${mL(vk.cost, ui.garAt)}`}</button></div></div>`;
+      <div class="btns"><button class="btn p" data-a="veh" ${!canL(ui.garAt, vk.cost) || full || big ? 'disabled' : ''}>${big ? `Wymaga garażu na ${['małej', 'średniej', 'dużej'][VCLS[ui.vehK]]} działce` : full ? 'Garaż pełny — rozbuduj' : `Kup — ${mL(vk.cost, ui.garAt)}`}</button></div></div>`;
   }
   for (const v of S.veh) {
     const k = VEH[v.k];
@@ -1635,17 +1791,56 @@ function act(a, d) {
       const c = licCost(d.cc), cu = curOfCC(d.cc); if (S.lic[d.cc] || !canC(S, cu, c)) return;
       payC(S, cu, c); S.lic[d.cc] = true; S.c[LOC[ui.bl].c] = {}; addNews(S, `Licencja: ${cName(d.cc)}`); toast(`${flag(d.cc)} Licencja na ${cName(d.cc)}!`); break;
     }
-    case 'buildPick': case 'garPick':
-      ui.placeB = a === 'garPick' ? { k: 'g', lid: d.l } : { k: 'b', lid: d.l, b: d.b }; ui.flyB = d.l; window.scrollTo({ top: 0, behavior: 'smooth' }); break;
-    case 'bMove': $('modal').hidden = true; ui.bc = LOC[d.l].c; ui.bl = d.l; ui.tab = 'budowa'; ui.placeB = { k: 'mv', lid: d.l, id: d.id }; ui.flyB = d.l; window.scrollTo({ top: 0, behavior: 'smooth' }); break;
+    case 'plotPick': ui.placeB = { k: 'plot', lid: d.l, sz: +d.sz }; ui.flyB = d.l; window.scrollTo({ top: 0, behavior: 'smooth' }); break;
+    case 'pMove': $('modal').hidden = true; ui.bc = LOC[d.l].c; ui.bl = d.l; ui.tab = 'budowa'; ui.placeB = { k: 'mvp', lid: d.l, id: +d.p }; ui.flyB = d.l; window.scrollTo({ top: 0, behavior: 'smooth' }); break;
     case 'bGo': $('modal').hidden = true; ui.bc = LOC[d.l].c; ui.bl = d.l; ui.tab = 'budowa'; ui.panTo = true; break;
     case 'pbOff': ui.placeB = null; break;
-    case 'pbAuto': { const p = ui.placeB; ui.placeB = null; if (!p) break; act(p.k === 'g' ? 'garage' : 'build', { l: p.lid, b: p.b }); return; }
+    case 'pbAuto': { const p = ui.placeB; ui.placeB = null; if (!p || p.k !== 'plot') break; act('plotBuy', { l: p.lid, sz: p.sz }); return; }
+    case 'plotBuy': {
+      const sz = +d.sz, l = LOC[d.l], L0 = S.L[d.l], c = plotCost(d.l, sz);
+      if (!hasLic(d.l)) return;
+      if (pCount(L0, sz) >= PLIM[l.t][sz]) { toast(`Limit działek (${PSZ[sz].n.toLowerCase()}) w: ${l.n}`); return; }
+      if (!canL(d.l, c)) { toast(`Za mało ${curOf(d.l)}`); return; }
+      let pos = isFinite(d.la) && isFinite(d.lo) ? [+d.la, +d.lo] : findSpot(d.l, PSZ[sz].m);
+      if (!pos) { toast('Brak wolnego miejsca w tej miejscowości'); return; }
+      payC(S, curOf(d.l), c); const L = ensureL(S, d.l), p = { id: S.nid++, sz, lv: 1, la: pos[0], lo: pos[1], g: 0 }; plots(L).push(p);
+      ui.plot = p.id; ui.flyP = pos; toast(`${pName(p)} — ${l.n}`); break;
+    }
+    case 'pSel': ui.plot = ui.plot == d.p ? null : +d.p; break;
+    case 'pInfo': plotSheet(d.l, d.p); return;
+    case 'pBuild': $('modal').hidden = true; ui.plot = +d.p; ui.bl = d.l; ui.bc = LOC[d.l].c; ui.tab = 'budowa'; ui.dep = null; render(true);
+      setTimeout(() => { const e = document.querySelector('.deph'); if (e) e.scrollIntoView({ behavior: 'smooth' }); }, 60); return;
+    case 'pLv': case 'pSize': {
+      const L = S.L[d.l], p = plots(L).find(x => x.id == d.p); if (!p) return;
+      const c = a === 'pLv' ? pLvCost(d.l, p) : pSizeCost(d.l, p);
+      if ((a === 'pLv' ? p.lv >= PMAX : p.sz >= 2) || !canL(d.l, c)) return;
+      const np = { ...p, lv: p.lv + (a === 'pLv' ? 1 : 0), sz: p.sz + (a === 'pSize' ? 1 : 0) };
+      if (a === 'pSize' && pCount(L, np.sz) >= PLIM[LOC[d.l].t][np.sz]) { toast(`Limit działek (${PSZ[np.sz].n.toLowerCase()}) w: ${LOC[d.l].n}`); return; }
+      const er = spotErr(d.l, p.la, p.lo, pSide(np), p.id); if (er) { toast('Brak miejsca, żeby powiększyć działkę — przenieś ją w wolne miejsce'); return; }
+      payC(S, curOf(d.l), c); p.lv = np.lv; p.sz = np.sz;
+      toast(a === 'pLv' ? `${pName(p)}: poziom ${p.lv} — miejsce na ${p.lv} budynki` : `Działka powiększona: ${pName(p).toLowerCase()}`);
+      if (!$('modal').hidden) { save(); plotSheet(d.l, p.id); render(); return; } break;
+    }
+    case 'pGar': {
+      const L = S.L[d.l], p = plots(L).find(x => x.id == d.p); if (!p || p.g || pFree(L, p) < 1 || !canL(d.l, GARAGE_COST)) return;
+      payC(S, curOf(d.l), GARAGE_COST); p.g = 1; syncGar(L); ui.garAt = d.l; toast(`Garaż — ${LOC[d.l].n}`);
+      if (!$('modal').hidden) { save(); plotSheet(d.l, p.id); render(); return; } break;
+    }
+    case 'garUp': {
+      const L = S.L[d.l], p = plots(L).find(x => x.id == d.p); if (!p || !p.g || !canL(d.l, garUpP(p))) return;
+      payC(S, curOf(d.l), garUpP(p)); p.g++; syncGar(L); toast(`Garaż poz. ${p.g}`);
+      if (!$('modal').hidden) { save(); plotSheet(d.l, p.id); render(); return; } break;
+    }
+    case 'pSell': {
+      const L = S.L[d.l], i = plots(L).findIndex(x => x.id == d.p); if (i < 0 || pUsed(L, L.P[i])) return;
+      earnC(S, curOf(d.l), pVal(d.l, L.P[i])); L.P.splice(i, 1); $('modal').hidden = true; toast('Działka sprzedana'); break;
+    }
     case 'build': {
-      const def = B[d.b], ld = landOf(d.l), cost = def.cost + ld; if (!hasLic(d.l) || !canL(d.l, cost) || free(S, d.l) < 1) return;
-      const id = S.nid++, b = { id, t: d.b, l: 1, st: '', land: ld };
-      if (isFinite(d.la) && isFinite(d.lo)) { b.la = +d.la; b.lo = +d.lo; } else posOf(d.l, b);
-      payC(S, curOf(d.l), cost); ensureL(S, d.l).bld.push(b); toast(`${def.n} — ${LOC[d.l].n}`); break;
+      const def = B[d.b], L = S.L[d.l], p = pickPlot(L, d.b, d.p || ui.plot), cost = def.cost;
+      if (!hasLic(d.l) || !canL(d.l, cost)) return;
+      if (!p) { toast(`Potrzebna ${PSZ[REQ(d.b)].n.toLowerCase()} działka z wolnym miejscem`); return; }
+      const id = S.nid++, b = { id, t: d.b, l: 1, st: '', p: p.id };
+      payC(S, curOf(d.l), cost); L.bld.push(b); toast(`${def.n} — ${pName(p).toLowerCase()}, ${LOC[d.l].n}`); break;
     }
     case 'up': {
       const b = S.L[d.l].bld.find(x => x.id == d.id), c = upCost(b); if (!canL(d.l, c)) return;
@@ -1655,17 +1850,9 @@ function act(a, d) {
       const L = S.L[d.l], i = L.bld.findIndex(x => x.id == d.id); if (i < 0) return;
       earnC(S, curOf(d.l), bldValue(L.bld[i])); L.bld.splice(i, 1); break;
     }
-    case 'expand': {
-      const L = ensureL(S, d.l), c = xCost(L, d.l); if (!canL(d.l, c) || L.x >= T(d.l).maxX) return;
-      payC(S, curOf(d.l), c); L.x++; toast(`${LOC[d.l].n}: nowe działki`); break;
-    }
-    case 'garage': {
-      const c = GARAGE_COST + landOf(d.l); if (!hasLic(d.l) || !canL(d.l, c) || free(S, d.l) < 1) return;
-      payC(S, curOf(d.l), c); const GL = ensureL(S, d.l); GL.gar = 1; GL.gpos = isFinite(d.la) && isFinite(d.lo) ? [+d.la, +d.lo] : autoPos(d.l, 'gar'); ui.garAt = d.l; toast(`Garaż — ${LOC[d.l].n}`); break;
-    }
-    case 'garUp': { const L = S.L[d.l], c = garUp(L); if (!canL(d.l, c)) return; payC(S, curOf(d.l), c); L.gar++; toast(`Garaż poz. ${L.gar}`); break; }
     case 'veh': {
       const k = VEH[ui.vehK]; if (!k || !ui.garAt || !canL(ui.garAt, k.cost) || garUsed(S, ui.garAt) >= garCap(S, ui.garAt)) return;
+      if (VCLS[ui.vehK] > garCls(S, ui.garAt)) { toast(`${k.n} wymaga garażu na ${['małej', 'średniej', 'dużej'][VCLS[ui.vehK]]} działce`); return; }
       payC(S, curOf(ui.garAt), k.cost); S.veh.push({ id: S.nid++, k: ui.vehK, home: ui.garAt, at: ui.garAt, st: 'idle', from: null, to: null, g: null, q: 0, eta: 0, dur: 1 });
       toast(`${k.n} w garażu: ${LOC[ui.garAt].n}`); break;
     }
@@ -1867,8 +2054,9 @@ function cloudSave(now) {
       .then(() => { cloudAt = Date.now(); }).catch(() => {});
     // budynki widoczne dla innych graczy na mapie
     const items = []; for (const lid in S.L) { const L = S.L[lid]; for (const b of L.bld) { const [la, lo] = posOf(lid, b); items.push({ t: b.t, l: b.l, la, lo, lid }); }
-      if (L.gar) { const [la, lo] = garPos(lid, L); items.push({ t: 'gar', l: L.gar, la, lo, lid }); } }
-    DB.collection('bld').doc(USER.uid).set({ uid: USER.uid, name: S.name, ceo: S.ceo, color: S.color, worth: Math.round(worth()), ts: now, items }).catch(() => {});
+      for (const p of plots(L)) if (p.g) { const [la, lo] = pLayout(p, pUsed(L, p))[0]; items.push({ t: 'gar', l: p.g, la, lo, lid }); } }
+    const pl = []; for (const lid in S.L) for (const p of plots(S.L[lid])) pl.push({ lid, la: p.la, lo: p.lo, sz: p.sz, lv: p.lv, g: p.g || 0, b: S.L[lid].bld.filter(b => b.p === p.id).map(b => b.t) });
+    DB.collection('bld').doc(USER.uid).set({ uid: USER.uid, name: S.name, ceo: S.ceo, color: S.color, worth: Math.round(worth()), ts: now, items, p: pl }).catch(() => {});
     // podsumowanie dla panelu admina (bez całego zapisu)
     DB.collection('stats').doc(USER.uid).set({ uid: USER.uid, email: USER.email || '', name: S.name, ceo: S.ceo, color: S.color, hq: S.hq, hl: S.hl, diff: S.diff ?? 1,
       worth: Math.round(worth()), cash: Math.round(totUSD(S)), inc: Math.round(S.inc), hour: S.hour, season: S.season, pp: S.pp,

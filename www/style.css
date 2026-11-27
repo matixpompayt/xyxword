@@ -279,3 +279,18 @@ header#top{flex-wrap:wrap}
 .pmr:last-child{border:0}
 .pmbar{width:70px;height:6px;border-radius:3px;background:var(--line);overflow:hidden}.pmbar i{display:block;height:100%;background:linear-gradient(90deg,#3fb4ff,#ff5a4f)}
 .pmr .n{min-width:84px;text-align:right;font-variant-numeric:tabular-nums}
+/* działki */
+.plots{margin-top:10px;border-top:1px solid var(--line);padding-top:10px}
+.prow{display:flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:12px;padding:6px;margin:6px 0;background:var(--bg2);animation:rise .3s ease both}
+.prow.on{border-color:var(--acc,#e0823f);box-shadow:0 0 0 1px var(--acc,#e0823f) inset}
+.pmain{flex:1;display:flex;align-items:center;gap:10px;background:none;border:0;color:inherit;font:inherit;text-align:left;padding:2px;min-width:0}
+.pmain .grow{min-width:0}.pmain .mut.small{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pbtn{display:flex;flex-direction:column;gap:4px;align-items:stretch}
+.pbtn .btn{white-space:nowrap}
+.psz{display:inline-block;flex:none;border:2px solid currentColor;border-radius:3px;vertical-align:middle;color:var(--acc,#e0823f)}
+.psz.s0{width:10px;height:10px}.psz.s1{width:15px;height:15px}.psz.s2{width:21px;height:21px}
+.prow .psz{color:var(--acc,#e0823f)}
+.pbuy{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+.pbuy .btn{display:flex;flex-direction:column;align-items:center;gap:2px;padding:8px 4px}
+.pbuy small{font-size:11px;opacity:.85;font-weight:500}
+.pit{padding:6px 0;border-bottom:1px solid var(--line)}.pit:last-child{border:0}
