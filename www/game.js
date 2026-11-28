@@ -5,6 +5,29 @@ const SAVE = 'xyxword_save_v1';
 const HOUR_MS = 3600000;         // czas rzeczywisty: 1 godzina gry = 1 godzina
 const SEASON_H = 24 * 30;        // sezon = 30 dni gry
 const OFFLINE_MAX_H = 24 * 10;   // max 10 dni symulacji offline
+// ===== CZAS GRY: tempo ustawia admin (cfg/time w Firestore) =====
+// m: 'local' — zegar gry = zegar rzeczywisty; 'fast' — od chwili r0 (ms rzeczywiste) czas gry płynie k razy szybciej od g0 (k = 0 → pauza)
+// j: skoki czasu (np. powrót do czasu lokalnego): { ep, at: kiedy (ms rzecz.), from: czas gry przed, to: czas gry po }
+const TC0 = { m: 'local', k: 1, g0: 0, r0: 0, ep: 0, j: [] };
+let TCFG = TC0;
+try { const c = JSON.parse(localStorage.getItem('xyx_tcfg') || 'null'); if (c && c.m) TCFG = { ...TC0, ...c }; } catch (e) {}
+const gNow = () => TCFG.m === 'local' ? Date.now() : TCFG.g0 + (Date.now() - TCFG.r0) * TCFG.k;
+const kTxt = k => String(Math.round(k * 100) / 100).replace('.', ',');
+const tcTxt = c => c.m === 'local' ? 'czas lokalny 1:1' : c.k === 0 ? 'pauza' : `1:${kTxt(c.k)}`;
+function shiftTime(s, d) { // przesuwa wszystkie chwile gry o d ms (skok czasu, pominięcie długiej nieobecności)
+  if (!d) return;
+  for (const k of ['clock', 'hT', 'rtTry']) if (s[k]) s[k] += d;
+  for (const u of [...(s.veh || []), ...(s.ships || [])]) for (const k of ['t0', 'tD', 'tA', 't1', 'wt']) if (u[k]) u[k] += d;
+  for (const c of s.ct || []) if (c.t0) c.t0 += d;
+}
+function timeSync(s) { // skoki czasu ogłoszone przez admina, których ten zapis jeszcze nie przeszedł
+  if (!s || !s.clock) return;
+  for (const j of TCFG.j || []) if (j.ep > (s.tep || 0) && (s.last || 0) < j.at) {
+    if (s.clock < j.from) advance(s, j.from);   // świat dograny do chwili skoku
+    shiftTime(s, j.to - j.from);
+  }
+  s.tep = Math.max(s.tep || 0, TCFG.ep || 0);
+}
 const VERSION = window.XYX_VERSION || 'dev';
 const REPO = 'matixpompayt/xyxword';
 const BRANCH_COST = 2500000, PORT_COST = 15000000, SHIP_COST = 25000000, SHIP_CAP = 40000; // statek: 40 tys. t (masowiec Handysize)
@@ -384,9 +407,9 @@ function newState(o = {}) {
   for (const g of GK) m[g] = { sat: 0, d: rnd(.9, 1.1), h: [] };
   const s = {
     v: 2, created: Date.now(), setup: !!o.done, ceo: o.ceo || '', name: o.name || 'Moja Firma', color: o.color || COLORS[0], hq, hl, diff,
-    w: { [curOfCC(LOC[hl].cc)]: cash * (FX0[curOfCC(LOC[hl].cc)] || 1) }, fx: {}, fxp: {}, hour: 0, last: Date.now(),
+    w: { [curOfCC(LOC[hl].cc)]: cash * (FX0[curOfCC(LOC[hl].cc)] || 1) }, fx: {}, fxp: {}, hour: 0, last: Date.now(), tep: TCFG.ep,
     c: { [hq]: {} }, lic: { [LOC[hl].cc]: true }, L: { [hl]: newLoc() }, ships: [], veh: [], custom: [], nid: 1, m, ai: mkAI(cash, diff),
-    pl: 1, ec: 2, tr: 1, rt: 2, clock: Date.now(), fm: {}, ct: [], pend: [], season: 1, pp: 0, perk: { prod: 0, upk: 0, ship: 0, sell: 0 }, ev: [],
+    pl: 1, ec: 2, tr: 1, rt: 2, clock: gNow(), fm: {}, ct: [], pend: [], season: 1, pp: 0, perk: { prod: 0, upk: 0, ship: 0, sell: 0 }, ev: [],
     news: [], inc: 0, upk: 0, lastSeason: null, tut: { step: o.tut === false ? 99 : 0, sold: false, rew: false },
   };
   for (const g of GK) m[g].h = Array(8).fill(price(g, s));
@@ -674,7 +697,7 @@ const DAY = 864e5;
 const cDay = (s, c) => Math.floor((s.clock - c.t0) / DAY);
 const niceQ = v => { const e = Math.pow(10, Math.floor(Math.log10(Math.max(v, 1e-3)))); return Math.max(e, Math.round(v / e) * e); };
 function offersOf(lid) { // dzisiejsze oferty kontraktów firm w miejscowości
-  const di = Math.floor(((S && S.clock) || Date.now()) / DAY), r = [];
+  const di = Math.floor(((S && S.clock) || gNow()) / DAY), r = [];
   for (const f of firmsOf(lid)) {
     if (f.k === 'terminal' || hashS(f.id + '@' + di) % 4) continue;
     const h = hashS(f.id + '#' + di), g = f.gs[h % f.gs.length], per = niceQ(fDepth(f, g) * .08), days = 3 + (h >>> 4) % 8;
@@ -869,7 +892,7 @@ function routeNext(s, u, ship) { // trasa w kółko: odbiór → dostawa → odb
   }
   if (!goPick(s, u, ship, r.pk, r.dr, r.g, want)) u.wait = 'brak pieniędzy na kurs';
 }
-function uPos(u, t = Date.now()) { // pozycja pojazdu na mapie [la, lo]
+function uPos(u, t = gNow()) { // pozycja pojazdu na mapie [la, lo]
   if (u.st === 'idle' || !u.a) return u.pos || [LOC[u.at].la, LOC[u.at].lo];
   if (t <= u.tD) return u.a; if (t >= u.tA) return u.b;
   const r = rtGet(u.rk), f = (t - u.tD) / Math.max(1, u.tA - u.tD);
@@ -878,9 +901,9 @@ function uPos(u, t = Date.now()) { // pozycja pojazdu na mapie [la, lo]
   const f0 = r.cf[i - 1], f1 = r.cf[i], k = f1 > f0 ? clamp((f - f0) / (f1 - f0), 0, 1) : 0, p0 = r.geo[i - 1], p1 = r.geo[i];
   return [p0[1] + (p1[1] - p0[1]) * k, p0[0] + (p1[0] - p0[0]) * k];
 }
-const durTxt = ms => { const m = Math.max(0, Math.round(ms / 6e4)); return m >= 60 ? `${Math.floor(m / 60)} h ${m % 60} min` : `${m} min`; };
+const durTxt = ms => { const m = Math.max(0, Math.round(ms / 6e4)); return m >= 1440 ? `${Math.floor(m / 1440)} d ${Math.floor(m % 1440 / 60)} h` : m >= 60 ? `${Math.floor(m / 60)} h ${m % 60} min` : m > 0 || ms <= 0 ? `${m} min` : `${Math.max(1, Math.round(ms / 1e3))} s`; };
 function addNews(s, t) { s.news.unshift({ h: s.hour, c: s.clock, t }); s.news.length = Math.min(s.news.length, 40); }
-function tstr(h) { const t = new Date((S && S.clock) || Date.now()), d = Math.floor(h / 24) + 1; return `Dzień ${d}, ${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')}`; }
+function tstr(h) { const t = new Date((S && S.clock) || gNow()), d = Math.floor(h / 24) + 1; return `Dzień ${d}, ${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')}`; }
 
 // ================== SYMULACJA 1 GODZINY ==================
 function prod(s, dt) { // produkcja i koszty za dt godzin
@@ -930,11 +953,11 @@ function hourly(s) { // raz na godzinę: rynki, kursy, AI, wydarzenia, kontrakty
   if (s.hour % SEASON_H === 0) endSeason(s);
 }
 const HOUR = 36e5;
-function advance(s, to) { // symulacja zdarzeniowa do chwili „to” (ms); czas gry = czas rzeczywisty
-  if (!s.clock) s.clock = s.last || Date.now();
+function advance(s, to) { // symulacja zdarzeniowa do chwili „to” (ms czasu gry, zob. gNow)
+  if (!s.clock) s.clock = s.last || gNow();
   if (!s.hT) s.hT = s.clock + HOUR;
   const max = OFFLINE_MAX_H * HOUR;
-  if (to - s.clock > max) { const sk = to - max - s.clock; s.clock += sk; s.hT += sk; for (const u of [...s.veh, ...s.ships]) for (const k of ['t0', 'tD', 'tA', 't1']) if (u[k]) u[k] += sk; }
+  if (to - s.clock > max) shiftTime(s, to - max - s.clock);
   let guard = 0;
   while (s.clock < to && guard++ < 200000) {
     let t = Math.min(to, s.hT);
@@ -948,7 +971,7 @@ function advance(s, to) { // symulacja zdarzeniowa do chwili „to” (ms); czas
   if (s.clock - (s.rtTry || 0) > 3e5) rtRetry(s);
 }
 function rtRetry(s) { s.rtTry = s.clock; for (const u of s.veh) if (u.st === 'idle' && u.r) routeNext(s, u, false); for (const u of s.ships) if (u.st === 'idle' && u.r) routeNext(s, u, true); }
-const hour = s => { prod(s, 1); s.clock = (s.clock || Date.now()) + HOUR; s.hT = s.clock + HOUR; for (const u of [...s.veh, ...s.ships]) if (u.st !== 'idle' && u.t1 <= s.clock) arrive(s, u, !u.k); hourly(s); rtRetry(s); }; // test / zgodność
+const hour = s => { prod(s, 1); s.clock = (s.clock || gNow()) + HOUR; s.hT = s.clock + HOUR; for (const u of [...s.veh, ...s.ships]) if (u.st !== 'idle' && u.t1 <= s.clock) arrive(s, u, !u.k); hourly(s); rtRetry(s); }; // test / zgodność
 function randomEvent(s) {
   const t = Math.random();
   if (t < .5) {
@@ -1692,7 +1715,7 @@ function mountLM(cid, sel) {
 }
 function animVeh() { // pozycje pojazdów co sekundę
   const lm = LM; if (!S || !lm || !lm.ready || !lm.map.getSource('xy-vp') || !lm.el.isConnected) return;
-  const t = Date.now(), lines = [], pts = [];
+  const t = gNow(), lines = [], pts = [];
   for (const [u, ship] of [...S.veh.map(v => [v, false]), ...S.ships.map(x => [x, true])]) {
     if (!LOC[u.at] && !u.a) continue;
     const [la, lo] = uPos(u, t), mv = u.st !== 'idle';
@@ -2189,7 +2212,7 @@ function vDispatch() {
       const cur = u.at, res = P.rev || P.buyC;
       body += `<div class="sum">
         <div style="--i:0"><span>Dystans</span><b>${kmTxt(P.km)}</b></div>
-        <div style="--i:1"><span>Czas do celu</span><b>${durTxt(P.tt * 1e3)}</b></div>
+        <div style="--i:1"><span>Czas do celu${TCFG.m !== 'local' && TCFG.k > 1 ? ` (na zegarku ${durTxt(P.tt * 1e3 / TCFG.k)})` : ''}</span><b>${durTxt(P.tt * 1e3)}</b></div>
         <div style="--i:2"><span>Transport${P.duty ? ' (z cłem)' : ''}</span><b>${mL(P.fee, cur)}</b></div>
         <div style="--i:3"><span>${P.buyC ? 'Zakup towaru' : P.rev ? 'Sprzedaż (po podatku)' : 'Rozładunek'}</span><b>${P.buyC ? mL(P.buyC, P.pick.lid) : P.rev ? mL(P.rev, P.drop.lid) : 'do składu'}</b></div>
         ${res ? `<div class="res ${P.net >= 0 ? 'ok' : 'ko'}" style="--i:4"><span>${P.rev ? 'Zysk z kursu' : 'Razem z transportem'}</span><b>${P.rev ? mH(P.net) : mH(P.buyC + P.fee)}</b></div>` : ''}</div>`;
@@ -2205,7 +2228,7 @@ function vDispatch() {
   return h + body + `</div></div>`;
 }
 function vCard(u, ship, i) {
-  const t = Date.now(), k = ship ? 'sf' : 'vf', mv = u.st !== 'idle';
+  const t = gNow(), k = ship ? 'sf' : 'vf', mv = u.st !== 'idle';
   let s, s2 = '', right = '', bar = '';
   if (mv) {
     const ph = t < u.tD ? 'Załadunek' : t < u.tA ? 'W drodze' : u.job === 'pick' ? 'Odbiór towaru' : 'Rozładunek';
@@ -2462,7 +2485,7 @@ function drawDP() {
   if (!on) ui.dpCam = null;
 }
 function dpLaunch() { // wyjazd zaplanowanego kursu
-  advance(S, Date.now());
+  advance(S, gNow());
   const P = dpPlan(); if (!P || !P.ready || !(P.q > 0)) { render(true); return; }
   const { u, ship } = P; if (u.st !== 'idle' || u.pend) { render(true); return; }
   const g = P.g, want = P.q; let fee = 0;
@@ -2496,7 +2519,7 @@ function tweenCash() { // licznik gotówki płynnie dobija do wartości
 function renderTop() {
   $('coName').textContent = S.name;
   document.documentElement.style.setProperty('--me', S.color);
-  $('clock').textContent = tstr(S.hour) + ' · Sezon ' + S.season;
+  $('clock').textContent = tstr(S.hour) + ' · Sezon ' + S.season + (TCFG.m !== 'local' ? (TCFG.k === 0 ? ' · ⏸ pauza' : TCFG.k !== 1 ? ` · ⏩ ×${kTxt(TCFG.k)}` : '') : '');
   tweenCash();
   $('cash').style.color = wal(S, homeCur()) < 0 ? 'var(--bad)' : '';
   const nw = Object.keys(S.w || {}).filter(c => c !== homeCur() && Math.abs(S.w[c]) >= .5).length;
@@ -2596,6 +2619,9 @@ function act(a, d) {
     case 'npSet': ui.np.t = d.v; foundSheet(); return;
     case 'npPort': ui.np.port = !ui.np.port; foundSheet(); return;
     case 'admDel': adminDel(d.id); return;
+    case 'admTsel': ADM.tsel = d.m ? { m: d.m, k: +d.k } : null; renderAdmin(); return;
+    case 'admTk': { const k = +String(($('admK') || {}).value || '').replace(',', '.'); if (!(k >= 0 && k <= 3600)) { toast('Podaj tempo od 0 do 3600'); return; } ADM.tsel = { m: 'fast', k }; renderAdmin(); return; }
+    case 'admTset': admSetTime(ADM.tsel); return;
     case 'admTab': ADM.tab = d.v; if (d.v !== 'miejsca') ui.place = false; renderAdmin(); return;
     case 'admCont': ADM.cid = d.c; renderAdmin(); return;
     case 'admPl': admPlayer(d.id); return;
@@ -3078,11 +3104,12 @@ function startGame(s) {
   registerCustom(S); ui.z = {}; ui.dp = null; ui.camT = null; ui.snapTab = null; ui.animTab = null; ui.cashShown = null; ui.wzLast = null; if (LM) LM.cid = null;
   ui.bc = S.hq; ui.bl = ui.ml = S.hl; ui.tab = 'firma';
   if (S.setup) {
-    const off = (Date.now() - (S.clock || S.last || Date.now())) / HOUR;
+    timeSync(S);
+    const off = (gNow() - (S.clock || gNow())) / HOUR;
     if (off > .05) {
-      const c0 = totUSD(S); advance(S, Date.now());
+      const c0 = totUSD(S); advance(S, gNow());
       setTimeout(() => toast(`Pod Twoją nieobecność minęło ${durTxt(off * HOUR)} · ${totUSD(S) - c0 >= 0 ? '+' : ''}${mH(totUSD(S) - c0)}`), 400);
-    } else advance(S, Date.now());
+    } else advance(S, gNow());
   }
   acc = 0; prev = performance.now();
   save(); renderAuth(); render(true); renderWiz();
@@ -3112,6 +3139,16 @@ function adminDel(id) {
   DB.collection('places').doc(id).set({ del: true }, { merge: true }).then(() => toast('Usunięto')).catch(e => toast('Błąd: ' + (e.code || e.message)));
 }
 // ===== HANDEL MIĘDZY GRACZAMI: zlecenia skupu (escrow) i dostawy =====
+function listenTime() { // tempo czasu gry dla wszystkich (ustawia admin)
+  if (!DB || ui.timeUnsub) return;
+  ui.timeUnsub = DB.collection('cfg').doc('time').onSnapshot(d => {
+    const c = d.exists ? { ...TC0, ...d.data() } : TC0, old = TCFG;
+    TCFG = c; try { localStorage.setItem('xyx_tcfg', JSON.stringify(c)); } catch (e) {}
+    const ch = old.m !== c.m || old.k !== c.k || old.ep !== c.ep;
+    if (S && S.setup) { timeSync(S); advance(S, gNow()); save(); render(true); if (ch) toast(`Tempo czasu gry: ${tcTxt(c)}`); }
+    if (ADM.on && ADM.tab === 'czas') renderAdmin();
+  }, () => {});
+}
 function listenOrders() { if (!DB || ui.ordUnsub) return; ui.ordUnsub = DB.collection('orders').onSnapshot(sn => { ORD = sn.docs.map(d => ({ id: d.id, ...d.data() })); }, () => {}); }
 function listenDeliv() {
   if (!DB || !USER || ui.delUnsub) return;
@@ -3335,18 +3372,59 @@ function edWrite(data, msg) {
   DB.collection('places').doc(e.id).set(data, { merge: true }).then(() => toast(msg)).catch(er => toast('Błąd zapisu: ' + (er.code || er.message)));
   $('modal').hidden = true;
 }
+// --- admin: czas gry ---
+const TPRE = [['local', 1, 'Czas lokalny 1:1', 'zegar gry = zegar w telefonie'], ['fast', 1, '1:1', '1 h gry trwa 1 h'], ['fast', 10, '1:10', '1 h gry trwa 6 min'],
+  ['fast', 60, '1:60', '1 h gry trwa 1 min'], ['fast', 360, '1:360', '1 dzień gry trwa 4 min'], ['fast', 0, 'Pauza', 'świat stoi u wszystkich']];
+const fmtT = t => new Date(t).toLocaleString('pl-PL', { weekday: 'short', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+const tSame = (a, b) => a && b && a.m === b.m && (a.m === 'local' || a.k === b.k);
+function tDiffTxt() { const d = gNow() - Date.now(); return TCFG.m === 'local' || Math.abs(d) < 3e4 ? 'zgodny z zegarem rzeczywistym' : `${d > 0 ? 'przed' : 'za'} czasem rzeczywistym o ${durTxt(Math.abs(d))}`; }
+function admTime() {
+  const c = TCFG, sel = ADM.tsel, g = gNow(), now = Date.now();
+  let h = `<div class="card tclock"><div class="mut small">Czas gry teraz</div><div class="tbig" id="admClk">${fmtT(g)}</div>
+    <div class="row" style="margin-top:6px"><span class="ltag ${c.m === 'local' ? 'w' : c.k === 0 ? 'u' : 'p'}">${tcTxt(c)}</span><span class="grow mut small" id="admClk2">${tDiffTxt()}</span></div>
+    ${c.ts ? `<div class="mut small" style="margin-top:4px">Zmienione ${dt(c.ts)} (${ago(c.ts)})</div>` : ''}</div>`;
+  h += `<h2>Tempo dla wszystkich graczy</h2><div class="tgrid">${TPRE.map(([m, k, n, d]) => { const x = { m, k }, cur = tSame(c, x), on = tSame(sel, x);
+    return `<button class="tp ${on ? 'on' : ''} ${cur ? 'cur' : ''}" data-a="admTsel" data-m="${m}" data-k="${k}"><b>${n}</b><small>${cur ? 'ustawione teraz' : d}</small></button>`; }).join('')}</div>
+    <label class="f">Własne tempo (ile minut gry na 1 minutę)</label><div class="row"><input id="admK" type="number" min="0" max="3600" step="1" inputmode="decimal" placeholder="np. 30" value="${sel && sel.m === 'fast' && !TPRE.some(t => t[1] === sel.k && t[0] === 'fast') ? sel.k : ''}"><button class="btn" data-a="admTk">Wybierz</button></div>`;
+  if (sel) {
+    const d = g - now, H = 36e5, lst = [];
+    if (sel.m === 'local') {
+      if (c.m === 'local') lst.push('Gra już jest w czasie lokalnym.');
+      else if (Math.abs(d) > 3e4) lst.push(`Zegar gry ${d > 0 ? 'cofnie się' : 'przeskoczy do przodu'} o ${durTxt(Math.abs(d))} do czasu rzeczywistego.`, 'Świat każdego gracza zostanie najpierw dograny do chwili zmiany, a potem przesunięty: towar, pieniądze i pojazdy w trasie zostają.');
+      lst.push('Godziny szczytu na drogach i pora dnia będą zgodne z zegarem w telefonie.');
+    } else if (sel.k === 0) lst.push('Produkcja, pojazdy, koszty i sezon stoją u wszystkich graczy, aż zmienisz tempo.');
+    else lst.push(`1 minuta na zegarku = ${kTxt(sel.k)} min gry.`, `Przejazd 2 h trwa ${durTxt(2 * H / sel.k)}, sezon (30 dni gry) — ${durTxt(30 * 24 * H / sel.k)}.`,
+      'Zegar gry płynie dalej od obecnej chwili, bez skoku.', ...(sel.k > 24 ? ['Gracze offline dostaną nadrobione najwyżej 10 dni gry.'] : []));
+    h += `<div class="card hint" style="margin-top:12px"><b>${sel.m === 'local' ? 'Czas lokalny 1:1' : sel.k === 0 ? 'Pauza' : '1:' + kTxt(sel.k)}</b>${lst.map(x => `<div class="small" style="margin-top:5px">${x}</div>`).join('')}
+      <div class="btns"><button class="btn p" data-a="admTset" ${tSame(c, sel) ? 'disabled' : ''}>Zastosuj u wszystkich</button><button class="btn" data-a="admTsel" data-m="">Anuluj</button></div></div>`;
+  }
+  if ((c.h || []).length) h += `<h2>Ostatnie zmiany</h2><div class="card">${[...c.h].reverse().map(x => `<div class="row news"><span class="grow">${tcTxt(x)}</span><span class="mut small">${dt(x.ts)}</span></div>`).join('')}</div>`;
+  return h;
+}
+function admSetTime(t) {
+  if (!DB || !isAdmin() || !t) return;
+  const now = Date.now(), g = gNow(), c = TCFG; let nc;
+  if (t.m === 'local') { nc = { m: 'local', k: 1, g0: now, r0: now, ep: c.ep || 0, j: c.j || [] }; if (Math.abs(g - now) > 3e4) { nc.ep++; nc.j = [...nc.j, { ep: nc.ep, at: now, from: g, to: now }].slice(-30); } }
+  else nc = { m: 'fast', k: t.k, g0: g, r0: now, ep: c.ep || 0, j: c.j || [] };
+  nc.h = [...(c.h || []), { m: nc.m, k: nc.k, ts: now }].slice(-8);
+  DB.collection('cfg').doc('time').set({ ...nc, by: USER.email, ts: now })
+    .then(() => { ADM.tsel = null; ADM.err = ''; toast(`Ustawiono dla wszystkich: ${tcTxt(nc)}`); renderAdmin(); })
+    .catch(e => { ADM.err = 'Nie udało się zapisać czasu gry — opublikuj nowe reguły Firestore. (' + (e.code || '') + ')'; renderAdmin(); });
+}
+setInterval(() => { const a = $('admClk'), b = $('admClk2'); if (a && ADM.on) { a.textContent = fmtT(gNow()); if (b) b.textContent = tDiffTxt(); } }, 1000);
 function renderAdmin() {
   if (!ADM.on) return;
-  const el = $('adm'), T = [['gracze', 'Gracze'], ['stat', 'Statystyki'], ['miejsca', 'Miejscowości']];
+  const el = $('adm'), T = [['gracze', 'Gracze'], ['stat', 'Statystyki'], ['miejsca', 'Miejscowości'], ['czas', 'Czas gry']];
   const animate = ADM.lastTab !== ADM.tab; ADM.lastTab = ADM.tab;
   let body = '';
   if (ADM.tab === 'gracze') body = `<div class="lsearch"><input id="admQ" data-admq="1" type="search" placeholder="Szukaj: e-mail, firma, prezes" value="${esc(ADM.q)}">
       <select data-in="admSort" style="width:auto">${[['worth', 'Wartość'], ['active', 'Aktywność'], ['new', 'Najnowsi']].map(([k, n]) => `<option value="${k}" ${ADM.sort === k ? 'selected' : ''}>${n}</option>`).join('')}</select></div>
       <div class="mut small" style="margin:4px 2px 8px">${ADM.players.length} graczy z kontem</div><div id="admList"></div>`;
   else if (ADM.tab === 'stat') body = admStats();
+  else if (ADM.tab === 'czas') body = admTime();
   else body = admPlaces();
   el.innerHTML = `<div class="adm-top"><div class="grow"><b>Panel administratora</b><div class="mut small">XyxWord · ${esc(VERSION)}</div></div><button class="btn s" data-a="logout">Wyloguj</button></div>
-    <div class="au-tabs adm-tabs">${T.map(([k, n]) => `<button class="${ADM.tab === k ? 'on' : ''}" data-a="admTab" data-v="${k}">${n}</button>`).join('')}<i style="left:calc(${T.findIndex(t => t[0] === ADM.tab)} * 33.33% + 4px);width:calc(33.33% - 8px)"></i></div>
+    <div class="au-tabs adm-tabs">${T.map(([k, n]) => `<button class="${ADM.tab === k ? 'on' : ''}" data-a="admTab" data-v="${k}">${n}</button>`).join('')}<i style="left:calc(${T.findIndex(t => t[0] === ADM.tab)} * ${100 / T.length}% + 4px);width:calc(${100 / T.length}% - 8px)"></i></div>
     ${ADM.err ? `<div class="card warn">${esc(ADM.err)}</div>` : ''}<div class="adm-body ${animate ? 'enter' : ''}">${body}</div>`;
   if (ADM.tab === 'gracze') renderAdminList();
   if (ADM.tab === 'miejsca' && $('lmapSlot')) { ui.place = true; mountLM(ADM.cid, ''); }
@@ -3370,7 +3448,7 @@ initPts();
 let acc = 0, prev = performance.now(), n = 0;
 function loop() { // co sekundę: symulacja do teraz, animacja pojazdów; render co 5 s
   if (!S || !S.setup || ui.locked) return;
-  const h0 = S.hour; advance(S, Date.now()); n++;
+  const h0 = S.hour; advance(S, gNow()); n++;
   animVeh();
   if (n % 15 === 0) processPend();
   if (n % 30 === 0) save();
@@ -3380,14 +3458,15 @@ function loop() { // co sekundę: symulacja do teraz, animacja pojazdów; render
 document.addEventListener('visibilitychange', () => {
   if (!S) return;
   if (document.hidden) { save(); cloudSave(true); }
-  else if (S.setup) { advance(S, Date.now()); save(); render(true); }
+  else if (S.setup) { advance(S, gNow()); save(); render(true); }
 });
-if (VERSION === 'dev') window.__xyx = { get S() { return S; }, get LM() { return LM; }, advance, firmsOf, offersOf, stores, fetchRoute, parseSave, newState, LOCS, B, G, netH, lvCost, cumCost, vOut, vIn, SC, hour: n => { for (let i = 0; i < n; i++) hour(S); render(true); } };
+if (VERSION === 'dev') window.__xyx = { get S() { return S; }, get LM() { return LM; }, tc: c => { if (c) TCFG = { ...TC0, ...c }; return TCFG; }, timeSync, gNow, openAdmin, renderAdmin, ADM, advance, firmsOf, offersOf, stores, fetchRoute, parseSave, newState, LOCS, B, G, netH, lvCost, cumCost, vOut, vIn, SC, hour: n => { for (let i = 0; i < n; i++) hour(S); render(true); } };
 registerCustom(null);
-if (FB) { au.mode = 'wait'; renderAuth(); firebase.auth().onAuthStateChanged(onUser); listenPlaces(); listenBld(); listenOrders(); listenOffers(); }
+if (FB) { au.mode = 'wait'; renderAuth(); firebase.auth().onAuthStateChanged(onUser); listenPlaces(); listenBld(); listenOrders(); listenOffers(); listenTime(); }
 else if (localStorage.getItem('xyx_guest') === '1') startGame(load(SAVE) || newState());
 else renderAuth();
 setInterval(loop, 1000);
+setInterval(() => { if (S && S.setup && TCFG.m !== 'local' && TCFG.k >= 5) animVeh(); }, 250); // przy szybkim czasie pojazdy płynniej
 checkUpdate(false);
 setInterval(() => checkUpdate(false), 5 * 60 * 1000);
 document.addEventListener('visibilitychange', () => { if (document.hidden) return; if (ui.dl && ui.dl.st === 'perm') runUpdate(); else checkUpdate(false); });

@@ -9,6 +9,8 @@ service cloud.firestore {
     }
     match /bld/{uid} { allow read: if true; allow write: if request.auth != null && request.auth.uid == uid; }
     match /places/{id} { allow read: if true; allow write: if isAdmin(); }
+    // ustawienia gry dla wszystkich (np. tempo czasu) — czyta każdy, zmienia tylko admin
+    match /cfg/{id} { allow read: if true; allow write: if isAdmin(); }
     // zlecenia skupu: właściciel tworzy/usuwa; inni gracze mogą tylko zmniejszyć "left" (dostawa)
     match /orders/{id} {
       allow read: if true;
