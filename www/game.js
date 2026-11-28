@@ -2,7 +2,7 @@
 (() => {
 // ================== KONFIGURACJA ==================
 const SAVE = 'xyxword_save_v1';
-const HOUR_MS = 4000;            // 1 godzina gry = 4 s
+const HOUR_MS = 3600000;         // czas rzeczywisty: 1 godzina gry = 1 godzina
 const SEASON_H = 24 * 30;        // sezon = 30 dni gry
 const OFFLINE_MAX_H = 24 * 10;   // max 10 dni symulacji offline
 const VERSION = window.XYX_VERSION || 'dev';
@@ -155,9 +155,9 @@ const TYPE = {
        d: 'Tanie działki, dużo średnich i dużych. Farmy i kopalnie +25%, sprzedaż −5%.' },
 };
 const VEH = {
-  van:   { n: 'Dostawczy',     cap: 1.5, spd: 90, cost: 45000,  fuel: .3 },   // ładowność w tonach
-  truck: { n: 'Ciężarówka',    cap: 12,  spd: 80, cost: 120000, fuel: .6 },
-  tir:   { n: 'TIR z naczepą', cap: 25,  spd: 75, cost: 170000, fuel: .9 },
+  van:   { n: 'Dostawczy',     cap: 1.5, spd: 90, cost: 45000,  fuel: .3, l100: 9,  sf: 1.05 },  // ładowność t, spalanie l/100 km, mnożnik czasu jazdy (ograniczenia prędkości)
+  truck: { n: 'Ciężarówka',    cap: 12,  spd: 80, cost: 120000, fuel: .6, l100: 24, sf: 1.2 },
+  tir:   { n: 'TIR z naczepą', cap: 25,  spd: 75, cost: 170000, fuel: .9, l100: 31, sf: 1.25 },
 };
 const POS = { eu: [52, 24], na: [21, 26], sa: [31, 62], af: [53, 54], as: [77, 30], au: [86, 68] };
 
@@ -299,7 +299,7 @@ const B = {
   fab_aut:   { n: 'Fabryka samochodów',    d: 'mech', t: 2, c: [1, 180],       in: { stal: 1, plastik: .2, chipy: .1, opony: 5 }, out: { auta: 1 } }, // Hyundai Ulsan ~1,5 mln/rok
 };
 // ===== POZIOMY I KOSZTY =====
-const LVMAX = 10, T0 = 150;                     // 10 poziomów; budowa zwraca się w ~150 h gry
+const LVMAX = 10, T0 = 72;                     // 10 poziomów; budowa zwraca się w ~150 h gry
 const vOut = d => Object.entries(d.out).reduce((a, [g, v]) => a + v * G[g].p, 0);
 const vIn = d => Object.entries(d.in || {}).reduce((a, [g, v]) => a + v * G[g].p, 0);
 const OPEX = id => .5 * Math.max(0, vOut(B[id]) - vIn(B[id]));             // koszt operacyjny na jednostkę (praca, energia)
@@ -376,7 +376,7 @@ function mkAI(base, diff = 1) {
   const names = [...AI_NAMES].sort(() => Math.random() - .5).slice(0, 7), k = DIFF[diff].ai;
   return names.map(n => ({ n, w: base * rnd(.35, 1.15), r: rnd(.0022, .0042) * k }));
 }
-function newLoc() { return { bld: [], inv: {}, auto: {}, x: 0, port: false, gar: 0 }; }
+function newLoc() { return { bld: [], yard: {}, auto: {}, x: 0, port: false, gar: 0 }; }
 function ensureL(s, lid) { return s.L[lid] || (s.L[lid] = newLoc()); }
 function newState(o = {}) {
   const hl = o.hl || CAP[o.hq || 'eu'], hq = LOC[hl].c, diff = o.diff ?? 1, cash = DIFF[diff].cash;
@@ -386,7 +386,7 @@ function newState(o = {}) {
     v: 2, created: Date.now(), setup: !!o.done, ceo: o.ceo || '', name: o.name || 'Moja Firma', color: o.color || COLORS[0], hq, hl, diff,
     w: { [curOfCC(LOC[hl].cc)]: cash * (FX0[curOfCC(LOC[hl].cc)] || 1) }, fx: {}, fxp: {}, hour: 0, last: Date.now(),
     c: { [hq]: {} }, lic: { [LOC[hl].cc]: true }, L: { [hl]: newLoc() }, ships: [], veh: [], custom: [], nid: 1, m, ai: mkAI(cash, diff),
-    pl: 1, ec: 2, tr: 1, lm: {}, season: 1, pp: 0, perk: { prod: 0, upk: 0, ship: 0, sell: 0 }, ev: [],
+    pl: 1, ec: 2, tr: 1, rt: 1, clock: Date.now(), fm: {}, ct: [], pend: [], season: 1, pp: 0, perk: { prod: 0, upk: 0, ship: 0, sell: 0 }, ev: [],
     news: [], inc: 0, upk: 0, lastSeason: null, tut: { step: o.tut === false ? 99 : 0, sold: false, rew: false },
   };
   for (const g of GK) m[g].h = Array(8).fill(price(g, s));
@@ -438,6 +438,19 @@ function parseSave(raw) {
         s.ec = 2; s.news = s.news || [];
         s.news.unshift({ h: s.hour || 0, t: 'Aktualizacja: realna ekonomia! Towary w tonach, litrach i sztukach, realne ceny, zakłady z 10 poziomami wydajności. Gotówka ×100.' });
       }
+      if (!s.rt) { // czas rzeczywisty, składy zakładów, firmy
+        s.rt = 1; s.clock = s.last || Date.now(); s.hT = s.clock + 36e5; s.fm = {}; s.ct = []; s.pend = []; delete s.lm;
+        for (const L of Object.values(s.L)) {
+          const inv = L.inv || {}; delete L.inv; L.yard = L.yard || {};
+          for (const g in inv) {
+            if (!G[g] || inv[g] <= 1e-6) continue;
+            const pb = L.bld.find(b => B[b.t] && B[b.t].out[g]) || L.bld.find(b => B[b.t] && (B[b.t].in || {})[g]);
+            const put = putL(L, g, inv[g], pb ? 'b' + pb.id : undefined); if (inv[g] - put > 1e-9) L.yard[g] = (L.yard[g] || 0) + inv[g] - put;
+          }
+        }
+        for (const u of [...s.veh, ...s.ships]) { if (u.st !== 'idle') { u.at = u.to || u.at; u.st = 'idle'; u.to = null; } delete u.r; u.pos = null; u.job = null; }
+        s.news = s.news || []; s.news.unshift({ h: s.hour || 0, c: s.clock, t: 'Aktualizacja: czas rzeczywisty (1 h = 1 h)! Każdy zakład ma swój skład, w miastach są firmy-odbiorcy, pojazdy jeżdżą po prawdziwych drogach, są kontrakty. Stary towar leży na placu. Trasy trzeba ustawić od nowa.' });
+      }
       if (!s.lic) { // zapis sprzed państw: licencje tam, gdzie gracz już działa, + stolice opłaconych kontynentów
         s.lic = {};
         const add = id => { const l = LOC[id]; if (l && l.cc) s.lic[l.cc] = true; };
@@ -458,7 +471,7 @@ function priceAt(g, sat, d) { return G[g].p * d * clamp(Math.exp(-sat / SC(g)), 
 function price(g, s = S) { const m = s.m[g]; return priceAt(g, m.sat, m.d); }
 function sellPrice(g, q, s = S) { const m = s.m[g]; return priceAt(g, m.sat + q / 2, m.d) * (1 + .04 * s.perk.sell); }
 function buyPrice(g, q, s = S) { const m = s.m[g]; return priceAt(g, m.sat - q / 2, m.d) * 1.15; }
-function add(L, g, q) { L.inv[g] = (L.inv[g] || 0) + q; }
+function add(L, g, q) { const p = putL(L, g, q); if (q - p > 1e-9) { L.yard = L.yard || {}; L.yard[g] = (L.yard[g] || 0) + q - p; } }
 const T = lid => TYPE[LOC[lid].t];
 // ===== DZIAŁKI =====
 const PSZ = [{ n: 'Mała', k: 1, m: 25, i: '▫️' }, { n: 'Średnia', k: 3, m: 60, i: '◻️' }, { n: 'Duża', k: 8, m: 150, i: '⬜' }];
@@ -478,10 +491,39 @@ const pItems = (L, p) => [...(p.g ? ['gar'] : []), ...(p.mg ? ['mag'] : []), ...
 const MAGB = [300, 3000, 30000], MAGC = [150000, 1200000, 9000000], MAGMAX = 10;
 const magCapP = p => p.mg ? MAGB[p.sz] * Math.pow(10, (p.mg - 1) / (MAGMAX - 1)) : 0;
 const magUpCost = p => r2(MAGC[p.sz] * .5 * p.mg);
-const bufT = L => L.bld.reduce((a, b) => B[b.t] ? a + capQ(b.t, b.l) * Object.entries(B[b.t].out).reduce((x, [g, v]) => x + v * G[g].w, 0) * 4 : a, 0); // zakład trzyma ~4 h produkcji
-const stCap = (s, lid) => { const L = s.L[lid]; return L ? plots(L).reduce((a, p) => a + magCapP(p), 0) + bufT(L) : 0; };
-const stUsed = (s, lid) => { const L = s.L[lid]; return L ? Object.entries(L.inv).reduce((a, [g, q]) => a + q * (G[g] ? G[g].w : 0), 0) : 0; };
-const stFree = (s, lid) => Math.max(0, stCap(s, lid) - stUsed(s, lid));
+// ===== SKŁADY: każdy zakład ma swój skład (~4 h produkcji), magazyny na działkach, plac ze starym towarem =====
+const capB = b => Math.max(1, 4 * capQ(b.t, b.l) * (Object.entries(B[b.t].out).reduce((a, [g, v]) => a + v * G[g].w, 0) + Object.entries(B[b.t].in || {}).reduce((a, [g, v]) => a + v * G[g].w, 0)));
+const invW = inv => Object.entries(inv).reduce((a, [g, q]) => a + q * (G[g] ? G[g].w : 0), 0);
+function stores(L) {
+  const a = [];
+  for (const b of L.bld) if (B[b.t]) a.push({ k: 'b', id: 'b' + b.id, o: b, inv: b.inv || (b.inv = {}), cap: capB(b), n: B[b.t].n });
+  for (const p of plots(L)) if (p.mg) a.push({ k: 'm', id: 'm' + p.id, o: p, inv: p.inv || (p.inv = {}), cap: magCapP(p), n: `Magazyn poz. ${p.mg} (${PSZ[p.sz].n.toLowerCase()} dz.)` });
+  if (L.yard && Object.keys(L.yard).length) a.push({ k: 'y', id: 'y', inv: L.yard, cap: 0, n: 'Plac (towar sprzed aktualizacji)' });
+  return a;
+}
+const stById = (L, id) => L ? stores(L).find(st => st.id === id) : null;
+const stFreeOf = st => Math.max(0, st.cap - invW(st.inv));
+const invOf = (L, g) => L ? stores(L).reduce((a, st) => a + (st.inv[g] || 0), 0) : 0;
+function invAll(L) { const r = {}; if (L) for (const st of stores(L)) for (const g in st.inv) r[g] = (r[g] || 0) + st.inv[g]; return r; }
+const KO = { y: 0, m: 1, b: 2 };
+function takeL(L, g, q, pref) { // bierze z: wybranego składu, placu, magazynów, innych zakładów w miejscowości
+  const ss = stores(L).sort((a, b) => (b.id === pref) - (a.id === pref) || KO[a.k] - KO[b.k]); let got = 0;
+  for (const st of ss) { if (got >= q - 1e-12) break; const h = st.inv[g] || 0; if (h <= 0) continue; const t = Math.min(h, q - got); st.inv[g] = h - t; if (st.inv[g] < 1e-9) delete st.inv[g]; got += t; }
+  return got;
+}
+function putL(L, g, q, pref) { // kładzie do: wybranego składu, potem do magazynów
+  const ss = stores(L).filter(st => st.k !== 'y' && (st.id === pref || st.k === 'm')).sort((a, b) => (b.id === pref) - (a.id === pref)); let put = 0;
+  for (const st of ss) { if (put >= q - 1e-12) break; const room = stFreeOf(st) / G[g].w; if (room <= 0) continue; const t = Math.min(room, q - put); st.inv[g] = (st.inv[g] || 0) + t; put += t; }
+  return put;
+}
+const stCap = (s, lid) => s.L[lid] ? stores(s.L[lid]).reduce((a, st) => a + st.cap, 0) : 0;
+const stUsed = (s, lid) => s.L[lid] ? stores(s.L[lid]).reduce((a, st) => a + (st.k === 'y' ? 0 : invW(st.inv)), 0) : 0;
+const stFree = (s, lid) => s.L[lid] ? stores(s.L[lid]).filter(st => st.k === 'm').reduce((a, st) => a + stFreeOf(st), 0) : 0;
+function stPos(lid, st) { // punkt załadunku na mapie
+  if (!st || st.k === 'y' || !S) return [LOC[lid].la, LOC[lid].lo];
+  if (st.k === 'b') return posOf(lid, st.o);
+  const it = pItems(S.L[lid], st.o), q = pLayout(st.o, it.length)[it.indexOf('mag')]; return q ? [q[0], q[1]] : [st.o.la, st.o.lo];
+}
 const pUsed = (L, p) => pItems(L, p).length;
 const pFree = (L, p) => p.lv - pUsed(L, p);
 const pCount = (L, sz) => L ? plots(L).filter(p => p.sz === sz).length : 0;
@@ -543,19 +585,113 @@ function distF(lid, g) { // daleko od producentów = drożej (do +35%), blisko =
   if (S) for (const id in S.L) if (S.L[id].bld.some(b => B[b.t].out[g])) d = Math.min(d, km(lid, id));
   return DFC[k] = .85 + .5 * (1 - Math.exp(-d / 1500));
 }
-const lsat = (s, lid, g) => ((s.lm || {})[lid] || {})[g] || 0;
 const lBase = (s, lid, g) => price(g, s) * cpf(LOC[lid].cc, g) * distF(lid, g) * T(lid).sell;
-const lPrice = (s, lid, g, dq = 0) => lBase(s, lid, g) * clamp(Math.exp(-(lsat(s, lid, g) + dq) / LD(lid, g)), .15, 3);
-function sellAt(s, lid, g, q) { // sprzedaż z pojazdu w miejscowości; płaci waluta miejscowości
-  if (q <= 0) return 0;
-  const rev = lPrice(s, lid, g, q / 2) * (1 + .04 * s.perk.sell) * q * (1 - taxOf(lid));
-  const lm = (s.lm = s.lm || {})[lid] || (s.lm[lid] = {}); lm[g] = (lm[g] || 0) + q; s.m[g].sat += q * .02;
-  earnC(s, curOf(lid), rev); if (s.tut) s.tut.sold = true; return rev;
+// ===== FIRMY (odbiorcy w miejscowościach) =====
+const GF = { // jakie towary kupuje dany typ firmy
+  food: ['chleb', 'ser', 'wedliny', 'filety', 'soki', 'piwo', 'wino', 'wodka', 'czekolada', 'ciastka', 'lody', 'olej', 'cukier', 'maka', 'jaja', 'mleko'],
+  agro: ['zboze', 'ziemniaki', 'buraki', 'rzepak', 'owoce', 'winogrona', 'chmiel', 'bydlo', 'swinie', 'drob', 'jaja', 'mleko'],
+};
+const FT = {
+  sklep:    { n: 'Sklep spożywczy',        w: 4, min: 0,    g: ['chleb', 'ser', 'wedliny', 'filety', 'soki', 'piwo', 'wino', 'wodka', 'czekolada', 'ciastka', 'lody', 'olej', 'cukier', 'maka', 'jaja', 'mleko'] },
+  skup:     { n: 'Skup płodów rolnych',    w: 3, min: 0,    g: GF.agro },
+  stacja:   { n: 'Stacja paliw',           w: 1, min: 800,  g: ['paliwo'] },
+  piek:     { n: 'Piekarnia',              w: 2, min: 0,    g: ['maka', 'cukier', 'jaja', 'mleko', 'olej'] },
+  drewno:   { n: 'Skup drewna',            w: 1, min: 0,    g: ['drewno'] },
+  hurt:     { n: 'Hurtownia spożywcza',    w: 2, min: 3000, g: GF.food },
+  bud:      { n: 'Skład budowlany',        w: 2, min: 2000, g: ['deski', 'sklejka', 'stal', 'kamien', 'farby', 'kable', 'aluminium'] },
+  rolnicze: { n: 'Centrum rolnicze',       w: 1, min: 1000, g: ['nawozy', 'pasza', 'traktory', 'opony', 'paliwo'] },
+  apteka:   { n: 'Hurtownia farmaceutyczna', w: 1, min: 5000, g: ['leki'] },
+  meble:    { n: 'Salon meblowy',          w: 1, min: 10000, g: ['meble'] },
+  moda:     { n: 'Sklep odzieżowy',        w: 1, min: 10000, g: ['ubrania', 'buty', 'bizuteria'] },
+  ksieg:    { n: 'Hurtownia papiernicza',  w: 1, min: 10000, g: ['ksiazki', 'zabawki', 'papier', 'kartony'] },
+  miesne:   { n: 'Zakłady mięsne',         w: 1, min: 10000, g: ['bydlo', 'swinie', 'drob', 'mieso', 'skory'] },
+  rtv:      { n: 'Elektromarket',          w: 1, min: 20000, g: ['telefony', 'telewizory', 'komputery', 'agd'] },
+  spoz:     { n: 'Zakłady spożywcze',      w: 1, min: 20000, g: ['zboze', 'maka', 'cukier', 'mleko', 'kakao', 'owoce', 'buraki', 'rzepak', 'chmiel', 'winogrona', 'ziemniaki', 'olej'] },
+  papier:   { n: 'Zakłady papiernicze',    w: 1, min: 20000, g: ['drewno', 'celuloza', 'papier', 'kartony'] },
+  auto:     { n: 'Salon samochodowy',      w: 1, min: 30000, g: ['auta', 'opony', 'rowery'] },
+  tekst:    { n: 'Zakłady tekstylne',      w: 1, min: 30000, g: ['bawelna', 'przedza', 'tkanina', 'skory', 'skora', 'kauczuk'] },
+  energ:    { n: 'Elektrownia',            w: 1, min: 30000, g: ['wegiel', 'gaz', 'drewno'] },
+  jubiler:  { n: 'Jubiler',                w: 1, min: 50000, g: ['bizuteria', 'zloto'] },
+  huta:     { n: 'Zakłady metalurgiczne',  w: 1, min: 50000, g: ['ruda', 'wegiel', 'boksyt', 'miedz', 'stal', 'aluminium', 'zloto', 'kamien'] },
+  chem:     { n: 'Zakłady chemiczne',      w: 1, min: 50000, g: ['ropa', 'gaz', 'plastik', 'krzem', 'kauczuk', 'nawozy', 'farby', 'opakowania'] },
+  elektro:  { n: 'Zakłady elektroniczne',  w: 1, min: 100000, g: ['chipy', 'krzem', 'miedz', 'kable', 'plastik', 'aluminium'] },
+  terminal: { n: 'Terminal portowy (eksport)', w: 0, min: 0, g: ['zboze', 'wegiel', 'ruda', 'ropa', 'gaz', 'boksyt', 'miedz', 'drewno', 'kakao', 'bawelna', 'kauczuk', 'rzepak', 'cukier', 'stal', 'paliwo', 'nawozy', 'auta', 'aluminium', 'plastik'] },
+};
+const SURN = {
+  PL: ['Nowak', 'Kowalski', 'Wiśniewski', 'Wójcik', 'Kamiński', 'Lewandowski', 'Zieliński', 'Szymański', 'Woźniak', 'Dąbrowski', 'Kozłowski', 'Mazur', 'Krawczyk', 'Piotrowski', 'Grabowski', 'Pawlak', 'Michalski', 'Zając', 'Król', 'Wieczorek', 'Jabłoński', 'Majewski', 'Olszewski', 'Stępień'],
+  DE: ['Müller', 'Schmidt', 'Schneider', 'Fischer', 'Weber', 'Meyer', 'Wagner', 'Becker', 'Schulz', 'Hoffmann', 'Koch', 'Richter', 'Klein', 'Wolf', 'Neumann', 'Braun'],
+  _: ['Smith', 'Martin', 'Garcia', 'Rossi', 'Dubois', 'Silva', 'Jensen', 'Novák', 'Horváth', 'Popescu', 'Ivanov', 'Kim', 'Tanaka', 'Chen', 'Santos', 'Nilsson', 'Lopez', 'Moreau', 'Bianchi', 'Kovač']
+};
+const FCACHE = {};
+function firmsOf(lid) { // deterministyczne firmy w miejscowości; liczba rośnie z liczbą mieszkańców
+  if (FCACHE[lid]) return FCACHE[lid];
+  const l = LOC[lid], pop = popOf(lid), n = clamp(Math.round(1 + 4.2 * Math.log10(pop / 400)), 1, 32);
+  const types = ['sklep', 'skup']; if (pop >= 800) types.push('stacja');
+  const elig = Object.keys(FT).filter(k => FT[k].w && pop >= FT[k].min), tw = elig.reduce((a, k) => a + FT[k].w, 0);
+  for (let i = 0; types.length < n && i < 300; i++) {
+    let x = hashS(lid + ':' + i) % (tw * 100) / 100, k = elig[0]; for (const e of elig) { x -= FT[e].w; if (x < 0) { k = e; break; } }
+    if (types.filter(t => t === k).length < (pop > 3e5 ? 4 : pop > 3e4 ? 2 : 1)) types.push(k);
+  }
+  if (l.port) types.push('terminal');
+  const R = Math.max(.4, townR(l) * .8), sn = SURN[l.cc] || SURN._;
+  return FCACHE[lid] = types.map((k, j) => {
+    const h = hashS(lid + '#' + j), a = (h % 360) * Math.PI / 180, r = R * (.12 + ((h >>> 9) % 80) / 100);
+    return { id: lid + '#' + j, lid, k, gs: FT[k].g, n: k === 'terminal' ? FT[k].n : `${FT[k].n} ${sn[(h >>> 3) % sn.length]}`,
+      la: l.la + r / 111 * Math.cos(a), lo: l.lo + r / (111 * Math.cos(l.la * Math.PI / 180)) * Math.sin(a), pm: k === 'terminal' ? .92 : .9 + ((h >>> 5) % 21) / 100 };
+  });
 }
-function buyAt(s, lid, g, q) { // zakup do pojazdu; zwraca kupioną ilość
-  const c = curOf(lid), pu = lPrice(s, lid, g, -q / 2) * 1.15, can = wal(s, c) / rate(c, s) / pu;
+const nBuy = (lid, g) => firmsOf(lid).filter(f => f.gs.includes(g)).length;
+const fDepth = (f, g) => f.k === 'terminal' ? SC(g) * .4 : LD(f.lid, g) * 1.5 / Math.max(1, nBuy(f.lid, g));
+const fsat = (s, f, g) => ((s.fm || {})[f.id] || {})[g] || 0;
+const fPrice = (s, f, g, dq = 0) => f.player ? f.price : lBase(s, f.lid, g) * f.pm * clamp(Math.exp(-(fsat(s, f, g) + dq) / fDepth(f, g)), .15, 3);
+let ORD = []; // zlecenia skupu innych graczy (Firestore)
+function orderFirms(lid) {
+  const me = USER && USER.uid;
+  return ORD.filter(o => o.lid === lid && o.uid !== me && o.left > 1e-6 && G[o.g]).map(o => ({ id: 'o:' + o.id, lid, k: 'gracz', gs: [o.g], player: true, price: o.price, left: o.left,
+    n: `${bName(o.bt) || 'Zakład'} — gracz ${clean(o.name || '?')}`, la: o.la || LOC[lid].la, lo: o.lo || LOC[lid].lo, uid: o.uid }));
+}
+const firmsAll = lid => [...firmsOf(lid), ...orderFirms(lid)];
+const firmById = (lid, id) => id ? firmsAll(lid).find(f => f.id === id) : null;
+const buyers = (lid, g) => firmsAll(lid).filter(f => f.gs.includes(g));
+function bestFirm(s, lid, g) { let b = null, bp = 0; for (const f of buyers(lid, g)) { const p = fPrice(s, f, g); if (p > bp) { bp = p; b = f; } } return b; }
+function lPrice(s, lid, g, dq = 0) { let bp = 0; for (const f of firmsOf(lid)) if (f.gs.includes(g)) bp = Math.max(bp, fPrice(s, f, g, dq)); return bp; }
+function sellNPC(s, f, g, q) { // sprzedaż do firmy; najpierw kontrakt (stała cena), reszta po cenie rynkowej firmy
+  let rev = 0, qq = q;
+  const c = (s.ct || []).find(c => c.fid === f.id && c.g === g && c.st === 'on');
+  if (c) { const di = cDay(s, c), left = Math.max(0, c.per - (c.done[di] || 0)), qc = Math.min(qq, left); if (qc > 0) { rev += qc * c.price; c.done[di] = (c.done[di] || 0) + qc; qq -= qc; } }
+  if (qq > 0) { rev += fPrice(s, f, g, qq / 2) * qq; const fm = (s.fm = s.fm || {})[f.id] || (s.fm[f.id] = {}); fm[g] = (fm[g] || 0) + qq; s.m[g].sat += qq * .02; }
+  rev *= (1 + .04 * s.perk.sell) * (1 - taxOf(f.lid));
+  earnC(s, curOf(f.lid), rev); if (s.tut) s.tut.sold = true; return rev;
+}
+function buyFrom(s, f, g, q) { // zakup od firmy (hurt, marża 15%); zwraca kupioną ilość
+  const c = curOf(f.lid), pu = fPrice(s, f, g, -q / 2) * 1.15, can = wal(s, c) / rate(c, s) / pu;
   q = fl(Math.min(q, can)); if (q <= 0) return 0;
-  payC(s, c, pu * q); const lm = (s.lm = s.lm || {})[lid] || (s.lm[lid] = {}); lm[g] = (lm[g] || 0) - q; s.m[g].sat -= q * .02; return q;
+  payC(s, c, pu * q); const fm = (s.fm = s.fm || {})[f.id] || (s.fm[f.id] = {}); fm[g] = (fm[g] || 0) - q; s.m[g].sat -= q * .02; return q;
+}
+// ===== KONTRAKTY =====
+const DAY = 864e5;
+const cDay = (s, c) => Math.floor((s.clock - c.t0) / DAY);
+const niceQ = v => { const e = Math.pow(10, Math.floor(Math.log10(Math.max(v, 1e-3)))); return Math.max(e, Math.round(v / e) * e); };
+function offersOf(lid) { // dzisiejsze oferty kontraktów firm w miejscowości
+  const di = Math.floor(((S && S.clock) || Date.now()) / DAY), r = [];
+  for (const f of firmsOf(lid)) {
+    if (f.k === 'terminal' || hashS(f.id + '@' + di) % 4) continue;
+    const h = hashS(f.id + '#' + di), g = f.gs[h % f.gs.length], per = niceQ(fDepth(f, g) * .08), days = 3 + (h >>> 4) % 8;
+    r.push({ id: f.id + '@' + di + g, fid: f.id, lid, fn: f.n, g, per, days, price: lBase(S, lid, g) * f.pm * (1.15 + ((h >>> 8) % 11) / 100) });
+  }
+  return r;
+}
+function ctCheck(s) { // rozliczenie dni kontraktów
+  for (const c of s.ct || []) {
+    if (c.st !== 'on') continue;
+    while ((c.ck || 0) < Math.min(cDay(s, c), c.days)) {
+      const d = c.ck || 0, miss = Math.max(0, c.per - (c.done[d] || 0));
+      if (miss > 1e-6) { const pen = miss * c.price * .25; payC(s, curOf(c.lid), pen); addNews(s, `Kontrakt ${c.fn}: brak ${uq(miss, c.g)} ${G[c.g].n} — kara ${mL(pen, c.lid)}`); }
+      c.ck = d + 1;
+    }
+    if ((c.ck || 0) >= c.days) { c.st = 'end'; addNews(s, `Kontrakt zakończony: ${c.fn} (${G[c.g].n})`); }
+  }
+  s.ct = (s.ct || []).filter(c => c.st === 'on' || s.clock - c.t0 < (c.days + 2) * DAY);
 }
 function sell(s, lid, g, q) {
   const L = s.L[lid]; q = Math.min(q, L.inv[g] || 0);
@@ -593,7 +729,7 @@ function worth(s = S) {
     if (L.gar) w += GARAGE_COST * L.gar * .5;
     for (const p of plots(L)) w += pVal(lid, p);
     for (const b of L.bld) w += bldValue(b);
-    for (const g in L.inv) w += L.inv[g] * price(g, s) * .8;
+    const ia = invAll(L); for (const g in ia) w += ia[g] * price(g, s) * .8;
   }
   for (const sh of s.ships) { w += SHIP_COST * .5; if (sh.q) w += sh.q * price(sh.g, s) * .8; }
   for (const v of s.veh) { w += VEH[v.k].cost * .5; if (v.q) w += v.q * price(v.g, s) * .8; }
@@ -606,125 +742,189 @@ function vehHours(s, k, a, b) { return Math.ceil(km(a, b) * 1.25 / (VEH[k].spd *
 function vehFee(k, a, b) { return Math.round(km(a, b) * 1.6 * VEH[k].fuel) + 50; }
 const garCap = (s, lid) => (s.L[lid] ? s.L[lid].gar : 0) * 2;
 const garUsed = (s, lid) => s.veh.filter(v => v.home === lid).length;
-// ===== TRANSPORT =====
+// ===== TRANSPORT (czas rzeczywisty, prawdziwe drogi) =====
 const uCap = (u, ship) => ship ? SHIP_CAP : VEH[u.k].cap;           // ładowność w tonach
 const uName = (u, ship) => ship ? `Statek #${u.id}` : `${VEH[u.k].n} #${u.id}`;
-const uHrs = (s, u, ship, a, b) => a === b ? 1 : ship ? shipHours(s, a, b) : vehHours(s, u.k, a, b);
-const uFee = (u, ship, a, b, tn) => a === b ? (ship ? 2000 : 20) : ship ? shipFee(a, b, tn) : vehFee(u.k, a, b);
-function depart(s, u, ship, to, job, g, q, bq) { // wyjazd: opłata + cło; false gdy brak pieniędzy
-  const duty = dutyOf(u.at, to, g, q), fee = uFee(u, ship, u.at, to, g ? q * G[g].w : 0) + duty;
-  if (!canC(s, curOf(u.at), fee)) return false;
-  payC(s, curOf(u.at), fee);
-  if (duty) addNews(s, `Cło ${mL(duty, u.at)}: ${cName(LOC[u.at].cc)} → ${cName(LOC[to].cc)}`);
-  const dur = uHrs(s, u, ship, u.at, to);
-  Object.assign(u, { st: ship ? 'sail' : 'go', from: u.at, to, g: q ? g : null, q: q || 0, job, bg: job === 'buy' ? g : null, bq: bq || 0, eta: s.hour + dur, dur, wait: '' });
-  return true;
+const DIESEL = cc => [1.75, 1.35, 1.05][tierOf(cc)] * (.9 + (hashS('d' + cc) % 21) / 100); // $/l
+const WAGE = cc => [28, 12, 5][tierOf(cc)];                                                   // kierowca $/h
+const loadMin = (u, ship, tn) => tn <= 0 ? 0 : ship ? 240 + tn / 2000 * 60 : 10 + tn * (u.k === 'van' ? 4 : 2); // minuty załadunku/rozładunku
+function peakMin(lid, t) { // korki: 7–9 i 15–18 w miastach od 50 tys.
+  const h = new Date(t).getHours(), p = popOf(lid);
+  return p < 5e4 || !((h >= 7 && h < 9) || (h >= 15 && h < 18)) ? 0 : Math.min(35, 5 + 20 * Math.sqrt(p / 1e6));
+}
+function tripCost(u, ship, from, kmv, hrs, tn) {
+  if (ship) return Math.round(kmv * tn * .004) + 20000;
+  const cc = LOC[from].cc; return Math.round(kmv * VEH[u.k].l100 / 100 * DIESEL(cc) + hrs * WAGE(cc)) + 5;
+}
+// trasy po drogach: OSRM (OpenStreetMap), z cache; bez internetu — szacunek
+const OSRM = 'https://router.project-osrm.org/route/v1/driving/';
+const RTC = {}, RTP = {};
+const rkey = (a, b) => [a[0], a[1], b[0], b[1]].map(x => (+x).toFixed(4)).join(',');
+function rtGet(key) { if (RTC[key]) return RTC[key]; try { const v = localStorage.getItem('xyx_rt_' + key); if (v) return RTC[key] = JSON.parse(v); } catch (e) {} return null; }
+function rtPut(key, r) {
+  RTC[key] = r;
+  try { localStorage.setItem('xyx_rt_' + key, JSON.stringify(r)); }
+  catch (e) { try { Object.keys(localStorage).filter(k => k.startsWith('xyx_rt_')).slice(0, 150).forEach(k => localStorage.removeItem(k)); localStorage.setItem('xyx_rt_' + key, JSON.stringify(r)); } catch (e2) {} }
+}
+function rtRev(a, b) { // trasa powrotna = odwrócona
+  const k2 = rkey(b, a); if (rtGet(k2)) return; const r = rtGet(rkey(a, b)); if (!r) return;
+  rtPut(k2, { km: r.km, s: r.s, geo: [...r.geo].reverse(), cf: [...r.cf].reverse().map(x => +(1 - x).toFixed(4)), est: r.est });
+}
+function estRoute(a, b, ship) { const k = kmLL(a[0], a[1], b[0], b[1]) * (ship ? 1.3 : 1.3); return { km: k, s: k / (ship ? 37 : 60) * 3600, geo: [[a[1], a[0]], [b[1], b[0]]], cf: [0, 1], est: 1 }; }
+function fetchRoute(a, b, ship) {
+  const key = rkey(a, b), c = rtGet(key); if (c && !c.est) return Promise.resolve(c);
+  if (ship) { const r = estRoute(a, b, true); r.est = 0; rtPut(key, r); return Promise.resolve(r); }
+  if (RTP[key]) return RTP[key];
+  return RTP[key] = fetch(`${OSRM}${a[1]},${a[0]};${b[1]},${b[0]}?overview=full&geometries=geojson&annotations=duration`).then(r => r.json()).then(j => {
+    const rt = j.routes && j.routes[0]; if (!rt || !rt.geometry) throw 0;
+    const co = rt.geometry.coordinates, du = ((rt.legs[0] || {}).annotation || {}).duration || [];
+    let cum = [0]; for (let i = 0; i < du.length; i++) cum.push(cum[i] + du[i]);
+    if (cum.length !== co.length) cum = co.map((_, i) => i / Math.max(1, co.length - 1) * rt.duration);
+    const st = Math.max(1, Math.ceil(co.length / 400)), geo = [], cf = [], T = rt.duration || 1;
+    for (let i = 0; i < co.length; i += st) { geo.push([+co[i][0].toFixed(5), +co[i][1].toFixed(5)]); cf.push(+(cum[i] / T).toFixed(4)); }
+    if (cf[cf.length - 1] < 1) { const e = co[co.length - 1]; geo.push([+e[0].toFixed(5), +e[1].toFixed(5)]); cf.push(1); }
+    const r = { km: rt.distance / 1000, s: rt.duration, geo, cf }; rtPut(key, r); return r;
+  }).catch(() => { const r = estRoute(a, b); RTC[key] = r; return r; }).finally(() => { delete RTP[key]; });
+}
+function planTimes(s, u, ship, p) { // czasy kursu (s) i koszt
+  const tn = p.q && p.g ? p.q * G[p.g].w : 0, spd = spdM(s);
+  const ld = p.job === 'buy' ? 0 : loadMin(u, ship, tn) * 60;
+  const drive = (ship ? p.rt.km / 37 * 3600 : p.rt.s * VEH[u.k].sf) / spd;
+  const pk = ship ? 0 : (peakMin(u.at, s.clock) + peakMin(p.to, s.clock + (ld + drive) * 1e3)) * 60;
+  const end = p.job === 'buy' ? loadMin(u, ship, Math.min(uCap(u, ship), (p.bq || 0) * G[p.g].w)) * 60 : (p.job === 'sell' || p.job === 'unload') ? loadMin(u, ship, tn) * 60 : 0;
+  const tot = ld + drive + pk + end, duty = p.job === 'buy' ? 0 : dutyOf(u.at, p.to, p.g, p.q);
+  return { ld, drive, pk, end, tot, duty, fee: tripCost(u, ship, u.at, p.rt.km, tot / 3600, tn) + duty };
+}
+function depart(s, u, ship, p) { // wyjazd; zwraca koszt albo 0, gdy brak pieniędzy
+  const T = planTimes(s, u, ship, p);
+  if (!canC(s, curOf(u.at), T.fee)) return 0;
+  payC(s, curOf(u.at), T.fee);
+  if (T.duty) addNews(s, `Cło ${mL(T.duty, u.at)}: ${cName(LOC[u.at].cc)} → ${cName(LOC[p.to].cc)}`);
+  const t0 = s.clock;
+  Object.assign(u, { st: ship ? 'sail' : 'go', from: u.at, to: p.to, a: p.a, b: p.b, rk: rkey(p.a, p.b), km: p.rt.km, g: p.q ? p.g : (u.q ? u.g : null), q: p.q || 0,
+    job: p.job || null, bg: p.job === 'buy' ? p.g : null, bq: p.bq || 0, fid: p.fid || null, sid: p.sid || null,
+    t0, tD: t0 + T.ld * 1e3, tA: t0 + (T.ld + T.drive + T.pk) * 1e3, t1: t0 + T.tot * 1e3, wait: '' });
+  if (s.tut && p.job === 'sell') s.tut.sent = true;
+  return T.fee;
 }
 function arrive(s, u, ship) {
-  Object.assign(u, { st: 'idle', at: u.to, to: null });
-  const lid = u.at, nm = uName(u, ship);
+  const lid = u.to, nm = uName(u, ship);
+  Object.assign(u, { st: 'idle', at: lid, to: null, pos: u.b });
   if (u.job === 'sell' && u.q) {
-    const r = sellAt(s, lid, u.g, u.q);
-    addNews(s, `${nm}: sprzedano ${uq(u.q, u.g)} ${G[u.g].n} w ${LOC[lid].n} za ${mL(r, lid)}`);
-    u.g = null; u.q = 0;
+    if (u.fid && u.fid.startsWith('o:')) { (s.pend = s.pend || []).push({ fid: u.fid, lid, g: u.g, q: u.q }); addNews(s, `${nm}: dostarczono ${uq(u.q, u.g)} ${G[u.g].n} do zakładu gracza`); u.g = null; u.q = 0; }
+    else {
+      const f = firmById(lid, u.fid) || bestFirm(s, lid, u.g);
+      if (f && !f.player) { const r = sellNPC(s, f, u.g, u.q); addNews(s, `${nm}: ${f.n} (${LOC[lid].n}) kupił ${uq(u.q, u.g)} ${G[u.g].n} za ${mL(r, lid)}`); u.g = null; u.q = 0; }
+      else addNews(s, `${nm}: w ${LOC[lid].n} nikt nie kupuje: ${G[u.g].n}`);
+    }
   } else if (u.job === 'unload' && u.q) {
-    const fit = s.L[lid] ? fl(Math.min(u.q, stFree(s, lid) / G[u.g].w)) : 0;
-    if (fit > 0) add(ensureL(s, lid), u.g, fit);
+    const L = s.L[lid], fit = L ? fl(putL(L, u.g, u.q, u.sid)) : 0;
     u.q = fl(u.q - fit);
     addNews(s, `${nm}: rozładowano ${uq(fit, u.g)} ${G[u.g].n} w ${LOC[lid].n}` + (u.q > 0 ? ` — brak miejsca na ${uq(u.q, u.g)}` : ''));
     if (u.q <= 0) { u.g = null; u.q = 0; }
   } else if (u.job === 'buy' && u.bg) {
-    const got = buyAt(s, lid, u.bg, Math.min(u.bq || Infinity, uCap(u, ship) / G[u.bg].w));
+    const f = firmById(lid, u.fid) || firmsOf(lid).find(x => x.gs.includes(u.bg));
+    const got = f && !f.player ? buyFrom(s, f, u.bg, Math.min(u.bq || Infinity, uCap(u, ship) / G[u.bg].w)) : 0;
     if (got > 0) { u.g = u.bg; u.q = got; }
-    addNews(s, got > 0 ? `${nm}: kupiono ${uq(got, u.bg)} ${G[u.bg].n} w ${LOC[lid].n}` : `${nm}: brak ${curOf(lid)} na zakup w ${LOC[lid].n}`);
+    addNews(s, got > 0 ? `${nm}: kupiono ${uq(got, u.bg)} ${G[u.bg].n} — ${f.n}, ${LOC[lid].n}` : `${nm}: zakup nieudany w ${LOC[lid].n} (brak ${curOf(lid)} albo sprzedawcy)`);
   } else if (!u.r) addNews(s, `${nm} dotarł do: ${LOC[lid].n}`);
-  u.job = null; u.bg = null; u.bq = 0;
+  Object.assign(u, { job: null, bg: null, bq: 0, fid: null, sid: null });
+  if (u.r) routeNext(s, u, ship);
 }
-function routeNext(s, u, ship) { // trasa: A ⇄ B, sprzedaż albo zakup, w kółko
-  const r = u.r, w = G[r.g].w, cap = uCap(u, ship) / w;
+function routeNext(s, u, ship) { // trasa A ⇄ B: sprzedaż albo zakup, w kółko (też offline)
+  const r = u.r; if (!r || !G[r.g]) { delete u.r; return; }
+  const cap = uCap(u, ship) / G[r.g].w, L = s.L[r.a];
+  const go = (to, job, g, q, bq, a, b, fid, sid) => depart(s, u, ship, { to, job, g, q, bq, a, b, rt: rtGet(rkey(a, b)) || { km: r.km, s: r.s }, fid, sid });
   if (u.at === r.a) {
-    if (u.q && u.g) { // resztka ładunku po nieudanym rozładunku
-      const fit = fl(Math.min(u.q, stFree(s, r.a) / G[u.g].w)); if (fit > 0) { add(ensureL(s, r.a), u.g, fit); u.q = fl(u.q - fit); if (u.q <= 0) { u.g = null; u.q = 0; } }
-      if (u.q) { u.wait = 'brak miejsca w magazynie'; return; }
-    }
+    if (u.q && u.g) { const fit = L ? putL(L, u.g, u.q, r.src) : 0; u.q = fl(u.q - fit); if (u.q <= 0) { u.q = 0; u.g = null; } else { u.wait = 'brak miejsca w składzie'; return; } }
     if (r.m === 'sell') {
-      const inv = (s.L[r.a] || newLoc()).inv, q = fl(Math.min(cap, inv[r.g] || 0));
-      if (q <= 0 || (q < cap * .5 && s.hour % 6)) { u.wait = 'czeka na towar'; return; }
-      inv[r.g] -= q; if (inv[r.g] < 1e-6) delete inv[r.g];
-      if (!depart(s, u, ship, r.b, 'sell', r.g, q)) { add(ensureL(s, r.a), r.g, q); u.wait = 'brak pieniędzy na kurs'; }
-    } else if (!depart(s, u, ship, r.b, 'buy', r.g, 0, cap)) u.wait = 'brak pieniędzy na kurs';
-  } else if (u.at === r.b) {
-    if (!depart(s, u, ship, r.a, u.q ? 'unload' : null, u.g, u.q)) u.wait = 'brak pieniędzy na kurs';
-  } else if (!depart(s, u, ship, r.a, u.q ? 'unload' : null, u.g, u.q)) u.wait = 'brak pieniędzy na kurs';
+      const st = r.src ? stById(L, r.src) : null, have = st ? (st.inv[r.g] || 0) : invOf(L, r.g), q = fl(Math.min(cap, have));
+      if (q <= 0 || (q < cap * .5 && s.clock - (u.wt || s.clock) < 2 * HOUR)) { if (!u.wait) u.wt = s.clock; u.wait = 'czeka na towar'; return; }
+      const took = fl(takeL(L, r.g, q, r.src));
+      if (!go(r.b, 'sell', r.g, took, 0, r.aP, r.bP, r.fid)) { putL(L, r.g, took, r.src); u.wait = 'brak pieniędzy na kurs'; }
+    } else if (!go(r.b, 'buy', r.g, 0, cap, r.aP, r.bP, r.fid)) u.wait = 'brak pieniędzy na kurs';
+  } else if (!go(r.a, u.q ? 'unload' : null, u.g, u.q, 0, u.pos || r.bP, r.aP, null, r.src)) u.wait = 'brak pieniędzy na kurs';
 }
-function addNews(s, t) { s.news.unshift({ h: s.hour, t }); s.news.length = Math.min(s.news.length, 30); }
-function tstr(h) { const d = Math.floor(h / 24) + 1, hh = h % 24; return `Dzień ${d}, ${String(hh).padStart(2, '0')}:00`; }
+function uPos(u, t = Date.now()) { // pozycja pojazdu na mapie [la, lo]
+  if (u.st === 'idle' || !u.a) return u.pos || [LOC[u.at].la, LOC[u.at].lo];
+  if (t <= u.tD) return u.a; if (t >= u.tA) return u.b;
+  const r = rtGet(u.rk), f = (t - u.tD) / Math.max(1, u.tA - u.tD);
+  if (!r) return [u.a[0] + (u.b[0] - u.a[0]) * f, u.a[1] + (u.b[1] - u.a[1]) * f];
+  let i = 1; while (i < r.cf.length - 1 && r.cf[i] < f) i++;
+  const f0 = r.cf[i - 1], f1 = r.cf[i], k = f1 > f0 ? clamp((f - f0) / (f1 - f0), 0, 1) : 0, p0 = r.geo[i - 1], p1 = r.geo[i];
+  return [p0[1] + (p1[1] - p0[1]) * k, p0[0] + (p1[0] - p0[0]) * k];
+}
+const durTxt = ms => { const m = Math.max(0, Math.round(ms / 6e4)); return m >= 60 ? `${Math.floor(m / 60)} h ${m % 60} min` : `${m} min`; };
+function addNews(s, t) { s.news.unshift({ h: s.hour, c: s.clock, t }); s.news.length = Math.min(s.news.length, 40); }
+function tstr(h) { const t = new Date((S && S.clock) || Date.now()), d = Math.floor(h / 24) + 1; return `Dzień ${d}, ${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')}`; }
 
 // ================== SYMULACJA 1 GODZINY ==================
-function hour(s) {
-  s.hour++;
-  const cash0 = totUSD(s);
-  const prodM = 1 + .08 * s.perk.prod, upkM = Math.max(.3, 1 - .07 * s.perk.upk);
-  let upk = 0;
+function prod(s, dt) { // produkcja i koszty za dt godzin
+  const prodM = 1 + .08 * s.perk.prod, upkM = Math.max(.3, 1 - .07 * s.perk.upk); let upk = 0;
   for (const lid in s.L) {
-    const L = s.L[lid], cur = curOf(lid); let u = 0, room = stCap(s, lid) - stUsed(s, lid);
+    const L = s.L[lid]; let u = 0;
     for (const b of L.bld) {
-      const d = B[b.t], k = capQ(b.t, b.l) * prodM, ox = OPEX(b.t) * capQ(b.t, b.l) * upkM;
-      u += cumCost(b.t, b.l) * .0002 * upkM;
-      if (d.in) {
-        let f = 1; const miss = [];
-        for (const g in d.in) { const r = (L.inv[g] || 0) / (d.in[g] * k); if (r < 1) miss.push(G[g].n); f = Math.min(f, r); }
-        if (f <= .001) { b.st = 'Stoi — brak: ' + miss.join(', '); continue; }
-        const dw = Object.entries(d.out).reduce((a, [g, v]) => a + v * G[g].w * locF(s, lid, d, g), 0) - Object.entries(d.in).reduce((a, [g, v]) => a + v * G[g].w, 0);
-        if (dw > 0 && room < dw * k * f) { f = Math.max(0, room / (dw * k)); if (f <= .001) { b.st = 'Stoi — pełny magazyn'; continue; } miss.push('miejsca w magazynie'); }
-        room -= Math.max(0, dw) * k * f;
-        for (const g in d.in) { L.inv[g] -= d.in[g] * k * f; if (L.inv[g] < 1e-6) delete L.inv[g]; }
-        for (const g in d.out) add(L, g, d.out[g] * k * f * locF(s, lid, d, g));
-        u += ox * f;
-        b.st = f < .999 ? `Praca ${Math.round(f * 100)}% — mało: ${miss.join(', ')}` : '';
-      } else {
-        const dw = Object.entries(d.out).reduce((a, [g, v]) => a + v * G[g].w * locF(s, lid, d, g), 0), f = room <= 0 ? 0 : Math.min(1, room / (dw * k));
-        if (f <= .001) { b.st = 'Stoi — pełny magazyn'; continue; }
-        for (const g in d.out) add(L, g, d.out[g] * k * f * locF(s, lid, d, g));
-        room -= dw * k * f; u += ox * f; b.st = f < .999 ? `Praca ${Math.round(f * 100)}% — mało miejsca w magazynie` : '';
-      }
+      const d = B[b.t]; if (!d) continue;
+      u += cumCost(b.t, b.l) * .0002 * upkM * dt;
+      if (b.off) { b.st = 'Zatrzymany'; continue; }
+      const k = capQ(b.t, b.l) * prodM * dt, ox = OPEX(b.t) * capQ(b.t, b.l) * upkM * dt, own = 'b' + b.id;
+      let f = 1; const miss = [];
+      for (const g in d.in || {}) { const r = invOf(L, g) / (d.in[g] * k); if (r < 1) miss.push(G[g].n); f = Math.min(f, r); }
+      if (f <= 1e-4) { b.st = 'Stoi — brak: ' + miss.join(', '); continue; }
+      const ow = Object.entries(d.out).reduce((a, [g, v]) => a + v * G[g].w * locF(s, lid, d, g), 0);
+      const room = stores(L).filter(st => st.id === own || st.k === 'm').reduce((a, st) => a + stFreeOf(st), 0);
+      if (room < ow * k * f) { f = Math.max(0, room / (ow * k)); if (f <= 1e-4) { b.st = 'Stoi — pełny skład i magazyn'; continue; } miss.push('miejsca w składzie'); }
+      for (const g in d.in || {}) takeL(L, g, d.in[g] * k * f, own);
+      for (const g in d.out) putL(L, g, d.out[g] * k * f * locF(s, lid, d, g), own);
+      u += ox * f;
+      b.st = f < .995 ? `Praca ${Math.round(f * 100)}% — mało: ${miss.join(', ')}` : '';
     }
-    if (L.port) u += 3000 * upkM;
-    if (L.gar) u += 400 * L.gar * upkM;
-    for (const p of plots(L)) u += (plotCost(lid, p.sz) * .0003 * p.lv + (p.mg ? MAGC[p.sz] * .0004 * p.mg : 0)) * upkM;
-    payC(s, cur, u); upk += u;
+    if (L.port) u += 3000 * upkM * dt;
+    if (L.gar) u += 400 * L.gar * upkM * dt;
+    for (const p of plots(L)) u += (plotCost(lid, p.sz) * .0003 * p.lv + (p.mg ? MAGC[p.sz] * .0004 * p.mg : 0)) * upkM * dt;
+    payC(s, curOf(lid), u); upk += u;
   }
-  for (const v of s.veh) { const u = VEH[v.k].cost * .001 * upkM; payC(s, curOf(v.home), u); upk += u; }
-  s.upk = upk;
-  // kursy walut: błądzenie losowe z powrotem do średniej
+  for (const v of s.veh) { const u = VEH[v.k].cost * .001 * upkM * dt; payC(s, curOf(v.home), u); upk += u; }
+  s.upkA = (s.upkA || 0) + upk;
+}
+function hourly(s) { // raz na godzinę: rynki, kursy, AI, wydarzenia, kontrakty, sezon
+  s.hour++;
+  s.upk = s.upkA || 0; s.upkA = 0;
   s.fx = s.fx || {}; s.fxp = s.fxp || {};
   for (const c in FX0) { if (c === 'USD') continue; const f = s.fx[c] || 1; s.fx[c] = clamp(f * Math.exp((Math.random() + Math.random() + Math.random() - 1.5) * .004) + (1 - f) * .01, .7, 1.35); }
   if (s.hour % 24 === 0) s.fxp = { ...s.fx };
-  // statki i pojazdy
-  for (const sh of s.ships) if (sh.st === 'sail' && s.hour >= sh.eta) arrive(s, sh, true);
-  for (const v of s.veh) if (v.st === 'go' && s.hour >= v.eta) arrive(s, v, false);
-  for (const u of [...s.ships, ...s.veh]) if (u.st === 'idle' && u.r) routeNext(s, u, u.k === undefined || !VEH[u.k]);
-  // rynki lokalne odbijają (~4%/h)
-  for (const lid in s.lm || {}) { const lm = s.lm[lid]; for (const g in lm) { lm[g] *= .96; if (Math.abs(lm[g]) < LD(lid, g) * .002) delete lm[g]; } if (!Object.keys(lm).length) delete s.lm[lid]; }
+  // firmy odbijają (~4%/h)
+  for (const fid in s.fm || {}) { const fm = s.fm[fid]; for (const g in fm) { fm[g] *= .96; if (Math.abs(fm[g]) < 1e-4) delete fm[g]; } if (!Object.keys(fm).length) delete s.fm[fid]; }
   if (s.hour % 24 === 0) for (const k in DFC) delete DFC[k];
-  // rynek
-  for (const g of GK) {
-    const m = s.m[g];
-    m.sat *= .96;
-    m.d = clamp(m.d + (1 - m.d) * .03 + rnd(-.015, .015), .5, 1.8);
-  }
-  // konkurencja AI
-  for (const a of s.ai) {
-    a.w *= 1 + a.r * rnd(.4, 1.6);
-    if (Math.random() < .3) { const g = pick(GK); s.m[g].sat += SC(g) * rnd(0, .03) * (Math.random() < .3 ? -1 : 1); }
-  }
-  // wydarzenia
+  for (const g of GK) { const m = s.m[g]; m.sat *= .96; m.d = clamp(m.d + (1 - m.d) * .03 + rnd(-.015, .015), .5, 1.8); }
+  for (const a of s.ai) { a.w *= 1 + a.r * rnd(.4, 1.6); if (Math.random() < .3) { const g = pick(GK); s.m[g].sat += SC(g) * rnd(0, .03) * (Math.random() < .3 ? -1 : 1); } }
   s.ev = s.ev.filter(e => e.until > s.hour);
   if (Math.random() < 1 / 30) randomEvent(s);
   if (s.hour % 3 === 0) for (const g of GK) { const h = s.m[g].h; h.push(price(g, s)); if (h.length > 16) h.shift(); }
-  s.inc = s.inc * .85 + (totUSD(s) - cash0) * .15;
+  const c = totUSD(s); s.inc = s.inc * .7 + (c - (s.cashH ?? c)) * .3; s.cashH = c;
+  ctCheck(s);
   if (s.hour % SEASON_H === 0) endSeason(s);
 }
+const HOUR = 36e5;
+function advance(s, to) { // symulacja zdarzeniowa do chwili „to” (ms); czas gry = czas rzeczywisty
+  if (!s.clock) s.clock = s.last || Date.now();
+  if (!s.hT) s.hT = s.clock + HOUR;
+  const max = OFFLINE_MAX_H * HOUR;
+  if (to - s.clock > max) { const sk = to - max - s.clock; s.clock += sk; s.hT += sk; for (const u of [...s.veh, ...s.ships]) for (const k of ['t0', 'tD', 'tA', 't1']) if (u[k]) u[k] += sk; }
+  let guard = 0;
+  while (s.clock < to && guard++ < 200000) {
+    let t = Math.min(to, s.hT);
+    for (const u of [...s.veh, ...s.ships]) if (u.st !== 'idle' && u.t1 > s.clock && u.t1 < t) t = u.t1;
+    const dt = (t - s.clock) / HOUR; if (dt > 0) prod(s, dt);
+    s.clock = t;
+    for (const u of s.veh) if (u.st !== 'idle' && u.t1 <= t) arrive(s, u, false);
+    for (const u of s.ships) if (u.st !== 'idle' && u.t1 <= t) arrive(s, u, true);
+    if (t >= s.hT) { s.hT += HOUR; hourly(s); rtRetry(s); }
+  }
+  if (s.clock - (s.rtTry || 0) > 3e5) rtRetry(s);
+}
+function rtRetry(s) { s.rtTry = s.clock; for (const u of s.veh) if (u.st === 'idle' && u.r) routeNext(s, u, false); for (const u of s.ships) if (u.st === 'idle' && u.r) routeNext(s, u, true); }
+const hour = s => { prod(s, 1); s.clock = (s.clock || Date.now()) + HOUR; s.hT = s.clock + HOUR; for (const u of [...s.veh, ...s.ships]) if (u.st !== 'idle' && u.t1 <= s.clock) arrive(s, u, !u.k); hourly(s); rtRetry(s); }; // test / zgodność
 function randomEvent(s) {
   const t = Math.random();
   if (t < .5) {
@@ -754,7 +954,7 @@ function endSeason(s) {
 
 // ================== SAMOUCZEK ==================
 const hasB = t => Object.values(S.L).some(L => L.bld.some(b => b.t === t));
-const hqInv = g => (S.L[S.hl] && S.L[S.hl].inv[g]) || 0;
+const hqInv = g => invOf(S.L[S.hl], g);
 const TUT = [
   { t: 'Witaj, prezesie!', d: () => `${esc(S.name)} startuje w: ${LOC[S.hl].n} (${CN[S.hq].n}). Cel gry: zarabiać, budować coraz bardziej zaawansowane łańcuchy produkcji i wygrać sezon w rankingu. Pokażę Ci podstawy w kilku krokach.`, next: true },
   { t: 'Zakładka Budowa', d: 'Zakłady stawiasz w zakładce Budowa, na działkach w miastach i wsiach. Otwórz ją.', sel: () => ['[data-tab=budowa]'], done: () => ui.tab === 'budowa' },
@@ -766,15 +966,15 @@ const TUT = [
     sel: () => ['[data-a=pLv]', '[data-tab=budowa]'], done: () => Object.values(S.L).some(L => (L.P || []).some(p => p.lv >= 2)) || hasB('mlyn') },
   { t: 'Młyn', d: 'Młyn mieli 1,33 t zboża na 1 t mąki, a mąka jest prawie 2× droższa. Tak działają łańcuchy produkcji. Zbuduj Młyn (Branża spożywcza) na tej samej działce.',
     sel: () => ['[data-a=build][data-b=mlyn]', '[data-a=dep][data-v=spoz]', '[data-a=dep][data-v=""]', `.chips [data-a=bl][data-l=${S.hl}]`, '[data-tab=budowa]'], done: () => hasB('mlyn') },
-  { t: 'Produkcja trwa', d: () => `Zakłady pracują same: 1 godzina gry = 4 s. Każdy ma też koszt utrzymania co godzinę. Poczekaj na mąkę: ${qty(Math.min(2, hqInv('maka')))} / 2 t.`,
+  { t: 'Produkcja trwa', d: () => `Gra toczy się w czasie rzeczywistym: 1 h gry = 1 h, zakłady pracują też, gdy gra jest zamknięta. Na start młyn ma pierwszą partię mąki: ${qty(Math.min(2, hqInv('maka')))} / 2 t.`,
     done: () => hqInv('maka') >= 2 || S.tut.sold },
   { t: 'Magazyn', d: 'Zakłady trzymają tylko ~4 h produkcji — potem stają. Kup <b>małą</b> działkę i postaw na niej magazyn (300 t).',
     sel: () => ['[data-a=pMag]', '[data-a=plotBuy][data-sz="0"]', '[data-a=plotPick][data-sz="0"]', '[data-a=pbAuto]', '[data-tab=budowa]'], done: () => Object.values(S.L).some(L => (L.P || []).some(p => p.mg)) },
   { t: 'Garaż', d: 'Towar sprzedajesz, wysyłając pojazd do miejscowości. Podnieś małą działkę na poziom 2 i postaw garaż (dostawczaki).',
     sel: () => ['[data-a=pGar]', '[data-a=pLv]', '[data-tab=budowa]'], done: () => Object.values(S.L).some(L => (L.P || []).some(p => p.g)) },
   { t: 'Dostawczak', d: 'W zakładce Transport kup dostawczy (1,5 t).', sel: () => ['[data-a=veh]', '[data-tab=logistyka]'], done: () => S.veh.length > 0 },
-  { t: 'Sprzedaż', d: 'Wyślij dostawczak z mąką do najbliższego miasta z opcją „Sprzedaj”. Każda miejscowość ma inną cenę: zależy od państwa, odległości od producentów i liczby mieszkańców. Częsta sprzedaż w jednym miejscu obniża cenę.',
-    sel: () => ['[data-a=go]', '[data-tab=logistyka]'], done: () => S.tut.sold },
+  { t: 'Sprzedaż', d: 'Skąd: Młyn, towar: Mąka. Dokąd: np. Gorzów, Komu: wybierz firmę (piekarnia, hurtownia…) — każda płaci inaczej. Auto pojedzie po prawdziwych drogach (załadunek, jazda, rozładunek) — zobaczysz je na mapie. Częsta sprzedaż jednej firmie obniża jej cenę.',
+    sel: () => ['[data-a=go]', '[data-tab=logistyka]'], done: () => S.tut.sold || S.tut.sent },
   { t: 'Trasy', d: 'Zaznacz „Powtarzaj w kółko”, a pojazd sam będzie woził towar na sprzedaż (albo kupował surowce) i wracał — także gdy gra jest zamknięta. Brakujące surowce kupujesz tak samo: „Jadę kupić towar”.', next: true, sel: () => ['[data-tab=logistyka]'] },
   { t: 'Działki, miasta i wsie', d: 'Mała działka — garaż. Średnia — farmy, hodowla, kopalnie, lekkie przetwórstwo. Duża — fabryki i huty. Wieś: tanie działki, dużo dużych, farmy i kopalnie +25%. Miasto: drogie działki, mało dużych, fabryki +15% i sprzedaż +5%.', next: true, sel: () => ['[data-tab=budowa]'] },
   { t: 'Ciężarówki i TIR-y', d: 'Garaż na średniej działce mieści ciężarówki (12 t), na dużej TIR-y (25 t). Każda miejscowość ma własny magazyn — zboże ze wsi możesz wozić do młyna w mieście.', next: true, sel: () => ['[data-tab=logistyka]'] },
@@ -977,7 +1177,7 @@ function zoomAt(cid, k, ux, uy) { // ux,uy: punkt mapy, który ma zostać w miej
 }
 function locMap(cid, sel) {
   const m = MAPS[cid], z = zOf(cid), u = 1 / z.k, P = l => [l.x, l.y];
-  const own = l => { const L = S.L[l.id]; return !!(L && (L.bld.length || L.gar || (L.P && L.P.length) || Object.keys(L.inv).length)); };
+  const own = l => { const L = S.L[l.id]; return !!(L && (L.bld.length || L.gar || (L.P && L.P.length))); };
   let g = '';
   for (const v of S.veh) {
     if (v.st !== 'go' || LOC[v.to].c !== cid) continue;
@@ -1373,7 +1573,8 @@ function plotSheet(lid, pid) {
         : x === 'gar'
         ? `<div class="row pit"><span class="grow">🚚 <b>Garaż</b> poz. ${p.g} <span class="mut small">· ${garUsed(S, lid)}/${garCap(S, lid)} pojazdów · do: ${['dostawczaków', 'ciężarówek', 'TIR-ów'][p.sz]}</span></span>
            <button class="btn s g" data-a="garUp" data-l="${lid}" data-p="${p.id}" ${!canL(lid, garUpP(p)) ? 'disabled' : ''}>+2 miejsca — ${mL(garUpP(p), lid)}</button></div>`
-        : `<div class="row pit"><span class="grow"><b>${B[x.t].n}</b> poz. ${x.l}${x.st ? ` <span class="neg small">${esc(x.st)}</span>` : ''}<div class="flow">${flowTxt(B[x.t], capQ(x.t, x.l) * (1 + .08 * S.perk.prod), lid)}</div></span></div>`).join('')
+        : `<div class="row pit"><span class="grow"><b>${B[x.t].n}</b> poz. ${x.l}${x.st ? ` <span class="neg small">${esc(x.st)}</span>` : ''}<div class="flow">${flowTxt(B[x.t], capQ(x.t, x.l) * (1 + .08 * S.perk.prod), lid)}</div></span>
+           <button class="btn s ${x.off ? 'p' : ''}" data-a="bOff" data-l="${lid}" data-id="${x.id}" data-p="${p.id}">${x.off ? '▶' : '⏸'}</button></div>`).join('')
       : '<span class="mut">Pusta działka.</span>'}</div>
     <div class="btns">
       ${fr > 0 ? `<button class="btn p" data-a="pBuild" data-l="${lid}" data-p="${p.id}">Buduj tutaj (${fr} wolne)</button>` : ''}
@@ -1403,7 +1604,11 @@ function setupLayers() {
     paint: { 'circle-radius': ['interpolate', ['linear'], ['zoom'], 3, ['*', .7, popR], 10, ['*', 1.2, popR], 15, ['*', 1.8, popR]],
       'circle-color': ['case', ['==', ['get', 't'], 'm'], '#a9bfd6', '#86c98a'], 'circle-opacity': .9,
       'circle-stroke-color': '#0b131b', 'circle-stroke-width': 1 } });
-  map.addLayer({ id: 'xy-veh-l', type: 'line', source: 'xy-veh', paint: { 'line-color': '#f5c542', 'line-width': 2, 'line-dasharray': [3, 2] } });
+  map.addLayer({ id: 'xy-veh-l', type: 'line', source: 'xy-veh', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#f5c542', 'line-width': ['interpolate', ['linear'], ['zoom'], 6, 2, 14, 5], 'line-opacity': .75 } });
+  map.addSource('xy-vp', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+  map.addLayer({ id: 'xy-vp-c', type: 'circle', source: 'xy-vp', paint: { 'circle-radius': ['interpolate', ['linear'], ['zoom'], 5, 4, 14, 9], 'circle-color': ['case', ['==', ['get', 'mv'], 1], '#f5c542', '#9aa4ae'], 'circle-stroke-color': '#0b0e12', 'circle-stroke-width': 2 } });
+  map.addLayer({ id: 'xy-vp-s', type: 'symbol', source: 'xy-vp', minzoom: 8, layout: { 'text-field': ['get', 'n'], 'text-size': 11, 'text-offset': [0, 1.4], 'text-font': ['Noto Sans Bold'], 'text-allow-overlap': false },
+    paint: { 'text-color': '#f5d27a', 'text-halo-color': '#0a0c0f', 'text-halo-width': 1.4 } });
   map.addSource('xy-rad', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
   map.addLayer({ id: 'xy-rad-f', type: 'fill', source: 'xy-rad', paint: { 'fill-color': '#e0823f', 'fill-opacity': .08 } });
   map.addLayer({ id: 'xy-rad-l', type: 'line', source: 'xy-rad', paint: { 'line-color': '#e0823f', 'line-width': 2, 'line-dasharray': [2, 2] } });
@@ -1435,10 +1640,23 @@ function mountLM(cid, sel) {
     else { const b = MAPS[cid].box; lm.map.fitBounds([b[0], b[1]], { animate: false }); }
   } else if (ui.flyP) { lm.map.flyTo({ center: [ui.flyP[1], ui.flyP[0]], zoom: 16, pitch: 55, duration: 900 }); ui.flyP = null; }
   else if (ui.flyB) { const t = LOC[ui.flyB]; lm.map.flyTo({ center: [t.lo, t.la], zoom: t.t === 'm' ? 13 : 14.5, pitch: 50, duration: 900 }); ui.flyB = null; }
+  else if (ui.flyV) { lm.map.flyTo({ center: [ui.flyV[1], ui.flyV[0]], zoom: 13.5, duration: 900 }); ui.flyV = null; }
   else if (ui.fitB) lm.map.fitBounds(ui.fitB, { padding: 30, maxZoom: 11 });
   else if (ui.panTo && l) lm.map.easeTo({ center: [l.lo, l.la], zoom: Math.max(lm.map.getZoom(), 9.5) });
   ui.panTo = false; ui.fitB = null;
   drawLM();
+}
+function animVeh() { // pozycje pojazdów co sekundę
+  const lm = LM; if (!S || !lm || !lm.ready || !lm.map.getSource('xy-vp') || !$('lmapSlot')) return;
+  const t = Date.now(), lines = [], pts = [];
+  for (const [u, ship] of [...S.veh.map(v => [v, false]), ...S.ships.map(x => [x, true])]) {
+    if (!LOC[u.at] && !u.a) continue;
+    const [la, lo] = uPos(u, t), mv = u.st !== 'idle';
+    pts.push({ type: 'Feature', geometry: { type: 'Point', coordinates: [lo, la] }, properties: { n: uName(u, ship) + (mv && t > u.tD && t < u.tA ? '' : mv ? (t <= u.tD ? ' · załadunek' : ' · rozładunek') : ''), mv: mv ? 1 : 0 } });
+    if (mv && u.a) { const r = rtGet(u.rk); if (!r && !RTP[u.rk]) fetchRoute(u.a, u.b, ship);
+      lines.push({ type: 'Feature', geometry: { type: 'LineString', coordinates: r ? r.geo : [[u.a[1], u.a[0]], [u.b[1], u.b[0]]] }, properties: {} }); }
+  }
+  try { lm.map.getSource('xy-veh').setData({ type: 'FeatureCollection', features: lines }); lm.map.getSource('xy-vp').setData({ type: 'FeatureCollection', features: pts }); } catch (e) {}
 }
 function drawLM() {
   const lm = LM; if (!lm || !lm.ready || !lm.cid) return;
@@ -1454,7 +1672,7 @@ function drawLM() {
   const ids = new Set([ui.bl, ...Object.keys(SS.L), ...LOCS.filter(l => l.u || (!S && l.g)).map(l => l.id)]);
   for (const id of ids) {
     const l = LOC[id]; if (!l || l.c !== cid) continue;
-    const L = SS.L[id], mine = !!(L && (L.bld.length || L.gar || (L.P && L.P.length) || Object.keys(L.inv).length)), on = id === ui.bl;
+    const L = SS.L[id], mine = !!(L && (L.bld.length || L.gar || (L.P && L.P.length))), on = id === ui.bl;
     const d = document.createElement('div'); d.className = 'mk' + (on ? ' on' : '') + (mine ? ' mine' : '');
     d.innerHTML = `<i style="background:${mine ? SS.color : l.g ? '#ff8fe0' : l.u ? '#ffc98a' : l.t === 'm' ? '#a9bfd6' : '#86c98a'};${L && L.port ? 'box-shadow:0 0 0 3px #4aa3ff' : ''}"></i><span>${esc(l.n)}</span>`;
     d.addEventListener('click', ev => {
@@ -1466,15 +1684,6 @@ function drawLM() {
     });
     lm.mk.push(new maplibregl.Marker({ element: d, anchor: 'bottom', offset: [0, on ? 9 : 7] }).setLngLat([l.lo, l.la]).addTo(map));
   }
-  const lines = [];
-  for (const v of SS.veh) {
-    if (v.st !== 'go') continue;
-    const a = LOC[v.from], c = LOC[v.to], p = clamp(1 - (v.eta - SS.hour) / v.dur, 0, 1);
-    lines.push({ type: 'Feature', geometry: { type: 'LineString', coordinates: [[a.lo, a.la], [c.lo, c.la]] }, properties: {} });
-    const d = document.createElement('div'); d.className = 'mk veh'; d.innerHTML = `<i></i><span>${VEH[v.k].n} #${v.id}</span>`;
-    lm.mk.push(new maplibregl.Marker({ element: d, anchor: 'bottom', offset: [0, 6] }).setLngLat([a.lo + (c.lo - a.lo) * p, a.la + (c.la - a.la) * p]).addTo(map));
-  }
-  map.getSource('xy-veh').setData({ type: 'FeatureCollection', features: lines });
   try { map.getSource('xy-bld').setData({ type: 'FeatureCollection', features: bldFeatures() }); const pg = plotGeo(); map.getSource('xy-plot').setData({ type: 'FeatureCollection', features: pg.ground }); map.getSource('xy-3d').setData({ type: 'FeatureCollection', features: pg.ext }); } catch (e) {}
   const pb = ui.placeB, pl = pb && LOC[pb.lid];
   try { map.getSource('xy-rad').setData({ type: 'FeatureCollection', features: pl ? [circleGeo(pl.la, pl.lo, townR(pl))] : [] }); } catch (e) {}
@@ -1556,6 +1765,8 @@ function vBudowa() {
       <div class="lvbar"><i style="width:${b.l / LVMAX * 100}%"></i></div>
       <div class="flow">${flowTxt(d, k, lid)}</div>${b.st ? `<div class="warn">${esc(b.st)}</div>` : ''}
       <div class="btns">${b.l < LVMAX ? `<button class="btn s g" data-a="up" data-l="${lid}" data-id="${b.id}" ${!canL(lid, uc) ? 'disabled' : ''}>Ulepsz do ${uq(capQ(b.t, b.l + 1), mg)}/h — ${mL(uc, lid)}</button>` : '<span class="pos small" style="align-self:center">Maksymalny poziom</span>'}
+      <button class="btn s ${b.off ? 'p' : ''}" data-a="bOff" data-l="${lid}" data-id="${b.id}">${b.off ? '▶ Wznów' : '⏸ Zatrzymaj'}</button>
+      ${d.in && USER && DB ? `<button class="btn s" data-a="ordOpen" data-l="${lid}" data-id="${b.id}">👤 Skup od graczy</button>` : ''}
       ${b.p ? `<button class="btn s" data-a="pInfo" data-l="${lid}" data-p="${b.p}">Działka</button>` : ''}
       <button class="btn s" data-a="demo" data-l="${lid}" data-id="${b.id}">Sprzedaj za ${mL(bldValue(b), lid)}</button></div></div>`;
   }
@@ -1602,7 +1813,7 @@ function ctryPts() { // największa miejscowość każdego państwa
   return CPTS = Object.values(best);
 }
 function priceData(g) {
-  const hc = homeCur(), pts = ctryPts().map(l => ({ l, v: lPrice(S, l.id, g) })), vs = pts.map(p => p.v), mn = Math.min(...vs), mx = Math.max(...vs);
+  const hc = homeCur(), pts = ctryPts().map(l => ({ l, v: lBase(S, l.id, g) })), vs = pts.map(p => p.v), mn = Math.min(...vs), mx = Math.max(...vs);
   return { pts, mn, mx, hc, geo: { type: 'FeatureCollection', features: pts.map(p => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [p.l.lo, p.l.la] },
     properties: { k: mx > mn ? (p.v - mn) / (mx - mn) : .5, t: fmtC(p.v * rate(hc), hc), cc: p.l.cc } })) } };
 }
@@ -1662,42 +1873,67 @@ function kantor() {
     <div id="exOut" class="mut small" style="margin:8px 2px">${exPreview()}</div>
     <div class="btns"><button class="btn p" data-a="exch">Wymień</button></div></div>`;
 }
-function bestNear(lid, g) { // najlepsza cena w 25 najbliższych miejscowościach (ląd)
-  let b = null; for (const id of [lid, ...vehDests(lid)].slice(0, 26)) { const p = lPrice(S, id, g) * (1 - taxOf(id)); if (!b || p > b.p) b = { id, p }; } return b;
+function bestNear(lid, g) { // najlepsza firma w 25 najbliższych miejscowościach (ląd)
+  let b = null; for (const id of [lid, ...vehDests(lid)].slice(0, 26)) { const f = bestFirm(S, id, g); if (!f) continue; const p = fPrice(S, f, g) * (1 - taxOf(id)); if (!b || p > b.p) b = { id, f, p }; } return b;
 }
 function pqRes() { return findLocs(ui.pq, () => true).map(l => `<button class="chipb" data-a="pqSet" data-v="${l.id}">${flag(l.cc)} ${esc(l.n)} <small>${fmt(popOf(l.id))}</small></button>`).join(''); }
+const ctFor = (fid, g) => (S.ct || []).find(c => c.fid === fid && c.g === g && c.st === 'on');
+function kontrakty() {
+  const on = (S.ct || []).filter(c => c.st === 'on');
+  let h = `<h2>Kontrakty (${on.length}/5)</h2><div class="card">`;
+  for (const c of on) { const di = Math.min(cDay(S, c), c.days - 1), d = c.done[di] || 0;
+    h += `<div class="ctr"><div class="grow"><b>${esc(c.fn)}</b> <span class="mut small">· ${esc(LOC[c.lid].n)}</span>
+      <div class="small">${uq(c.per, c.g)} ${G[c.g].n} / dzień · ${mL(c.price, c.lid)}/${G[c.g].u} · dzień ${di + 1}/${c.days}</div>
+      <div class="bar ${d >= c.per ? '' : 'y'}"><i style="width:${Math.min(100, d / c.per * 100)}%"></i></div><div class="mut small">Dziś dostarczono ${uq(d, c.g)} z ${uq(c.per, c.g)} · kara za brak: 25% wartości</div></div>
+      <button class="btn s" data-a="ctDrop" data-id="${c.id}">Zerwij</button></div>`; }
+  if (!on.length) h += `<div class="mut small">Brak kontraktów. Firmy dają stałą, wyższą cenę za dostawy codziennie przez kilka dni.</div>`;
+  const near = [...new Set(Object.keys(S.L).flatMap(id => [id, ...vehDests(id).slice(0, 8)]))].slice(0, 40);
+  const offs = near.flatMap(offersOf).filter(o => !(S.ct || []).some(c => c.id === o.id)).sort((a, b) => b.price * b.per - a.price * a.per).slice(0, 10);
+  if (offs.length) h += `<div class="mut small" style="margin:10px 0 4px">Oferty w okolicy (dzisiaj):</div>` + offs.map(o => `<div class="ctr"><div class="grow"><b>${esc(o.fn)}</b> <span class="mut small">· ${esc(LOC[o.lid].n)}</span>
+      <div class="small">${uq(o.per, o.g)} ${G[o.g].n} / dzień przez ${o.days} dni · <b>${mL(o.price, o.lid)}</b>/${G[o.g].u}</div></div>
+      <button class="btn s p" data-a="ctAcc" data-id="${esc(o.id)}" ${on.length >= 5 ? 'disabled' : ''}>Przyjmij</button></div>`).join('');
+  return h + `</div>`;
+}
 function vMagazyn() {
   const list = LOCS.filter(l => S.L[l.id]);
   if (!S.L[ui.ml]) ui.ml = S.L[S.hl] ? S.hl : list[0].id;
-  const lid = ui.ml, L = S.L[lid], l = LOC[lid], cap = stCap(S, lid), used = stUsed(S, lid);
-  let h = kantor() + `<h2>Magazyny</h2>` + locChips(list, lid, 'ml');
-  const items = Object.entries(L.inv).filter(([, q]) => q > 1e-3);
-  h += `<div class="card"><div class="row"><b class="grow">${flag(l.cc)} ${l.n}</b><span class="mut small">${qty(used)} / ${qty(cap)} t</span></div>
-    <div class="bar ${used > cap * .9 ? 'r' : ''}"><i style="width:${cap ? Math.min(100, used / cap * 100) : 0}%"></i></div>
-    <div class="mut small" style="margin:4px 0 8px">${plots(L).some(p => p.mg) ? 'Magazyny + bufor zakładów (~4 h produkcji).' : 'Brak magazynu — tylko mały bufor zakładów (~4 h produkcji). Postaw magazyn na działce w Budowie.'} Sprzedajesz, wysyłając pojazd z towarem do miejscowości (Transport).</div>`;
-  if (!items.length) h += `<div class="mut">Magazyn pusty.</div>`;
-  for (const [g, q] of items) {
-    const bn = bestNear(lid, g);
-    h += `<div class="row" style="padding:8px 0;border-top:1px solid var(--line)"><div class="grow"><b>${G[g].n}</b> <span class="mut">· ${uq(q, g)} · ${qty(q * G[g].w)} t</span>
-      ${bn ? `<div class="mut small">Najlepiej w okolicy: ${esc(LOC[bn.id].n)} — ${mL(bn.p, bn.id)}/${G[g].u}</div>` : ''}</div>
-      <button class="btn s g" data-a="goSell" data-l="${lid}" data-g="${g}" data-v="${bn ? bn.id : ''}">Wyślij</button></div>`;
+  const lid = ui.ml, L = S.L[lid], l = LOC[lid], ss = stores(L);
+  let h = kantor() + `<h2>Składy i magazyny</h2>` + locChips(list, lid, 'ml');
+  h += `<div class="card"><div class="row"><b class="grow">${flag(l.cc)} ${l.n}</b><span class="mut small">${qty(stUsed(S, lid))} / ${qty(stCap(S, lid))} t</span></div>
+    <div class="mut small">Każdy zakład ma własny skład (~4 h produkcji), nadmiar idzie do magazynu. Zakłady w tej miejscowości same biorą od siebie surowce. Towar sprzedajesz, wysyłając pojazd do firmy.</div></div>`;
+  for (const st of ss) {
+    const used = invW(st.inv), gs = Object.entries(st.inv).filter(([, q]) => q > 1e-3);
+    h += `<div class="card"><div class="row"><b class="grow">${st.k === 'm' ? '📦 ' : st.k === 'y' ? '🧱 ' : '🏭 '}${esc(st.n)}</b>${st.k !== 'y' ? `<span class="mut small">${qty(used)} / ${qty(st.cap)} t</span>` : ''}</div>
+      ${st.k !== 'y' ? `<div class="bar ${used > st.cap * .9 ? 'r' : ''}"><i style="width:${Math.min(100, used / st.cap * 100)}%"></i></div>` : ''}
+      ${st.k === 'b' && st.o.off ? '<div class="warn">Produkcja zatrzymana</div>' : ''}
+      ${gs.length ? gs.map(([g, q]) => { const bn = bestNear(lid, g);
+        return `<div class="row" style="padding:7px 0;border-top:1px solid var(--line)"><div class="grow"><b>${G[g].n}</b> <span class="mut">· ${uq(q, g)}</span>
+          ${bn ? `<div class="mut small">Najlepiej: ${esc(bn.f.n)}, ${esc(LOC[bn.id].n)} — ${mL(bn.p, bn.id)}/${G[g].u}</div>` : ''}</div>
+          <button class="btn s g" data-a="goSell" data-l="${lid}" data-src="${st.id}" data-g="${g}">Wyślij</button></div>`; }).join('') : '<div class="mut small" style="margin-top:6px">Pusto.</div>'}</div>`;
   }
-  h += `</div>`;
-  // ceny w wybranej miejscowości
+  h += kontrakty();
+  // rynek w wybranej miejscowości: firmy i ceny
   if (!LOC[ui.pl]) ui.pl = lid;
-  const pl = ui.pl, pL = LOC[pl], pd = ui.pdep || 'all', pg = GK.filter(g => pd === 'all' || GDEP(g) === pd);
-  h += `<div class="deph"><h2 class="grow">Ceny w: ${flag(pL.cc)} ${esc(pL.n)} <span class="mut small">· ${fmt(popOf(pl))} mieszk. · ${TYPE[pL.t].n.toLowerCase()} · podatek ${Math.round(taxOf(pl) * 100)}%</span></h2><div class="depbtns"><button class="btn s b" data-a="priceMap">🗺 Mapa cen</button></div></div>
+  const pl = ui.pl, pL = LOC[pl], pd = ui.pdep || 'all', pg = GK.filter(g => pd === 'all' || GDEP(g) === pd), fs = firmsAll(pl);
+  h += `<div class="deph"><h2 class="grow">Rynek: ${flag(pL.cc)} ${esc(pL.n)} <span class="mut small">· ${fmt(popOf(pl))} mieszk. · ${fs.length} firm · podatek ${Math.round(taxOf(pl) * 100)}%</span></h2><div class="depbtns"><button class="btn s b" data-a="priceMap">🗺 Mapa cen</button></div></div>
     <input class="fsq" placeholder="Wpisz dowolną miejscowość…" data-pq="1" value="${esc(ui.pq || '')}"><div class="chips2" id="pqRes">${pqRes()}</div>
-    <select data-in="pdep" style="margin:6px 0 8px"><option value="all">Wszystkie działy (${GK.length} towarów)</option>${DEP.map(x => `<option value="${x.id}" ${x.id === pd ? 'selected' : ''}>${x.i} ${x.n}</option>`).join('')}</select>
-    <div class="card"><table><thead><tr><th>Towar</th><th class="n">Cena</th><th class="n">Rynek</th><th></th></tr></thead><tbody>
-    ${pg.map(g => { const sat = clamp(lsat(S, pl, g) / LD(pl, g), 0, 2), p = lPrice(S, pl, g);
-      return `<tr><td>${G[g].n}</td><td class="n">${mL(p, pl)}<small class="mut">/${G[g].u}</small></td><td class="n"><span class="satb" title="nasycenie"><i style="width:${Math.min(100, sat * 100)}%"></i></span></td><td>${spark([...S.m[g].h, price(g)])}</td></tr>`; }).join('')}
-    </tbody></table><div class="mut small" style="margin-top:6px">Cena zależy od państwa, odległości od producentów i liczby mieszkańców. Pasek „Rynek” = nasycenie: im częściej tu sprzedajesz, tym niższa cena (odbija ok. 4%/h). W dużych miastach nasyca się wolniej.</div></div>`;
+    <select data-in="pdep" style="margin:6px 0 8px"><option value="all">Wszystkie działy</option>${DEP.map(x => `<option value="${x.id}" ${x.id === pd ? 'selected' : ''}>${x.i} ${x.n}</option>`).join('')}</select>
+    <div class="card"><table><thead><tr><th>Towar</th><th class="n">Najlepsza cena</th><th class="n">Firm</th><th></th></tr></thead><tbody>
+    ${pg.map(g => { const n = buyers(pl, g).length, f = bestFirm(S, pl, g);
+      return `<tr><td>${G[g].n}</td><td class="n">${f ? `${mL(fPrice(S, f, g), pl)}<small class="mut">/${G[g].u}</small>` : '<span class="mut">—</span>'}</td><td class="n">${n || '<span class="mut">0</span>'}</td><td>${spark([...S.m[g].h, price(g)])}</td></tr>`; }).join('')}
+    </tbody></table><div class="mut small" style="margin-top:6px">„—” = nikt tu tego nie kupuje. Więcej mieszkańców = więcej firm i większy popyt.</div></div>
+    <h2>Firmy w ${esc(pL.n)} (${fs.length})</h2>`;
+  for (const f of fs) {
+    const gs = f.gs.filter(g => pd === 'all' || GDEP(g) === pd); if (!gs.length) continue;
+    h += `<div class="card firm"><div class="row"><b class="grow">${f.player ? '👤 ' : ''}${esc(f.n)}</b>${f.player ? `<span class="mut small">chce ${uq(f.left, f.gs[0])}</span>` : ''}</div>
+      <div class="fgs">${gs.map(g => { const sat = f.player ? 0 : clamp(fsat(S, f, g) / fDepth(f, g), 0, 1.5), c = ctFor(f.id, g);
+        return `<span class="fg">${c ? '📄 ' : ''}${G[g].n} <b>${mL(c ? c.price : fPrice(S, f, g), pl)}</b>${f.player ? '' : `<i class="satb"><i style="width:${Math.min(100, sat * 70)}%"></i></i>`}</span>`; }).join('')}</div></div>`;
+  }
   return h;
 }
 
-// formularz kursu (statek albo pojazd): wieź towar z magazynu albo kup na miejscu; sprzedaj / rozładuj; opcjonalnie trasa
-const goodsOpts = (sel, only) => DEP.map(x => { const gs = (only || GK).filter(g => GDEP(g) === x.id); return gs.length ? `<optgroup label="${x.n}">${gs.map(g => `<option value="${g}" ${g === sel ? 'selected' : ''}>${G[g].n}${only && S.L[ui._at] ? ` (${uq(S.L[ui._at].inv[g], g)})` : ''}</option>`).join('')}</optgroup>` : ''; }).join('');
+// formularz kursu: skąd (skład) → dokąd (firma albo swój skład); albo jazda po zakup
+const goodsOpts = (sel, only) => DEP.map(x => { const gs = (only || GK).filter(g => GDEP(g) === x.id); return gs.length ? `<optgroup label="${x.n}">${gs.map(g => `<option value="${g}" ${g === sel ? 'selected' : ''}>${G[g].n}</option>`).join('')}</optgroup>` : ''; }).join('');
 function findLocs(q, filt, n = 8) {
   q = (q || '').trim().toLowerCase(); if (q.length < 2) return [];
   const a = [], b = [];
@@ -1706,64 +1942,93 @@ function findLocs(q, filt, n = 8) {
 }
 function fsRes(kind, u) {
   const ship = kind === 'sf', at = LOC[u.at], f = ui[kind][u.id] || {};
-  const r = findLocs(f.qs, l => l.id !== u.at && (ship ? l.port : l.ld === at.ld));
-  return r.map(l => `<button class="chipb" data-a="fTo" data-k="${kind}" data-id="${u.id}" data-v="${l.id}">${flag(l.cc)} ${esc(l.n)} <small>${kmTxt(km(u.at, l.id))}</small></button>`).join('');
+  return findLocs(f.qs, l => l.id !== u.at && (ship ? l.port : l.ld === at.ld)).map(l => `<button class="chipb" data-a="fTo" data-k="${kind}" data-id="${u.id}" data-v="${l.id}">${flag(l.cc)} ${esc(l.n)} <small>${kmTxt(km(u.at, l.id))}</small></button>`).join('');
+}
+function fPlan(kind, u) { // formularz → plan kursu
+  const ship = kind === 'sf', f = ui[kind][u.id] || (ui[kind][u.id] = {}), capT = uCap(u, ship), L = S.L[u.at];
+  if (!f.to || !LOC[f.to]) return null;
+  const p = { to: f.to }, ownTo = !!S.L[p.to], here = u.pos || [LOC[u.at].la, LOC[u.at].lo];
+  const ss = L ? stores(L).filter(st => Object.values(st.inv).some(v => v > 1e-3)) : [];
+  if (u.q > 0) { p.g = u.g; p.q = u.q; p.job = ownTo && f.job === 'unload' ? 'unload' : 'sell'; p.a = here; p.cargo = 1; }
+  else if (f.mode === 'buy' || !ss.length) { p.job = 'buy'; p.g = G[f.bg] ? f.bg : 'zboze'; const mx = fl(capT / G[p.g].w); p.bq = clamp(fl(f.bq ?? mx), 0, mx); p.q = 0; p.a = here; }
+  else {
+    const val = x => Object.entries(x.inv).reduce((a, [g, q]) => a + q * G[g].p, 0);
+    const st = ss.find(x => x.id === f.src) || [...ss].sort((a, b) => val(b) - val(a))[0]; p.src = st.id; p.st = st;
+    const gs = Object.keys(st.inv).filter(g => st.inv[g] > 1e-3).sort((a, b) => st.inv[b] * G[b].p - st.inv[a] * G[a].p); p.g = gs.includes(f.g) ? f.g : gs[0];
+    p.mx = fl(Math.min(capT / G[p.g].w, st.inv[p.g])); p.q = clamp(fl(f.q ?? p.mx), 0, p.mx);
+    p.job = ownTo && f.job === 'unload' ? 'unload' : 'sell'; p.a = ship ? here : stPos(u.at, st);
+  }
+  if (p.job === 'unload') {
+    const ds = stores(S.L[p.to]).filter(x => x.k !== 'y'), d = ds.find(x => x.id === f.sid) || ds.find(x => x.k === 'b' && (B[x.o.t].in || {})[p.g]) || ds.find(x => x.k === 'm') || ds[0];
+    p.sid = d ? d.id : null; p.b = ship ? [LOC[p.to].la, LOC[p.to].lo] : stPos(p.to, d);
+  } else {
+    const fs = p.job === 'buy' ? firmsOf(p.to).filter(x => x.gs.includes(p.g)) : buyers(p.to, p.g);
+    const fr = fs.find(x => x.id === f.fid) || (p.job === 'buy' ? fs[0] : bestFirm(S, p.to, p.g));
+    p.fid = fr ? fr.id : null; p.firm = fr; p.fs = fs; p.b = ship || !fr ? [LOC[p.to].la, LOC[p.to].lo] : [fr.la, fr.lo];
+  }
+  p.rt = rtGet(rkey(p.a, p.b)); if (p.rt && p.rt.est && !ship && !RTP[rkey(p.a, p.b)] && !p.rt.retried) { p.rt.retried = 1; fetchRoute(p.a, p.b, ship).then(() => render()); }
+  return p;
+}
+function revEst(f, g, q, lid) {
+  if (f.player) return f.price * Math.min(q, f.left) * (1 - taxOf(lid));
+  let r = 0, qq = q; const c = ctFor(f.id, g);
+  if (c) { const left = Math.max(0, c.per - (c.done[cDay(S, c)] || 0)), qc = Math.min(qq, left); r += qc * c.price; qq -= qc; }
+  return (r + (qq > 0 ? fPrice(S, f, g, qq / 2) * qq : 0)) * (1 + .04 * S.perk.sell) * (1 - taxOf(lid));
 }
 function sendForm(kind, u, dests) {
-  const ship = kind === 'sf', st = ui[kind], f = st[u.id] || (st[u.id] = {}), capT = uCap(u, ship);
-  if (f.to && !dests.includes(f.to)) dests = [f.to, ...dests];
+  const ship = kind === 'sf', f = ui[kind][u.id] || (ui[kind][u.id] = {}), L = S.L[u.at];
   if (!f.to) f.to = dests.find(d => d !== u.at) || u.at;
-  const to = f.to, own = !!S.L[to], L = S.L[u.at], inv = L ? L.inv : {};
-  const goods = Object.keys(inv).filter(g => inv[g] > 1e-3);
-  let body = '', g = null, q = 0, job = 'sell', canRt = false;
-  if (u.q > 0) {
-    g = u.g; q = u.q; job = own && f.job === 'unload' ? 'unload' : (f.job || (own ? 'unload' : 'sell')); if (!own) job = 'sell';
-    body = `<div class="flow">W pojeździe: <b>${uq(q, g)} ${G[g].n}</b></div>`;
-  } else {
-    if (!goods.length) f.mode = 'buy';
-    const mode = f.mode || 'carry';
-    body = `<label class="f">Co robisz</label><select data-in="${kind}" data-s="${u.id}" data-k="mode"><option value="carry" ${mode === 'carry' ? 'selected' : ''} ${goods.length ? '' : 'disabled'}>Wiozę towar z magazynu</option><option value="buy" ${mode === 'buy' ? 'selected' : ''}>Jadę kupić towar</option></select>`;
-    if (mode === 'carry') {
-      if (!goods.includes(f.g)) f.g = goods[0];
-      g = f.g; const mx = fl(Math.min(capT / G[g].w, inv[g])); q = clamp(fl(f.q ?? mx), 0, mx);
-      job = own && f.job === 'unload' ? 'unload' : 'sell'; canRt = !!L;
-      ui._at = u.at;
-      body += `<div class="grid2"><div><label class="f">Towar</label><select data-in="${kind}" data-s="${u.id}" data-k="g">${goodsOpts(g, goods)}</select></div>
-        <div><label class="f">Ilość (max ${uq(mx, g)})</label><input type="number" inputmode="decimal" step="any" data-in="${kind}" data-s="${u.id}" data-k="q" value="${q}" min="0" max="${mx}"></div></div>`;
-    } else {
-      if (!G[f.bg]) f.bg = 'zboze';
-      g = f.bg; const mx = fl(capT / G[g].w); q = clamp(fl(f.bq ?? mx), 0, mx); job = 'buy'; canRt = !!L;
-      body += `<div class="grid2"><div><label class="f">Kup towar</label><select data-in="${kind}" data-s="${u.id}" data-k="bg">${goodsOpts(g)}</select></div>
-        <div><label class="f">Ilość (max ${uq(mx, g)})</label><input type="number" inputmode="decimal" step="any" data-in="${kind}" data-s="${u.id}" data-k="bq" value="${q}" min="0" max="${mx}"></div></div>`;
-    }
+  if (!dests.includes(f.to)) dests = [f.to, ...dests];
+  const p = fPlan(kind, u); if (!p) return '';
+  const ownTo = !!S.L[p.to], o = (v, t, on) => `<option value="${esc(v)}" ${on ? 'selected' : ''}>${t}</option>`, sel = (k, x) => `<select data-in="${kind}" data-s="${u.id}" data-k="${k}">${x}</select>`;
+  let h = '';
+  if (p.cargo) h += `<div class="flow">W pojeździe: <b>${uq(u.q, u.g)} ${G[u.g].n}</b></div>`;
+  else {
+    const ss = L ? stores(L).filter(st => Object.values(st.inv).some(v => v > 1e-3)) : [];
+    h += `<label class="f">Co robisz</label>` + sel('mode', (ss.length ? o('carry', 'Wiozę towar ze składu', p.job !== 'buy') : '') + o('buy', 'Jadę kupić towar', p.job === 'buy'));
+    if (p.job !== 'buy') h += `<div class="grid2"><div><label class="f">Skąd</label>${sel('src', ss.map(x => o(x.id, `${x.n}`, x.id === p.src)).join(''))}</div>
+        <div><label class="f">Towar</label>${sel('g', Object.keys(p.st.inv).filter(g => p.st.inv[g] > 1e-3).map(g => o(g, `${G[g].n} — ${uq(p.st.inv[g], g)}`, g === p.g)).join(''))}</div></div>
+        <label class="f">Ilość (max ${uq(p.mx, p.g)} · ${qty(p.mx * G[p.g].w)} t)</label><input type="number" inputmode="decimal" step="any" data-in="${kind}" data-s="${u.id}" data-k="q" value="${p.q}" min="0" max="${p.mx}">`;
+    else { const mx = fl(uCap(u, ship) / G[p.g].w);
+      h += `<div class="grid2"><div><label class="f">Towar</label>${sel('bg', goodsOpts(p.g))}</div>
+        <div><label class="f">Ilość (max ${uq(mx, p.g)})</label><input type="number" inputmode="decimal" step="any" data-in="${kind}" data-s="${u.id}" data-k="bq" value="${p.bq}" min="0" max="${mx}"></div></div>`; }
   }
-  if (job !== 'buy') body += `<label class="f">Na miejscu</label><select data-in="${kind}" data-s="${u.id}" data-k="job"><option value="sell" ${job === 'sell' ? 'selected' : ''}>Sprzedaj</option>${own ? `<option value="unload" ${job === 'unload' ? 'selected' : ''}>Rozładuj do magazynu (wolne ${qty(stFree(S, to))} t)</option>` : ''}</select>`;
-  let est = '';
-  if (g && q > 0) {
-    if (job === 'sell') { const p = lPrice(S, to, g, q / 2) * (1 - taxOf(to)); est = `Cena w ${esc(LOC[to].n)}: ${mL(lPrice(S, to, g), to)}/${G[g].u} · przychód ≈ <b>${mL(p * q, to)}</b>`; }
-    if (job === 'buy') est = `Cena w ${esc(LOC[to].n)}: ${mL(lPrice(S, to, g) * 1.15, to)}/${G[g].u} · koszt ≈ <b>${mL(lPrice(S, to, g, -q / 2) * 1.15 * q, to)}</b>`;
+  h += `<label class="f">Dokąd</label>${sel('to', dests.map(d => o(d, `${flag(LOC[d].cc)} ${LOC[d].n}${d === u.at ? ' (tutaj)' : ' · ' + kmTxt(km(u.at, d))}${S.L[d] ? ' ★' : ''} · ${fmt(popOf(d))} mieszk. · ${firmsOf(d).length} firm`, d === p.to)).join(''))}
+    <input class="fsq" placeholder="…albo wpisz dowolną miejscowość${ship ? ' portową' : ''}" data-fs="${kind}" data-id="${u.id}" value="${esc(f.qs || '')}"><div class="chips2" id="fs-${kind}-${u.id}">${fsRes(kind, u)}</div>`;
+  if (p.job !== 'buy' && ownTo) h += `<label class="f">Na miejscu</label>` + sel('job', o('sell', 'Sprzedaj firmie', p.job === 'sell') + o('unload', 'Rozładuj do swojego składu', p.job === 'unload'));
+  let ok = !!p.rt;
+  if (p.job === 'unload') h += `<label class="f">Do składu</label>` + sel('sid', stores(S.L[p.to]).filter(x => x.k !== 'y').map(x => o(x.id, `${x.n} (wolne ${qty(stFreeOf(x))} t)`, x.id === p.sid)).join(''));
+  else if (!p.fs.length) { ok = false; h += `<div class="warn">W ${esc(LOC[p.to].n)} nikt ${p.job === 'buy' ? 'nie sprzedaje' : 'nie kupuje'}: ${G[p.g].n}. Wybierz większe miasto albo port.</div>`; }
+  else h += `<label class="f">${p.job === 'buy' ? 'U kogo' : 'Komu'} (${p.fs.length})</label>` + sel('fid', p.fs.map(x => { const c = ctFor(x.id, p.g), pr = p.job === 'buy' ? fPrice(S, x, p.g) * 1.15 : c ? c.price : fPrice(S, x, p.g);
+      return o(x.id, `${x.player ? '👤 ' : ''}${c ? '📄 ' : ''}${esc(x.n)} — ${mL(pr, p.to)}/${G[p.g].u}${x.player ? ` · chce ${uq(x.left, p.g)}` : ''}`, x.id === p.fid); }).join(''));
+  let est = '', fee = 0;
+  if (!p.rt) { est = `<div class="flow mut">🛣 Liczę trasę po drogach…</div>`; fetchRoute(p.a, p.b, ship).then(() => render()); }
+  else {
+    const T = planTimes(S, u, ship, { ...p, rt: p.rt }); fee = T.fee;
+    est = `<div class="flow">🛣 ${qty(p.rt.km)} km${p.rt.est ? ' (szacunek, brak trasy z OSM)' : ''} · jazda ${durTxt(T.drive * 1e3)}${T.ld ? ` · załadunek ${durTxt(T.ld * 1e3)}` : ''}${T.end ? ` · ${p.job === 'buy' ? 'załadunek' : 'rozładunek'} ${durTxt(T.end * 1e3)}` : ''}${T.pk ? ` · korki +${durTxt(T.pk * 1e3)}` : ''} = <b>${durTxt(T.tot * 1e3)}</b>
+      <div class="mut small">Koszt: ${ship ? 'fracht' : `paliwo ${qty(p.rt.km * (VEH[u.k].l100 / 100))} l + kierowca`} ${mL(T.fee - T.duty, u.at)}${T.duty ? ` + cło ${mL(T.duty, u.at)}` : ''}</div></div>`;
+    if (p.job === 'sell' && p.firm && p.q > 0) est += `<div class="flow">Przychód ≈ <b>${mL(revEst(p.firm, p.g, p.q, p.to), p.to)}</b> (po podatku)</div>`;
+    if (p.job === 'buy' && p.firm) est += `<div class="flow">Koszt towaru ≈ <b>${mL(fPrice(S, p.firm, p.g, -p.bq / 2) * 1.15 * p.bq, p.to)}</b></div>`;
   }
-  const tn = job === 'buy' ? 0 : g ? q * G[g].w : 0, duty = job === 'buy' ? 0 : dutyOf(u.at, to, g, q), fee = uFee(u, ship, u.at, to, tn) + duty, hrs = uHrs(S, u, ship, u.at, to);
-  const rt = canRt && (job === 'sell' || job === 'buy') && to !== u.at && f.rt;
-  return `<label class="f">Cel</label><select data-in="${kind}" data-s="${u.id}" data-k="to">${dests.map(d => `<option value="${d}" ${d === to ? 'selected' : ''}>${flag(LOC[d].cc)} ${LOC[d].n}${d === u.at ? ' (tutaj)' : ' · ' + kmTxt(km(u.at, d))}${S.L[d] ? ' ★' : ''} · ${fmt(popOf(d))} mieszk.</option>`).join('')}</select>
-    <input class="fsq" placeholder="…albo wpisz dowolną miejscowość${ship ? ' portową' : ''}" data-fs="${kind}" data-id="${u.id}" value="${esc(f.qs || '')}"><div class="chips2" id="fs-${kind}-${u.id}">${fsRes(kind, u)}</div>
-    ${body}
-    ${est ? `<div class="flow">${est}</div>` : ''}
-    ${canRt && (job === 'sell' || job === 'buy') && to !== u.at ? `<label class="chk"><input type="checkbox" data-in="${kind}" data-s="${u.id}" data-k="rt" ${f.rt ? 'checked' : ''}> Powtarzaj w kółko (trasa ${esc(LOC[u.at].n)} ⇄ ${esc(LOC[to].n)})</label>` : ''}
-    <div class="btns"><button class="btn p" data-a="go" data-k="${kind}" data-id="${u.id}" ${!canL(u.at, fee) || (job !== 'buy' && !(q > 0) && !u.q) ? 'disabled' : ''}>${rt ? 'Start trasy' : 'Wyślij'} · ${hrs} h · ${mL(fee, u.at)}</button>${duty ? `<span class="mut small" style="align-self:center">w tym cło ${mL(duty, u.at)}</span>` : ''}</div>`;
+  const canRt = !!L && !p.cargo && p.to !== u.at && p.job !== 'unload';
+  return h + est + (canRt ? `<label class="chk"><input type="checkbox" data-in="${kind}" data-s="${u.id}" data-k="rt" ${f.rt ? 'checked' : ''}> Powtarzaj w kółko (trasa ${esc(LOC[u.at].n)} ⇄ ${esc(LOC[p.to].n)})</label>` : '')
+    + `<div class="btns"><button class="btn p" data-a="go" data-k="${kind}" data-id="${u.id}" ${!ok || !canL(u.at, fee) || (p.job !== 'buy' && !(p.q > 0)) || (p.job === 'buy' && !(p.bq > 0)) ? 'disabled' : ''}>${canRt && f.rt ? 'Start trasy' : 'Wyślij'}${fee ? ' · ' + mL(fee, u.at) : ''}</button></div>`;
 }
 function uCard(u, ship) {
-  const nm = uName(u, ship), moving = u.st !== 'idle';
-  const rt = u.r ? `<div class="route">🔁 Trasa: ${esc(LOC[u.r.a].n)} ⇄ ${esc(LOC[u.r.b].n)} · ${G[u.r.g].n} · ${u.r.m === 'sell' ? 'sprzedaż' : 'zakup'}${u.wait ? ` · <span class="neg">${esc(u.wait)}</span>` : ''}
-    <button class="btn s" data-a="rtStop" data-k="${ship ? 'sf' : 'vf'}" data-id="${u.id}">Zakończ trasę</button></div>` : '';
-  if (moving) {
-    const p = clamp(1 - (u.eta - S.hour) / u.dur, 0, 1), jb = u.job === 'sell' ? 'sprzeda' : u.job === 'unload' ? 'rozładuje' : u.job === 'buy' ? `kupi ${G[u.bg].n}` : 'dojazd';
-    return `<div class="card"><div class="row"><b class="grow">${nm}</b><span class="mut small">${u.eta - S.hour} h do celu</span></div>
-      <div class="flow">${LOC[u.from].n} → ${LOC[u.to].n}${u.q ? ` · ${uq(u.q, u.g)} ${G[u.g].n}` : ' · pusty'} · ${jb}</div><div class="bar ${ship ? '' : 'y'}"><i style="width:${p * 100}%"></i></div>${rt}</div>`;
+  const nm = uName(u, ship), t = Date.now(), k = ship ? 'sf' : 'vf';
+  const rt = u.r ? `<div class="route">🔁 ${esc(LOC[u.r.a].n)} ⇄ ${esc(LOC[u.r.b].n)} · ${G[u.r.g].n} · ${u.r.m === 'sell' ? 'sprzedaż' : 'zakup'}${u.r.fid ? ' · ' + esc((firmById(u.r.b, u.r.fid) || {}).n || '') : ''}${u.wait && u.st === 'idle' ? ` · <span class="neg">${esc(u.wait)}</span>` : ''}
+    <button class="btn s" data-a="rtStop" data-k="${k}" data-id="${u.id}">Zakończ trasę</button></div>` : '';
+  const map = `<button class="btn s" data-a="vFocus" data-k="${k}" data-id="${u.id}">📍 Mapa</button>`;
+  if (u.st !== 'idle') {
+    const ph = t < u.tD ? `załadunek (${durTxt(u.tD - t)})` : t < u.tA ? `w drodze ${qty(clamp((t - u.tD) / (u.tA - u.tD), 0, 1) * u.km)} / ${qty(u.km)} km` : u.job === 'buy' ? 'załadunek u sprzedawcy' : u.job ? 'rozładunek' : 'na miejscu';
+    const dest = u.fid ? (firmById(u.to, u.fid) || {}).n : u.sid ? (stById(S.L[u.to], u.sid) || {}).n : '';
+    return `<div class="card"><div class="row"><b class="grow">${nm}</b><span class="mut small">do celu ${durTxt(u.t1 - t)}</span>${map}</div>
+      <div class="flow">${LOC[u.from].n} → ${LOC[u.to].n}${dest ? ' · ' + esc(dest) : ''}${u.q ? ` · ${uq(u.q, u.g)} ${G[u.g].n}` : u.bg ? ` · kupi ${G[u.bg].n}` : ' · pusty'} · ${ph}</div>
+      <div class="bar ${ship ? '' : 'y'}"><i style="width:${clamp((t - u.t0) / (u.t1 - u.t0), 0, 1) * 100}%"></i></div>${rt}</div>`;
   }
   const dests = ship ? portDests(u.at) : [u.at, ...vehDests(u.at)];
-  return `<div class="card"><div class="row"><b class="grow">${nm}</b><span class="mut small">${ship ? 'w porcie' : 'stoi w'}: ${LOC[u.at].n}</span></div>${rt}
-    ${u.r ? '' : sendForm(ship ? 'sf' : 'vf', u, dests)}</div>`;
+  return `<div class="card"><div class="row"><b class="grow">${nm}</b><span class="mut small">${ship ? 'w porcie' : 'stoi w'}: ${LOC[u.at].n}</span>${map}</div>${rt}
+    ${u.r ? '' : sendForm(k, u, dests)}</div>`;
 }
 function portDests(at) {
   const k = 'p' + at;
@@ -1779,7 +2044,7 @@ function vehDests(at) { // Twoje miejscowości na tym samym lądzie + 25 najbli�
   return [...new Set([...own, ...NEAR[at]])];
 }
 function vLogistyka() {
-  let h = '';
+  let h = lmapOn() ? '<div id="lmapSlot" class="lslot"></div><div class="mut small" style="margin:4px 2px 8px">Pojazdy jadą po prawdziwych drogach w czasie rzeczywistym.</div>' : '';
   // --- garaże i pojazdy ---
   const gars = Object.keys(S.L).filter(l => S.L[l].gar);
   h += `<h2>Garaże i pojazdy (${S.veh.length})</h2>`;
@@ -1871,7 +2136,7 @@ function render(force) {
   }
   document.querySelectorAll('#nav button').forEach(b => b.classList.toggle('on', b.dataset.tab === ui.tab));
   renderUpd(); renderTut();
-  if (ui.tab === 'budowa' && $('lmapSlot')) mountLM(ui.bc, ui.bl);
+  if ((ui.tab === 'budowa' || ui.tab === 'logistyka') && $('lmapSlot')) mountLM(ui.bc, ui.bl);
 }
 function renderUpd() {
   $('upd').innerHTML = ui.update ? `<div class="updbar"><div class="grow" style="flex:1"><b>Nowa wersja ${esc(ui.update.v)}</b><div class="mut small">Masz ${esc(VERSION)}</div></div><button class="btn p s" data-a="getUpd">${IS_WEB() ? 'Odśwież' : 'Pobierz'}</button></div>` : '';
@@ -1891,7 +2156,7 @@ function settings() {
       <button class="btn" data-a="mapMode">${S.mapMode === 'svg' ? 'Szczegółowa' : 'Prosta'}</button></div>
       ${S.mapMode === 'svg' ? '' : `<div class="btns">${Object.entries(MSTYLES).map(([k, n]) => `<button class="toggle ${(S.mapStyle || 'caros') === k ? 'on' : ''}" data-a="mapStyle" data-v="${k}">${n}</button>`).join('')}</div>`}</div>
     <h2>Aktualizacje</h2><div class="card"><div class="row"><div class="grow">Wersja: <b>${esc(VERSION)}</b><div class="mut small">Źródło: github.com/${REPO}</div></div><button class="btn" data-a="chkUpd">Sprawdź</button></div></div>
-    <h2>Gra</h2><div class="card"><div class="mut small">1 godzina gry = ${HOUR_MS / 1000} s. Gra liczy się też offline (do 10 dni gry).</div>
+    <h2>Gra</h2><div class="card"><div class="mut small">Czas rzeczywisty: 1 godzina gry = 1 godzina. Zakłady i pojazdy działają też, gdy gra jest zamknięta (do 10 dni).</div>
     <div class="btns"><button class="btn" data-a="tutAgain">Powtórz samouczek</button><button class="btn" data-a="reset" style="${ui.resetArm ? 'background:var(--bad);color:#fff' : ''}">${ui.resetArm ? 'Na pewno? Kliknij ponownie' : 'Zacznij od nowa'}</button></div></div></div>`;
 }
 
@@ -2041,7 +2306,9 @@ function act(a, d) {
       if (!hasLic(d.l) || !canL(d.l, cost)) return;
       if (!p) { toast(`Potrzebna ${PSZ[REQ(d.b)].n.toLowerCase()} działka z wolnym miejscem`); return; }
       const id = S.nid++, b = { id, t: d.b, l: 1, st: '', p: p.id };
-      payC(S, curOf(d.l), cost); L.bld.push(b); toast(`${def.n} — ${pName(p).toLowerCase()}, ${LOC[d.l].n}`); break;
+      payC(S, curOf(d.l), cost); L.bld.push(b); toast(`${def.n} — ${pName(p).toLowerCase()}, ${LOC[d.l].n}`);
+      if (S.tut && S.tut.step < TUT.length && !S.tut['g' + d.b] && (d.b === 'farma' || d.b === 'mlyn')) { S.tut['g' + d.b] = 1; b.inv = { [d.b === 'farma' ? 'zboze' : 'maka']: d.b === 'farma' ? 4 : 3 }; } // pierwsza partia na start
+      break;
     }
     case 'up': {
       const b = S.L[d.l].bld.find(x => x.id == d.id), c = upCost(b); if (b.l >= LVMAX || !canL(d.l, c)) return;
@@ -2071,32 +2338,49 @@ function act(a, d) {
       if (!ui.shipAt || !canL(ui.shipAt, SHIP_COST)) return;
       payC(S, curOf(ui.shipAt), SHIP_COST); S.ships.push({ id: S.nid++, st: 'idle', at: ui.shipAt, to: null, from: null, g: null, q: 0, eta: 0, dur: 1 }); toast('Nowy statek w porcie'); break;
     case 'pqSet': ui.pl = d.v; ui.pq = ''; break;
-    case 'goSell': { // skrót: pierwszy wolny pojazd w tej miejscowości z formularzem sprzedaży
+    case 'goSell': {
       const v = S.veh.find(x => x.st === 'idle' && x.at === d.l && !x.r && !x.q);
-      if (!v) { toast(`Brak wolnego pojazdu w: ${LOC[d.l].n}`); ui.tab = 'logistyka'; break; }
-      ui.vf[v.id] = { mode: 'carry', g: d.g, job: 'sell', to: d.v || undefined }; ui.tab = 'logistyka';
-      setTimeout(() => { const e = document.querySelector(`[data-a=go][data-id="${v.id}"]`); if (e) e.scrollIntoView({ behavior: 'smooth', block: 'center' }); }, 80); break;
+      ui.tab = 'logistyka';
+      if (!v) { toast(`Brak wolnego pojazdu w: ${LOC[d.l].n}`); break; }
+      const bn = bestNear(d.l, d.g); ui.vf[v.id] = { mode: 'carry', src: d.src, g: d.g, job: 'sell', to: bn ? bn.id : undefined, fid: bn ? bn.f.id : undefined };
+      setTimeout(() => { const e = document.querySelector(`[data-a=go][data-id="${v.id}"]`); if (e) e.scrollIntoView({ behavior: 'smooth', block: 'center' }); }, 120); break;
     }
-    case 'fTo': { const f = ui[d.k][d.id] || (ui[d.k][d.id] = {}); f.to = d.v; f.qs = ''; break; }
+    case 'fTo': { const f = ui[d.k][d.id] || (ui[d.k][d.id] = {}); f.to = d.v; f.qs = ''; delete f.fid; break; }
     case 'rtStop': { const u = (d.k === 'sf' ? S.ships : S.veh).find(x => x.id == d.id); if (u) { delete u.r; u.wait = ''; toast('Trasa zakończona — pojazd dokończy bieżący kurs'); } break; }
+    case 'vFocus': { const u = (d.k === 'sf' ? S.ships : S.veh).find(x => x.id == d.id); if (!u) return; ui.flyV = uPos(u); ui.tab = 'logistyka'; window.scrollTo({ top: 0, behavior: 'smooth' }); break; }
+    case 'ctAcc': {
+      const lid = d.id.split('#')[0], o = offersOf(lid).find(x => x.id === d.id); if (!o) return;
+      S.ct = S.ct || []; if (S.ct.filter(c => c.st === 'on').length >= 5 || S.ct.some(c => c.id === o.id)) return;
+      S.ct.push({ ...o, t0: S.clock, done: {}, st: 'on', ck: 0 }); toast(`Kontrakt: ${o.fn} — ${uq(o.per, o.g)} ${G[o.g].n} dziennie`); break;
+    }
+    case 'ctDrop': {
+      const c = (S.ct || []).find(x => x.id === d.id); if (!c) return;
+      const pen = Math.max(0, c.days - (c.ck || 0)) * c.per * c.price * .1; payC(S, curOf(c.lid), pen); c.st = 'end'; toast(`Kontrakt zerwany — kara ${mL(pen, c.lid)}`); break;
+    }
+    case 'bOff': { const b = S.L[d.l].bld.find(x => x.id == d.id); if (!b) return; b.off = !b.off; b.st = b.off ? 'Zatrzymany' : ''; toast(`${B[b.t].n}: ${b.off ? 'produkcja zatrzymana' : 'produkcja wznowiona'}`);
+      if (!$('modal').hidden && d.p) { save(); plotSheet(d.l, d.p); render(); return; } break; }
+    case 'ordOpen': ordSheet(d.l, d.id); return;
+    case 'ordNew': { const g = d.g, pr = +($('ordP_' + g) || {}).value, q = +($('ordQ_' + g) || {}).value; ordCreate(d.l, d.id, g, pr / rate(curOf(d.l)), q); return; }
+    case 'ordDel': ordCancel(d.id, d.l, d.b); return;
     case 'go': {
-      const ship = d.k === 'sf', u = (ship ? S.ships : S.veh).find(x => x.id == d.id), f = ui[d.k][d.id] || {};
-      if (!u || u.st !== 'idle' || !f.to) return;
-      const to = f.to, own = !!S.L[to], capT = uCap(u, ship), from = u.at; let ok = false, r = null;
-      if (u.q > 0) ok = depart(S, u, ship, to, own && (f.job || 'unload') === 'unload' ? 'unload' : 'sell', u.g, u.q);
-      else if ((f.mode || 'carry') === 'buy' || !Object.keys((S.L[from] || newLoc()).inv).length) {
-        const g = G[f.bg] ? f.bg : 'zboze', bq = clamp(fl(f.bq ?? capT / G[g].w), 0, fl(capT / G[g].w));
-        ok = depart(S, u, ship, to, 'buy', g, 0, bq); if (f.rt && S.L[from] && to !== from) r = { a: from, b: to, g, m: 'buy' };
-      } else {
-        const inv = S.L[from].inv, g = inv[f.g] > 0 ? f.g : Object.keys(inv)[0], mx = fl(Math.min(capT / G[g].w, inv[g])), q = clamp(fl(f.q ?? mx), 0, mx), job = own && f.job === 'unload' ? 'unload' : 'sell';
-        if (q <= 0) return;
-        inv[g] -= q; if (inv[g] < 1e-6) delete inv[g];
-        ok = depart(S, u, ship, to, job, g, q); if (!ok) add(S.L[from], g, q);
-        if (ok && f.rt && job === 'sell' && to !== from) r = { a: from, b: to, g, m: 'sell' };
-      }
-      if (!ok) { toast(`Za mało ${curOf(from)} na kurs`); return; }
-      if (r) u.r = r;
-      delete ui[d.k][d.id]; toast(`${uName(u, ship)} w drodze do: ${LOC[to].n} (${u.dur} h)${r ? ' — trasa' : ''}`); break;
+      const ship = d.k === 'sf', u = (ship ? S.ships : S.veh).find(x => x.id == d.id); if (!u || u.st !== 'idle') return;
+      const p = fPlan(d.k, u); if (!p) return;
+      if (p.job !== 'unload' && !p.fid) { toast('Brak odbiorcy'); return; }
+      if ((p.job !== 'buy' && !(p.q > 0)) || (p.job === 'buy' && !(p.bq > 0))) return;
+      const f = ui[d.k][d.id] || {};
+      fetchRoute(p.a, p.b, ship).then(rt => {
+        advance(S, Date.now()); if (u.st !== 'idle') return;
+        let took = 0;
+        if (p.src && !p.cargo) { took = fl(takeL(S.L[u.at], p.g, p.q, p.src)); if (took <= 0) return; p.q = took; }
+        const from = u.at, fee = depart(S, u, ship, { to: p.to, job: p.job, g: p.g, q: p.q, bq: p.bq, a: p.a, b: p.b, rt, fid: p.fid, sid: p.sid });
+        if (!fee) { if (took) putL(S.L[from], p.g, took, p.src); toast(`Za mało ${curOf(from)} na kurs`); render(); return; }
+        if (f.rt && S.L[from] && p.to !== from && p.job !== 'unload' && !p.cargo) {
+          const src = p.src || (() => { const b = S.L[from].bld.find(b => (B[b.t].in || {})[p.g]); return b ? 'b' + b.id : undefined; })();
+          u.r = { a: from, b: p.to, src, fid: p.fid, g: p.g, m: p.job, aP: p.a, bP: p.b, km: rt.km, s: rt.s }; rtRev(p.a, p.b);
+        }
+        delete ui[d.k][d.id]; save(); toast(`${uName(u, ship)} → ${LOC[p.to].n} · ${durTxt(u.t1 - u.t0)}${u.r ? ' · trasa' : ''}`); render();
+      });
+      return;
     }
     case 'perk': { const c = S.perk[d.k] + 1; if (S.pp < c || S.perk[d.k] >= 10) return; S.pp -= c; S.perk[d.k]++; break; }
     case 'settings': ui.resetArm = false; settings(); return;
@@ -2164,7 +2448,8 @@ document.addEventListener('change', e => {
     const ls = t.value === '' ? BYC[cid].filter(l => l.cc === cc) : BYC[cid].filter(l => l.rg === +t.value);
     ui.rgSel = t.value !== ''; if (ls.length) { const own = ls.find(l => S.L[l.id]); ui.bl = (own || ls[0]).id; fitTo(ls); } }
   else if (k === 'sf' || k === 'vf') { const o = ui[k], f = o[t.dataset.s] || (o[t.dataset.s] = {}), kk = t.dataset.k;
-    f[kk] = kk === 'rt' ? t.checked : (kk === 'q' || kk === 'bq') ? +t.value : t.value; if (kk === 'g') delete f.q; if (kk === 'bg') delete f.bq; if (kk === 'to') delete f.job; }
+    f[kk] = kk === 'rt' ? t.checked : (kk === 'q' || kk === 'bq') ? +t.value : t.value;
+    if (kk === 'g' || kk === 'src') { delete f.q; delete f.fid; } if (kk === 'bg') { delete f.bq; delete f.fid; } if (kk === 'to') { delete f.job; delete f.fid; delete f.sid; } if (kk === 'mode' || kk === 'job') delete f.fid; }
   else if (k === 'vehK') ui.vehK = t.value;
   t.blur(); render(true);
 });
@@ -2360,6 +2645,7 @@ async function onUser(user) {
   if (!user) { if (!S) { au.mode = au.mode === 'wait' ? 'login' : au.mode; renderAuth(); } return; }
   if (S && SAVE_KEY === SAVE + '_' + user.uid) return;
   if (user.email === ADMIN_EMAIL) { S = null; $('wiz').hidden = true; openAdmin(); return; }
+  setTimeout(listenDeliv, 1500);
   au.mode = 'wait'; renderAuth();
   SAVE_KEY = SAVE + '_' + user.uid;
   let local = load(), cloud = null;
@@ -2379,12 +2665,11 @@ function startGame(s) {
   S = s; registerCustom(S); ui.z = {}; ui.animTab = null; ui.cashShown = null; ui.wzLast = null; if (LM) LM.cid = null;
   ui.bc = S.hq; ui.bl = ui.ml = S.hl; ui.tab = 'firma';
   if (S.setup) {
-    const off = Math.min(OFFLINE_MAX_H, Math.floor((Date.now() - (S.last || Date.now())) / HOUR_MS));
-    if (off > 0) {
-      const c0 = totUSD(S);
-      for (let i = 0; i < off; i++) hour(S);
-      setTimeout(() => toast(`Offline minęło ${off} h gry · ${totUSD(S) - c0 >= 0 ? '+' : ''}${mH(totUSD(S) - c0)}`), 400);
-    }
+    const off = (Date.now() - (S.clock || S.last || Date.now())) / HOUR;
+    if (off > .05) {
+      const c0 = totUSD(S); advance(S, Date.now());
+      setTimeout(() => toast(`Pod Twoją nieobecność minęło ${durTxt(off * HOUR)} · ${totUSD(S) - c0 >= 0 ? '+' : ''}${mH(totUSD(S) - c0)}`), 400);
+    } else advance(S, Date.now());
   }
   acc = 0; prev = performance.now();
   save(); renderAuth(); render(true); renderWiz();
@@ -2412,6 +2697,70 @@ function adminAdd(p) {
 function adminDel(id) {
   if (!DB || !isAdmin()) return;
   DB.collection('places').doc(id).set({ del: true }, { merge: true }).then(() => toast('Usunięto')).catch(e => toast('Błąd: ' + (e.code || e.message)));
+}
+// ===== HANDEL MIĘDZY GRACZAMI: zlecenia skupu (escrow) i dostawy =====
+function listenOrders() { if (!DB || ui.ordUnsub) return; ui.ordUnsub = DB.collection('orders').onSnapshot(sn => { ORD = sn.docs.map(d => ({ id: d.id, ...d.data() })); }, () => {}); }
+function listenDeliv() {
+  if (!DB || !USER || ui.delUnsub) return;
+  ui.delUnsub = DB.collection('deliveries').where('to', '==', USER.uid).onSnapshot(sn => { for (const d of sn.docs) recvDeliv(d); }, () => {});
+}
+function recvDeliv(doc) {
+  const x = doc.data(); if (!S || !S.setup || !G[x.g]) return;
+  S.gotDel = S.gotDel || {}; if (S.gotDel[doc.id]) { doc.ref.delete().catch(() => {}); return; }
+  const L = S.L[x.lid];
+  if (L) { const put = putL(L, x.g, x.q, 'b' + x.bid); if (x.q - put > 1e-9) { L.yard = L.yard || {}; L.yard[x.g] = (L.yard[x.g] || 0) + x.q - put; } }
+  S.gotDel[doc.id] = Date.now(); const ks = Object.keys(S.gotDel); if (ks.length > 200) for (const k of ks.slice(0, 50)) delete S.gotDel[k];
+  addNews(S, `Dostawa od gracza ${clean(x.fromName || '?')}: ${uq(x.q, x.g)} ${G[x.g].n} → ${LOC[x.lid] ? LOC[x.lid].n : '?'}`); save();
+  doc.ref.delete().catch(() => {});
+}
+function ordSheet(lid, bid) {
+  const b = S.L[lid].bld.find(x => x.id == bid); if (!b) return; const d = B[b.t], c = curOf(lid);
+  $('modal').hidden = false;
+  $('modal').innerHTML = `<div class="sheet"><div class="row"><b class="grow" style="font-size:17px">👤 Skup od graczy — ${d.n}</b><button class="btn s" data-a="close">Zamknij</button></div>
+    <div class="mut small" style="margin:6px 0 10px">Inni gracze zobaczą Twój zakład w ${esc(LOC[lid].n)} jako odbiorcę i mogą przywieźć surowiec. Pieniądze za całe zlecenie są blokowane z góry; anulowanie zwraca resztę.</div>
+    ${Object.keys(d.in).map(g => { const id = `${USER.uid}_${bid}_${g}`, o = ORD.find(x => x.id === id), base = lBase(S, lid, g);
+      return `<div class="card"><b>${G[g].n}</b> <span class="mut small">· rynkowo ok. ${mL(base, lid)}/${G[g].u}</span>
+        ${o ? `<div class="row" style="margin-top:6px"><div class="grow">Zlecenie: ${mL(o.price, lid)}/${G[g].u} · zostało ${uq(o.left, g)}</div><button class="btn s" data-a="ordDel" data-id="${id}" data-l="${lid}" data-b="${bid}">Anuluj</button></div>`
+          : `<div class="grid2"><div><label class="f">Cena (${c} / ${G[g].u})</label><input id="ordP_${g}" type="number" inputmode="decimal" step="any" value="${Math.round(base * 1.05 * rate(c) * 100) / 100}"></div>
+            <div><label class="f">Ilość (${G[g].u})</label><input id="ordQ_${g}" type="number" inputmode="decimal" step="any" value="${niceQ(capQ(b.t, b.l) * d.in[g] * 24)}"></div></div>
+            <div class="btns"><button class="btn p" data-a="ordNew" data-l="${lid}" data-id="${bid}" data-g="${g}">Wystaw zlecenie</button></div>`}</div>`; }).join('')}</div>`;
+}
+function ordCreate(lid, bid, g, price, q) {
+  if (!USER || !DB || !(price > 0) || !(q > 0)) { toast('Podaj cenę i ilość'); return; }
+  const id = `${USER.uid}_${bid}_${g}`, cost = price * q; if (ORD.some(o => o.id === id)) return;
+  if (!canL(lid, cost)) { toast(`Za mało ${curOf(lid)} — zlecenie blokuje ${mL(cost, lid)}`); return; }
+  const b = S.L[lid].bld.find(x => x.id == bid), [la, lo] = posOf(lid, b);
+  payC(S, curOf(lid), cost); save();
+  DB.collection('orders').doc(id).set({ uid: USER.uid, name: S.name, lid, bid: +bid, bt: b.t, g, price, left: q, la, lo, ts: Date.now() })
+    .then(() => { toast(`Zlecenie wystawione: ${uq(q, g)} ${G[g].n}`); setTimeout(() => ordSheet(lid, bid), 300); })
+    .catch(() => { earnC(S, curOf(lid), cost); save(); toast('Nie udało się wystawić zlecenia (sprawdź reguły Firestore)'); });
+}
+function ordCancel(id, lid, bid) {
+  const ref = DB.collection('orders').doc(id);
+  DB.runTransaction(tx => tx.get(ref).then(d => { if (!d.exists) return 0; const x = d.data(); tx.delete(ref); return x.left * x.price; }))
+    .then(v => { if (v > 0) earnC(S, curOf(lid), v); save(); toast(`Zlecenie anulowane — zwrot ${mL(v || 0, lid)}`); setTimeout(() => ordSheet(lid, bid), 300); render(); })
+    .catch(() => toast('Nie udało się anulować'));
+}
+function pendNPC(p) { const f = firmsOf(p.lid).filter(x => x.gs.includes(p.g)).sort((a, b) => fPrice(S, b, p.g) - fPrice(S, a, p.g))[0];
+  if (f) { const r = sellNPC(S, f, p.g, p.q); addNews(S, `Zakład gracza nie przyjął całości — ${uq(p.q, p.g)} ${G[p.g].n} sprzedano firmie ${f.n} za ${mL(r, p.lid)}`); }
+  else { const L = ensureL(S, p.lid); L.yard = L.yard || {}; L.yard[p.g] = (L.yard[p.g] || 0) + p.q; } }
+function processPend() { // rozliczenie dostaw do zakładów innych graczy
+  if (!S || !S.pend || !S.pend.length || ui.pendBusy) return;
+  const p = S.pend[0];
+  if (!DB || !USER) { S.pend.shift(); pendNPC(p); return; }
+  ui.pendBusy = true;
+  const ref = DB.collection('orders').doc(p.fid.slice(2));
+  DB.runTransaction(tx => tx.get(ref).then(d => {
+    if (!d.exists) return { took: 0 };
+    const x = d.data(), took = Math.min(p.q, x.left);
+    if (took > 0) { tx.update(ref, { left: x.left - took, ts: Date.now() }); tx.set(DB.collection('deliveries').doc(), { to: x.uid, from: USER.uid, fromName: S.name, lid: x.lid, bid: x.bid, g: x.g, q: took, ts: Date.now() }); }
+    return { took, price: x.price, name: x.name };
+  })).then(r => {
+    S.pend.shift();
+    if (r.took > 0) { const rev = r.took * r.price * (1 - taxOf(p.lid)); earnC(S, curOf(p.lid), rev); if (S.tut) S.tut.sold = true; addNews(S, `Gracz ${clean(r.name || '?')} zapłacił ${mL(rev, p.lid)} za ${uq(r.took, p.g)} ${G[p.g].n}`); }
+    if (p.q - (r.took || 0) > 1e-9) pendNPC({ ...p, q: p.q - (r.took || 0) });
+    save(); render(false);
+  }).catch(() => {}).finally(() => { ui.pendBusy = false; });
 }
 function listenBld() {
   if (!DB || ui.bldUnsub) return;
@@ -2560,32 +2909,26 @@ document.addEventListener('change', e => { if (e.target.dataset.in === 'admSort'
 // ================== PĘTLA ==================
 initPts();
 let acc = 0, prev = performance.now(), n = 0;
-function loop() {
-  const now = performance.now(); acc += Math.min(now - prev, 60000); prev = now;
-  if (!S || !S.setup || ui.locked) { acc = 0; return; }
-  let ran = false;
-  while (acc >= HOUR_MS) { acc -= HOUR_MS; hour(S); ran = true; }
-  if (ran) {
-    if (++n % 3 === 0) save();
-    if (ui.seasonEnd) { ui.seasonEnd = false; toast(`Koniec sezonu! Miejsce ${S.lastSeason.pos}, +${S.lastSeason.pp} pkt prestiżu`); }
-    render(false);
-  }
+function loop() { // co sekundę: symulacja do teraz, animacja pojazdów; render co 5 s
+  if (!S || !S.setup || ui.locked) return;
+  const h0 = S.hour; advance(S, Date.now()); n++;
+  animVeh();
+  if (n % 15 === 0) processPend();
+  if (n % 30 === 0) save();
+  if (ui.seasonEnd) { ui.seasonEnd = false; toast(`Koniec sezonu! Miejsce ${S.lastSeason.pos}, +${S.lastSeason.pp} pkt prestiżu`); }
+  if (n % 5 === 0 || S.hour !== h0) render(false); else renderTop();
 }
 document.addEventListener('visibilitychange', () => {
   if (!S) return;
   if (document.hidden) { save(); cloudSave(true); }
-  else if (S.setup) { // po powrocie dolicz czas, który minął w tle
-    const off = Math.min(OFFLINE_MAX_H, Math.floor((Date.now() - S.last) / HOUR_MS));
-    for (let i = 0; i < off; i++) hour(S);
-    acc = 0; prev = performance.now(); save(); render(true);
-  }
+  else if (S.setup) { advance(S, Date.now()); save(); render(true); }
 });
-if (VERSION === 'dev') window.__xyx = { get S() { return S; }, get LM() { return LM; }, parseSave, newState, LOCS, B, G, netH, lvCost, cumCost, vOut, vIn, SC, hour: n => { for (let i = 0; i < n; i++) hour(S); render(true); } };
+if (VERSION === 'dev') window.__xyx = { get S() { return S; }, get LM() { return LM; }, advance, firmsOf, offersOf, stores, fetchRoute, parseSave, newState, LOCS, B, G, netH, lvCost, cumCost, vOut, vIn, SC, hour: n => { for (let i = 0; i < n; i++) hour(S); render(true); } };
 registerCustom(null);
-if (FB) { au.mode = 'wait'; renderAuth(); firebase.auth().onAuthStateChanged(onUser); listenPlaces(); listenBld(); }
+if (FB) { au.mode = 'wait'; renderAuth(); firebase.auth().onAuthStateChanged(onUser); listenPlaces(); listenBld(); listenOrders(); }
 else if (localStorage.getItem('xyx_guest') === '1') startGame(load(SAVE) || newState());
 else renderAuth();
-setInterval(loop, 500);
+setInterval(loop, 1000);
 checkUpdate(false);
 setInterval(() => checkUpdate(false), 5 * 60 * 1000);
 document.addEventListener('visibilitychange', () => { if (document.hidden) return; if (ui.dl && ui.dl.st === 'perm') runUpdate(); else checkUpdate(false); });
