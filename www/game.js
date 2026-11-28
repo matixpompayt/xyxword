@@ -32,6 +32,8 @@ const VERSION = window.XYX_VERSION || 'dev';
 const REPO = 'matixpompayt/xyxword';
 const BRANCH_COST = 2500000, PORT_COST = 15000000, SHIP_COST = 25000000, SHIP_CAP = 40000; // statek: 40 tys. t (masowiec Handysize)
 const GARAGE_COST = 200000;
+// koszty stałe na godzinę (v0.31: wcześniej 10–13× za wysokie — sam magazyn średni poz. 4 zjadał ~1900 $/h)
+const GAR_UPK = 20, PORT_UPK = 800, PLOT_UPK = .00001, MAG_UPK = .00001, VEH_UPK = .0001;
 
 const CONT = [
   { id: 'eu', n: 'Europa',      r: { zboze: 1.2, drewno: 1.1, wegiel: 1.2, ruda: .8,  ropa: .4,  krzem: .7,  miedz: .6 } },
@@ -325,10 +327,10 @@ const B = {
 const LVMAX = 10, T0 = 72;                     // 10 poziomów; budowa zwraca się w ~150 h gry
 const vOut = d => Object.entries(d.out).reduce((a, [g, v]) => a + v * G[g].p, 0);
 const vIn = d => Object.entries(d.in || {}).reduce((a, [g, v]) => a + v * G[g].p, 0);
-const OPEX = id => .5 * Math.max(0, vOut(B[id]) - vIn(B[id]));             // koszt operacyjny na jednostkę (praca, energia)
+const OPEX = id => .38 * Math.max(0, vOut(B[id]) - vIn(B[id]));            // koszt operacyjny na jednostkę (praca, energia); v0.31: było 0,5 — po podatkach i cenach lokalnych zostawało za mało
 const capQ = (id, l) => { const [a, b] = B[id].c; return a * Math.pow(b / a, (Math.min(LVMAX, Math.max(1, l)) - 1) / (LVMAX - 1)); };
 const mainG = id => Object.keys(B[id].out)[0];
-const netH = (id, l) => capQ(id, l) * (vOut(B[id]) - vIn(B[id]) - OPEX(id));
+const netH = (id, l) => capQ(id, l) * (vOut(B[id]) - vIn(B[id])) * .5;  // tylko do cen budowy (bez zmian od v0.25)
 const r2 = v => { const e = Math.pow(10, Math.max(0, Math.floor(Math.log10(Math.max(1, v))) - 1)); return Math.round(v / e) * e; };
 const LVC = {};
 function lvCost(id, l) { // koszt wejścia na poziom l (l = 1 to budowa)
@@ -409,7 +411,7 @@ function newState(o = {}) {
     v: 2, created: Date.now(), setup: !!o.done, ceo: o.ceo || '', name: o.name || 'Moja Firma', color: o.color || COLORS[0], hq, hl, diff,
     w: { [curOfCC(LOC[hl].cc)]: cash * (FX0[curOfCC(LOC[hl].cc)] || 1) }, fx: {}, fxp: {}, hour: 0, last: Date.now(), tep: TCFG.ep,
     c: { [hq]: {} }, lic: { [LOC[hl].cc]: true }, L: { [hl]: newLoc() }, ships: [], veh: [], custom: [], nid: 1, m, ai: mkAI(cash, diff),
-    pl: 1, ec: 2, tr: 1, rt: 2, clock: gNow(), fm: {}, ct: [], pend: [], season: 1, pp: 0, perk: { prod: 0, upk: 0, ship: 0, sell: 0 }, ev: [],
+    pl: 1, ec: 2, tr: 1, rt: 2, ec3: 1, clock: gNow(), fm: {}, ct: [], pend: [], season: 1, pp: 0, perk: { prod: 0, upk: 0, ship: 0, sell: 0 }, ev: [],
     news: [], inc: 0, upk: 0, lastSeason: null, tut: { step: o.tut === false ? 99 : 0, sold: false, rew: false },
   };
   for (const g of GK) m[g].h = Array(8).fill(price(g, s));
@@ -480,6 +482,11 @@ function parseSave(raw) {
         const add = id => { const l = LOC[id]; if (l && l.cc) s.lic[l.cc] = true; };
         add(s.hl); for (const id in s.L) add(id); for (const cid in s.c) add(CAP[cid]);
         s.news = s.news || []; s.news.unshift({ h: s.hour || 0, t: 'Aktualizacja: państwa i regiony! Każde państwo ma licencję, podatki i własne bonusy surowców.' });
+      }
+      if (!s.ec3) { // v0.31: trasy do firm same szukają najlepszego odbiorcy; niższe koszty stałe
+        s.ec3 = 1;
+        for (const u of [...(s.veh || []), ...(s.ships || [])]) if (u.r && u.r.dr && u.r.dr.k === 'f' && !String(u.r.dr.id || '').startsWith('o:')) u.r.auto = true;
+        s.news = s.news || []; s.news.unshift({ h: s.hour || 0, c: s.clock, t: 'Aktualizacja: niższe koszty magazynów, działek, garaży i pojazdów; trasy sprzedają tam, gdzie płacą najwięcej; nowe zestawienie Finanse w zakładce Firma.' });
       }
       return s;
     }
@@ -685,12 +692,12 @@ function sellNPC(s, f, g, q) { // sprzedaż do firmy; najpierw kontrakt (stała 
   if (c) { const di = cDay(s, c), left = Math.max(0, c.per - (c.done[di] || 0)), qc = Math.min(qq, left); if (qc > 0) { rev += qc * c.price; c.done[di] = (c.done[di] || 0) + qc; qq -= qc; } }
   if (qq > 0) { rev += fPrice(s, f, g, qq / 2) * qq; const fm = (s.fm = s.fm || {})[f.id] || (s.fm[f.id] = {}); fm[g] = (fm[g] || 0) + qq; s.m[g].sat += qq * .02; }
   rev *= (1 + .04 * s.perk.sell) * (1 - taxOf(f.lid));
-  earnC(s, curOf(f.lid), rev); if (s.tut) s.tut.sold = true; return rev;
+  earnC(s, curOf(f.lid), rev); fin(s, 'sprz', rev); fq(s, 2, g, q); if (s.tut) s.tut.sold = true; return rev;
 }
 function buyFrom(s, f, g, q) { // zakup od firmy (hurt, marża 15%); zwraca kupioną ilość
   const c = curOf(f.lid), pu = fPrice(s, f, g, -q / 2) * 1.15, can = wal(s, c) / rate(c, s) / pu;
   q = fl(Math.min(q, can)); if (q <= 0) return 0;
-  payC(s, c, pu * q); const fm = (s.fm = s.fm || {})[f.id] || (s.fm[f.id] = {}); fm[g] = (fm[g] || 0) - q; s.m[g].sat -= q * .02; return q;
+  payC(s, c, pu * q); fin(s, 'zak', -pu * q); fq(s, 3, g, q); const fm = (s.fm = s.fm || {})[f.id] || (s.fm[f.id] = {}); fm[g] = (fm[g] || 0) - q; s.m[g].sat -= q * .02; return q;
 }
 // ===== KONTRAKTY =====
 const DAY = 864e5;
@@ -710,7 +717,7 @@ function ctCheck(s) { // rozliczenie dni kontraktów
     if (c.st !== 'on') continue;
     while ((c.ck || 0) < Math.min(cDay(s, c), c.days)) {
       const d = c.ck || 0, miss = Math.max(0, c.per - (c.done[d] || 0));
-      if (miss > 1e-6) { const pen = miss * c.price * .25; payC(s, curOf(c.lid), pen); addNews(s, `Kontrakt ${c.fn}: brak ${uq(miss, c.g)} ${G[c.g].n} — kara ${mL(pen, c.lid)}`); }
+      if (miss > 1e-6) { const pen = miss * c.price * .25; payC(s, curOf(c.lid), pen); fin(s, 'kary', -pen); addNews(s, `Kontrakt ${c.fn}: brak ${uq(miss, c.g)} ${G[c.g].n} — kara ${mL(pen, c.lid)}`); }
       c.ck = d + 1;
     }
     if ((c.ck || 0) >= c.days) { c.st = 'end'; addNews(s, `Kontrakt zakończony: ${c.fn} (${G[c.g].n})`); }
@@ -722,12 +729,12 @@ function sell(s, lid, g, q) {
   if (q <= 0) return 0;
   const rev = sellPrice(g, q, s) * lpf(lid, g) * T(lid).sell * q * (1 - taxOf(lid));
   s.m[g].sat += q; L.inv[g] -= q; if (L.inv[g] < 1e-6) delete L.inv[g];
-  earnC(s, curOf(lid), rev); if (s.tut) s.tut.sold = true; return rev;
+  earnC(s, curOf(lid), rev); fin(s, 'sprz', rev); fq(s, 2, g, q); if (s.tut) s.tut.sold = true; return rev;
 }
 function buy(s, lid, g, q) {
   const cost = buyPrice(g, q, s) * lpf(lid, g) * q;
   if (q <= 0 || !canC(s, curOf(lid), cost)) return false;
-  payC(s, curOf(lid), cost); s.m[g].sat -= q; add(ensureL(s, lid), g, q); return cost;
+  payC(s, curOf(lid), cost); fin(s, 'zak', -cost); fq(s, 3, g, q); s.m[g].sat -= q; add(ensureL(s, lid), g, q); return cost;
 }
 const taxOf = lid => TIERS[tierOf(LOC[lid].cc)].tax;
 const landOf = lid => Math.round(T(lid).land * TIERS[tierOf(LOC[lid].cc)].land);
@@ -823,7 +830,7 @@ const near = (a, b) => a && b && kmLL(a[0], a[1], b[0], b[1]) < .3;
 function depart(s, u, ship, p) { // wyjazd odcinka; zwraca koszt albo 0, gdy brak pieniędzy
   const T = planTimes(s, u, ship, p), from = p.from || u.at;
   if (!canC(s, curOf(from), T.fee)) return 0;
-  if (T.fee) payC(s, curOf(from), T.fee);
+  if (T.fee) { payC(s, curOf(from), T.fee); fin(s, 'trans', -T.fee); }
   if (T.duty) addNews(s, `Cło ${mL(T.duty, from)}: ${cName(LOC[from].cc)} → ${cName(LOC[p.to].cc)}`);
   const t0 = s.clock;
   Object.assign(u, { st: ship ? 'sail' : 'go', from, to: p.to, a: p.a, b: p.b, rk: rkey(p.a, p.b), km: p.rt.km, g: p.q ? p.g : null, q: p.q || 0,
@@ -849,7 +856,26 @@ function doPick(s, u, ship) { // odbiór w punkcie: swój skład / zakup u firmy
   if (got > 0) { u.g = g; u.q = got; }
   return got;
 }
+function bestDrop(s, u, ship, g, q, a, from) { // trasa „najlepszy odbiorca”: największy zysk na godzinę (przychód − paliwo i kierowca w obie strony)
+  const L0 = LOC[from]; let best = null, bv = -Infinity;
+  for (const id of townsNear(from, ship, 26)) {
+    const l = LOC[id]; if (!l || (ship ? !l.port : l.ld !== L0.ld)) continue;
+    for (const f of buyers(id, g)) {
+      if (f.player && !(f.left > 1e-6)) continue;
+      const b = ship ? [l.la, l.lo] : [f.la, f.lo], kmv = Math.max(.5, kmLL(a[0], a[1], b[0], b[1]) * 1.3), hrs = kmv / (ship ? 37 : 60) * (ship ? 1 : VEH[u.k].sf);
+      const tn = q * G[g].w, v = (revEst(f, g, q, id) - 2 * tripCost(u, ship, from, kmv, hrs, tn)) / (2 * hrs + 2 * loadMin(u, ship, tn) / 60 + .2);
+      if (v > bv) { bv = v; best = f; }
+    }
+  }
+  return best ? { k: 'f', lid: best.lid, id: best.id, la: ship ? LOC[best.lid].la : best.la, lo: ship ? LOC[best.lid].lo : best.lo, g, n: `${best.n} (${LOC[best.lid].n})` } : null;
+}
+function autoDr(s, u, ship) { // przed jazdą z ładunkiem na trasie „auto”: wybierz najlepszego odbiorcę teraz
+  if (!u.r || !u.r.auto || !(u.q > 0) || !u.g) return;
+  const a = u.pos || [LOC[u.at].la, LOC[u.at].lo], d = bestDrop(s, u, ship, u.g, u.q, a, u.at);
+  if (d) { u.dr = d; if (!rtGet(rkey(a, spPos(d)))) fetchRoute(a, spPos(d), ship); }
+}
 function afterPick(s, u, ship) { // po odbiorze: dalej do celu
+  autoDr(s, u, ship);
   if (u.q > 0 && u.dr) { if (!goDrop(s, u, ship, 0)) u.wait = 'brak pieniędzy na kurs'; }
   else if (u.r) u.wait = 'czeka na towar';
   else addNews(s, `${uName(u, ship)}: nie udało się odebrać towaru w ${LOC[u.at].n}`);
@@ -882,11 +908,11 @@ function routeNext(s, u, ship) { // trasa w kółko: odbiór → dostawa → odb
   if (u.st !== 'idle' || (u.pend)) return;
   const want = fl(Math.min(r.want || Infinity, uCap(u, ship) / G[r.g].w));
   u.dr = r.dr;
-  if (u.q > 0 && u.g) { if (!goDrop(s, u, ship, 0)) u.wait = 'brak pieniędzy na kurs'; return; }
+  if (u.q > 0 && u.g) { autoDr(s, u, ship); if (!goDrop(s, u, ship, 0)) u.wait = 'brak pieniędzy na kurs'; return; }
   if (r.pk.k === 'st' && u.at === r.pk.lid && (ship || near(u.pos, spPos(r.pk)))) { // stoi przy swoim składzie
     const L = s.L[r.pk.lid], st = stById(L, r.pk.id), have = st ? (st.inv[r.g] || 0) : invOf(L, r.g), q = fl(Math.min(want, have));
-    if (q <= 0 || (q < want * .5 && s.clock - (u.wt || s.clock) < 2 * HOUR)) { if (u.wait !== 'czeka na towar') u.wt = s.clock; u.wait = 'czeka na towar'; return; }
-    u.g = r.g; u.q = fl(takeL(L, r.g, q, r.pk.id));
+    if (q < want * .5 && !(q >= want * .2 && s.clock - (u.wt || s.clock) >= 3 * HOUR)) { if (u.wait !== 'czeka na towar') u.wt = s.clock; u.wait = 'czeka na towar'; return; } // nie jedzie z resztką towaru
+    u.g = r.g; u.q = fl(takeL(L, r.g, q, r.pk.id)); autoDr(s, u, ship);
     if (!goDrop(s, u, ship, u.q * G[r.g].w)) { putL(L, r.g, u.q, r.pk.id); u.g = null; u.q = 0; u.wait = 'brak pieniędzy na kurs'; }
     return;
   }
@@ -905,6 +931,16 @@ const durTxt = ms => { const m = Math.max(0, Math.round(ms / 6e4)); return m >= 
 function addNews(s, t) { s.news.unshift({ h: s.hour, c: s.clock, t }); s.news.length = Math.min(s.news.length, 40); }
 function tstr(h) { const t = new Date((S && S.clock) || gNow()), d = Math.floor(h / 24) + 1; return `Dzień ${d}, ${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')}`; }
 
+// ===== FINANSE: przychody i koszty wg kategorii (okno 24 h gry) =====
+const FIN = { sprz: 'Sprzedaż towaru', zak: 'Zakup towaru', prod: 'Produkcja (praca, energia)', zakl: 'Utrzymanie zakładów', dz: 'Działki i magazyny',
+  gar: 'Garaże', port: 'Porty', poj: 'Utrzymanie pojazdów', trans: 'Paliwo, kierowcy, cło', kary: 'Kary z kontraktów' };
+function fin(s, k, v) { if (v) { const c = s.fc || (s.fc = {}); c[k] = (c[k] || 0) + v; } }
+function fq(s, i, g, q) { if (q > 0 && G[g]) { const c = s.fc || (s.fc = {}), m = c.q || (c.q = {}), a = m[g] || (m[g] = [0, 0, 0, 0]); a[i] += q; } } // 0 wyprodukowane, 1 zużyte, 2 sprzedane, 3 kupione
+function finSum(s) { // średnio na godzinę z ostatnich (do) 24 h
+  const H = (s.fh || []).length, r = {}, q = {}; if (!H) return { H: 0, r, q, op: 0 };
+  for (const h of s.fh) { for (const k in FIN) r[k] = (r[k] || 0) + (h[k] || 0) / H; for (const g in h.q || {}) { const a = q[g] || (q[g] = [0, 0, 0, 0]); h.q[g].forEach((v, i) => a[i] += v / H); } }
+  return { H, r, q, op: Object.values(r).reduce((a, b) => a + b, 0) };
+}
 // ================== SYMULACJA 1 GODZINY ==================
 function prod(s, dt) { // produkcja i koszty za dt godzin
   const prodM = 1 + .08 * s.perk.prod, upkM = Math.max(.3, 1 - .07 * s.perk.upk); let upk = 0;
@@ -912,7 +948,7 @@ function prod(s, dt) { // produkcja i koszty za dt godzin
     const L = s.L[lid]; let u = 0;
     for (const b of L.bld) {
       const d = B[b.t]; if (!d) continue;
-      u += cumCost(b.t, b.l) * .0002 * upkM * dt;
+      const uz = cumCost(b.t, b.l) * .0002 * upkM * dt; u += uz; fin(s, 'zakl', -uz);
       if (b.off) { b.st = 'Zatrzymany'; continue; }
       const k = capQ(b.t, b.l) * prodM * dt, ox = OPEX(b.t) * capQ(b.t, b.l) * upkM * dt, own = 'b' + b.id;
       let f = 1; const miss = [];
@@ -921,17 +957,17 @@ function prod(s, dt) { // produkcja i koszty za dt godzin
       const ow = Object.entries(d.out).reduce((a, [g, v]) => a + v * G[g].w * locF(s, lid, d, g), 0);
       const room = stores(L).filter(st => st.id === own || st.k === 'm').reduce((a, st) => a + stFreeOf(st), 0);
       if (room < ow * k * f) { f = Math.max(0, room / (ow * k)); if (f <= 1e-4) { b.st = 'Stoi — pełny skład i magazyn'; continue; } miss.push('miejsca w składzie'); }
-      for (const g in d.in || {}) takeL(L, g, d.in[g] * k * f, own);
-      for (const g in d.out) putL(L, g, d.out[g] * k * f * locF(s, lid, d, g), own);
-      u += ox * f;
+      for (const g in d.in || {}) { takeL(L, g, d.in[g] * k * f, own); fq(s, 1, g, d.in[g] * k * f); }
+      for (const g in d.out) { const q = d.out[g] * k * f * locF(s, lid, d, g); putL(L, g, q, own); fq(s, 0, g, q); }
+      u += ox * f; fin(s, 'prod', -ox * f);
       b.st = f < .995 ? `Praca ${Math.round(f * 100)}% — mało: ${miss.join(', ')}` : '';
     }
-    if (L.port) u += 3000 * upkM * dt;
-    if (L.gar) u += 400 * L.gar * upkM * dt;
-    for (const p of plots(L)) u += (plotCost(lid, p.sz) * .0003 * p.lv + (p.mg ? MAGC[p.sz] * .0004 * p.mg : 0)) * upkM * dt;
+    if (L.port) { const x = PORT_UPK * upkM * dt; u += x; fin(s, 'port', -x); }
+    if (L.gar) { const x = GAR_UPK * L.gar * upkM * dt; u += x; fin(s, 'gar', -x); }
+    for (const p of plots(L)) { const x = (plotCost(lid, p.sz) * PLOT_UPK * p.lv + (p.mg ? MAGC[p.sz] * MAG_UPK * p.mg : 0)) * upkM * dt; u += x; fin(s, 'dz', -x); }
     payC(s, curOf(lid), u); upk += u;
   }
-  for (const v of s.veh) { const u = VEH[v.k].cost * .001 * upkM * dt; payC(s, curOf(v.home), u); upk += u; }
+  for (const v of s.veh) { const u = VEH[v.k].cost * VEH_UPK * upkM * dt; payC(s, curOf(v.home), u); upk += u; fin(s, 'poj', -u); }
   s.upkA = (s.upkA || 0) + upk;
 }
 function hourly(s) { // raz na godzinę: rynki, kursy, AI, wydarzenia, kontrakty, sezon
@@ -941,14 +977,15 @@ function hourly(s) { // raz na godzinę: rynki, kursy, AI, wydarzenia, kontrakty
   for (const c in FX0) { if (c === 'USD') continue; const f = s.fx[c] || 1; s.fx[c] = clamp(f * Math.exp((Math.random() + Math.random() + Math.random() - 1.5) * .004) + (1 - f) * .01, .7, 1.35); }
   if (s.hour % 24 === 0) s.fxp = { ...s.fx };
   // firmy odbijają (~4%/h)
-  for (const fid in s.fm || {}) { const fm = s.fm[fid]; for (const g in fm) { fm[g] *= .96; if (Math.abs(fm[g]) < 1e-4) delete fm[g]; } if (!Object.keys(fm).length) delete s.fm[fid]; }
+  for (const fid in s.fm || {}) { const fm = s.fm[fid]; for (const g in fm) { fm[g] *= .94; if (Math.abs(fm[g]) < 1e-4) delete fm[g]; } if (!Object.keys(fm).length) delete s.fm[fid]; }
   if (s.hour % 24 === 0) for (const k in DFC) delete DFC[k];
   for (const g of GK) { const m = s.m[g]; m.sat *= .96; m.d = clamp(m.d + (1 - m.d) * .03 + rnd(-.015, .015), .5, 1.8); }
   for (const a of s.ai) { a.w *= 1 + a.r * rnd(.4, 1.6); if (Math.random() < .3) { const g = pick(GK); s.m[g].sat += SC(g) * rnd(0, .03) * (Math.random() < .3 ? -1 : 1); } }
   s.ev = s.ev.filter(e => e.until > s.hour);
   if (Math.random() < 1 / 30) randomEvent(s);
   if (s.hour % 3 === 0) for (const g of GK) { const h = s.m[g].h; h.push(price(g, s)); if (h.length > 16) h.shift(); }
-  const c = totUSD(s); s.inc = s.inc * .7 + (c - (s.cashH ?? c)) * .3; s.cashH = c;
+  s.fh = s.fh || []; s.fh.push(s.fc || {}); if (s.fh.length > 24) s.fh.shift(); s.fc = {};
+  s.inc = finSum(s).op; // wynik operacyjny /h (bez inwestycji)
   ctCheck(s);
   if (s.hour % SEASON_H === 0) endSeason(s);
 }
@@ -1147,6 +1184,21 @@ function locChips(list, sel, act) {
 }
 const bldCount = () => Object.values(S.L).reduce((a, L) => a + L.bld.length, 0);
 
+function vFinanse() { // skąd zyski i straty: średnio na godzinę z ostatnich 24 h gry
+  const F = finSum(S); if (!F.H) return `<h2>Finanse</h2><div class="card mut small">Zestawienie przychodów i kosztów pojawi się po pierwszej pełnej godzinie gry.</div>`;
+  const rows = Object.entries(FIN).map(([k, n]) => [k, n, F.r[k] || 0]).filter(x => Math.abs(x[2]) >= .5).sort((a, b) => b[2] - a[2]), mx = Math.max(1, ...rows.map(x => Math.abs(x[2])));
+  let h = `<h2>Finanse <span class="mut small" style="font-family:Barlow;font-weight:500">średnio na godzinę, ostatnie ${F.H} h gry</span></h2><div class="card fin">`;
+  h += rows.map(([k, n, v]) => `<div class="fr"><span class="grow">${n}</span><span class="fb"><i class="${v >= 0 ? 'p' : 'n'}" style="width:${Math.abs(v) / mx * 100}%"></i></span><b class="${v >= 0 ? 'pos' : 'neg'}">${v >= 0 ? '+' : ''}${mH(v)}</b></div>`).join('') || '<div class="mut small">Brak ruchu.</div>';
+  h += `<div class="fr tot"><span class="grow">Wynik operacyjny</span><b class="${F.op >= 0 ? 'pos' : 'neg'}">${F.op >= 0 ? '+' : ''}${mH(F.op)}/h</b></div><div class="mut small" style="margin-top:4px">Bez inwestycji (zakup działek, budowa, pojazdy).</div></div>`;
+  // towar, który zalega w składach (produkcja + zakupy większe niż zużycie + sprzedaż)
+  const lag = Object.entries(F.q).map(([g, a]) => [g, a[0] + a[3], a[1] + a[2]]).filter(([g, inp, out]) => inp > 1e-6 && inp - out > inp * .1).sort((a, b) => (b[1] - b[2]) * G[b[0]].p - (a[1] - a[2]) * G[a[0]].p);
+  const fixed = -((F.r.dz || 0) + (F.r.gar || 0) + (F.r.port || 0) + (F.r.poj || 0) + (F.r.zakl || 0));
+  const tips = [];
+  if (lag.length) tips.push(`Towar zalega w składach: ${lag.slice(0, 3).map(([g, i, o]) => `${G[g].n.toLowerCase()} — produkujesz ${uq(i, g)}/h, a sprzedajesz i zużywasz ${uq(o, g)}/h`).join('; ')}. Za produkcję płacisz od razu, więc zatrzymaj część zakładów albo wyślij więcej pojazdów (np. ciężarówkę zamiast dostawczaka).`);
+  if (fixed > (F.r.sprz || 0) * .5 && fixed > 50) tips.push(`Koszty stałe (${mH(fixed)}/h) to ponad połowa sprzedaży. Najwięcej kosztuje: ${[['dz', 'działki i magazyny'], ['gar', 'garaże'], ['port', 'porty'], ['poj', 'pojazdy'], ['zakl', 'zakłady']].sort((a, b) => (F.r[a[0]] || 0) - (F.r[b[0]] || 0))[0][1]}.`);
+  if (tips.length) h += `<div class="card hint">${tips.map(t => `<div class="small" style="margin:2px 0">${t}</div>`).join('')}</div>`;
+  return h;
+}
 function vFirma() {
   const r = ranking(), pos = r.findIndex(x => x.me) + 1;
   const day = Math.floor((S.hour % SEASON_H) / 24) + 1;
@@ -1155,10 +1207,11 @@ function vFirma() {
   if (!lmapOn()) h += mapSvg();
   h += `<div class="kpis">
     <div class="kpi"><span>Wartość firmy</span><b>${mH(worth())}</b></div>
-    <div class="kpi"><span>Przepływ gotówki /h</span><b class="${S.inc >= 0 ? 'pos' : 'neg'}">${mH(S.inc)}</b></div>
+    <div class="kpi"><span>Wynik operacyjny /h</span><b class="${S.inc >= 0 ? 'pos' : 'neg'}">${mH(S.inc)}</b></div>
     <div class="kpi"><span>Koszty utrzymania /h</span><b>${mH(S.upk)}</b></div>
     <div class="kpi"><span>Sezon ${S.season} · dzień ${day}/30</span><b>Miejsce ${pos} / ${r.length}</b></div>
   </div>`;
+  h += vFinanse();
   h += `<h2>Wiadomości</h2><div class="card">${S.news.slice(0, 10).map(n => `<div class="news"><span>D${Math.floor(n.h / 24) + 1}</span>${esc(n.t)}</div>`).join('')}</div>`;
   return h;
 }
@@ -2219,6 +2272,8 @@ function vDispatch() {
       body += `<div class="mut small">${P.T0 ? `Dojazd po towar ${kmTxt(P.r0.km)} · ${durTxt(P.T0.tot * 1e3)}. ` : ''}Jazda ${durTxt(P.T1.drive * 1e3)}${P.T1.ld ? `, załadunek ${durTxt(P.T1.ld * 1e3)}` : ''}, rozładunek ${durTxt(P.T1.end * 1e3)}${P.T1.pk ? `, korki +${durTxt(P.T1.pk * 1e3)}` : ''}.${P.est ? ' Trasa szacunkowa (brak połączenia z serwerem tras).' : ''}</div>`;
       const canRt = P.pick.k !== 'veh' && !sameSp(P.pick, P.drop);
       if (canRt) body += `<label class="chk"><input type="checkbox" data-in="dpRt" ${d.rt ? 'checked' : ''}> Powtarzaj w kółko (trasa)</label>`;
+      const canAuto = canRt && d.rt && P.drop.k === 'f' && !String(P.drop.id).startsWith('o:');
+      if (canAuto) body += `<label class="chk"><input type="checkbox" data-in="dpAuto" ${d.auto !== false ? 'checked' : ''}> Sprzedawaj tam, gdzie w okolicy płacą najwięcej</label><div class="mut small" style="margin:2px 0 0 32px">Gdy jedna firma ma za dużo towaru i obniża cenę, pojazd sam pojedzie do innej.</div>`;
       if (P.buyC && !canL(P.pick.lid, P.buyC)) body += `<div class="warn">Masz za mało ${curOf(P.pick.lid)} na cały zakup — pojazd kupi tyle, na ile starczy. Wymień walutę w kantorze (Rynek).</div>`;
       const ok = P.q > 0 && canL(u.at, P.fee);
       body += `<button class="btn p go" data-a="dpGo" ${ok ? '' : 'disabled'}><span class="tr">${uIc(u, ship)}</span>${!canL(u.at, P.fee) ? `Za mało ${curOf(u.at)} na transport` : canRt && d.rt ? 'Start trasy' : 'Wyślij kurs'}</button>`;
@@ -2241,7 +2296,7 @@ function vCard(u, ship, i) {
     s = `${u.pend ? 'Rozliczenie z graczem…' : u.wait ? esc(u.wait) : 'Wolny'} · ${LOC[u.at].n}`;
     if (u.q) s2 = `Ładunek: ${uq(u.q, u.g)} ${G[u.g].n.toLowerCase()}`;
   }
-  const rt = u.r ? `<div class="route">🔁 ${esc(stripN(u.r.pk))} → ${esc(stripN(u.r.dr))} · ${G[u.r.g].n}<button class="btn s" data-a="rtStop" data-k="${k}" data-id="${u.id}">Zakończ trasę</button></div>` : '';
+  const rt = u.r ? `<div class="route">🔁 ${esc(stripN(u.r.pk))} → ${u.r.auto ? `najlepszy odbiorca${u.dr && u.dr.k === 'f' ? ` (teraz: ${esc(stripN(u.dr))})` : ''}` : esc(stripN(u.r.dr))} · ${G[u.r.g].n}<button class="btn s" data-a="rtStop" data-k="${k}" data-id="${u.id}">Zakończ trasę</button></div>` : '';
   const acts = !mv && !u.pend && !u.r ? `<div class="vacts">${u.q ? `<button class="btn s p" data-a="dpVehLoad" data-id="${u.id}" data-sh="${ship ? 1 : ''}">Zawieź ładunek</button>`
     : `<button class="btn s p" data-a="dpNew" data-v="send" data-id="${u.id}" data-sh="${ship ? 1 : ''}">Wyślij</button><button class="btn s b" data-a="dpNew" data-v="buy" data-id="${u.id}" data-sh="${ship ? 1 : ''}">Zakupy</button>`}</div>` : '';
   return `<div class="vcard ${mv ? 'mv' : ''}" style="--i:${i}"><button class="vic" data-a="vFocus" data-k="${k}" data-id="${u.id}" aria-label="Pokaż na mapie">${uIc(u, ship)}</button>
@@ -2497,7 +2552,7 @@ function dpLaunch() { // wyjazd zaplanowanego kursu
     if (!fee) { putL(L, g, took, P.pick.id); u.g = null; u.q = 0; }
   } else fee = goPick(S, u, ship, P.pick, P.drop, g, want);
   if (!fee) { toast(`Za mało ${curOf(u.at)} na kurs`); render(true); return; }
-  if (ui.dp.rt && P.pick.k !== 'veh') { u.r = { pk: P.pick, dr: P.drop, g, want, rt2: { km: P.r1.km, s: P.r1.s } }; rtRev(P.pp, P.dp); }
+  if (ui.dp.rt && P.pick.k !== 'veh') { u.r = { pk: P.pick, dr: P.drop, g, want, rt2: { km: P.r1.km, s: P.r1.s }, auto: P.drop.k === 'f' && !String(P.drop.id).startsWith('o:') && ui.dp.auto !== false }; rtRev(P.pp, P.dp); }
   ui.dp = null; ui.camT = null; save();
   toast(`${uName(u, ship)} w drodze · ${durTxt(u.t1 - u.t0)}${u.r ? ' · trasa w kółko' : ''}`); render(true);
 }
@@ -2812,7 +2867,7 @@ function act(a, d) {
     }
     case 'ctDrop': {
       const c = (S.ct || []).find(x => x.id === d.id); if (!c) return;
-      const pen = Math.max(0, c.days - (c.ck || 0)) * c.per * c.price * .1; payC(S, curOf(c.lid), pen); c.st = 'end'; toast(`Kontrakt zerwany — kara ${mL(pen, c.lid)}`); break;
+      const pen = Math.max(0, c.days - (c.ck || 0)) * c.per * c.price * .1; payC(S, curOf(c.lid), pen); fin(S, 'kary', -pen); c.st = 'end'; toast(`Kontrakt zerwany — kara ${mL(pen, c.lid)}`); break;
     }
     case 'bOff': { const b = S.L[d.l].bld.find(x => x.id == d.id); if (!b) return; b.off = !b.off; b.st = b.off ? 'Zatrzymany' : ''; toast(`${B[b.t].n}: ${b.off ? 'produkcja zatrzymana' : 'produkcja wznowiona'}`);
       if (!$('modal').hidden && d.p) { save(); plotSheet(d.l, d.p); render(); return; } break; }
@@ -2888,6 +2943,7 @@ document.addEventListener('change', e => {
     ui.rgSel = t.value !== ''; if (ls.length) { const own = ls.find(l => S.L[l.id]); ui.bl = (own || ls[0]).id; fitTo(ls); } }
   else if (k === 'dpQ') { if (ui.dp) ui.dp.q = +t.value; }
   else if (k === 'dpRt') { if (ui.dp) ui.dp.rt = t.checked; }
+  else if (k === 'dpAuto') { if (ui.dp) ui.dp.auto = t.checked; }
   else if (k === 'vehK') ui.vehK = t.value;
   t.blur(); render(true);
 });
@@ -3204,7 +3260,7 @@ function listenPay() {
 function recvPay(doc) {
   const x = doc.data(); if (!S || !S.setup) return;
   S.gotDel = S.gotDel || {}; if (S.gotDel[doc.id]) { doc.ref.delete().catch(() => {}); return; }
-  const lid = LOC[x.lid] ? x.lid : S.hl; earnC(S, curOf(lid), x.amt * (1 - taxOf(lid)));
+  const lid = LOC[x.lid] ? x.lid : S.hl; earnC(S, curOf(lid), x.amt * (1 - taxOf(lid))); fin(S, 'sprz', x.amt * (1 - taxOf(lid))); fq(S, 2, x.g, x.q);
   S.gotDel[doc.id] = Date.now();
   addNews(S, `Gracz ${clean(x.fromName || '?')} odebrał ${uq(x.q, x.g)} ${G[x.g] ? G[x.g].n : x.g} z Twojej oferty — +${mL(x.amt * (1 - taxOf(lid)), lid)}`); save();
   doc.ref.delete().catch(() => {});
@@ -3236,7 +3292,7 @@ function pendOffer(p) { // kupno z oferty gracza przy odbiorze
     const x = d.data(), afford = wal(S, c) / rate(c) / x.price, took = fl(Math.min(p.q, x.left, afford));
     if (took > 0) { tx.update(ref, { left: x.left - took, ts: Date.now() }); tx.set(DB.collection('payments').doc(), { to: x.uid, from: USER.uid, fromName: S.name, lid: x.lid, g: x.g, q: took, amt: took * x.price, ts: Date.now() }); }
     return { took, price: x.price, name: x.name };
-  })).then(r => { S.pend.shift(); if (r.took > 0) payC(S, c, r.took * r.price); done(r.took, r.took > 0 ? `Kupiono od gracza ${clean(r.name || '?')}: ${uq(r.took, p.g)} ${G[p.g].n} za ${mL(r.took * r.price, p.lid)}` : 'Oferta gracza już niedostępna albo brak pieniędzy'); })
+  })).then(r => { S.pend.shift(); if (r.took > 0) { payC(S, c, r.took * r.price); fin(S, 'zak', -r.took * r.price); fq(S, 3, p.g, r.took); } done(r.took, r.took > 0 ? `Kupiono od gracza ${clean(r.name || '?')}: ${uq(r.took, p.g)} ${G[p.g].n} za ${mL(r.took * r.price, p.lid)}` : 'Oferta gracza już niedostępna albo brak pieniędzy'); })
     .catch(() => {}).finally(() => { ui.pendBusy = false; });
 }
 function processPend() { // rozliczenia z innymi graczami
@@ -3253,7 +3309,7 @@ function processPend() { // rozliczenia z innymi graczami
     return { took, price: x.price, name: x.name };
   })).then(r => {
     S.pend.shift();
-    if (r.took > 0) { const rev = r.took * r.price * (1 - taxOf(p.lid)); earnC(S, curOf(p.lid), rev); if (S.tut) S.tut.sold = true; addNews(S, `Gracz ${clean(r.name || '?')} zapłacił ${mL(rev, p.lid)} za ${uq(r.took, p.g)} ${G[p.g].n}`); }
+    if (r.took > 0) { const rev = r.took * r.price * (1 - taxOf(p.lid)); earnC(S, curOf(p.lid), rev); fin(S, 'sprz', rev); fq(S, 2, p.g, r.took); if (S.tut) S.tut.sold = true; addNews(S, `Gracz ${clean(r.name || '?')} zapłacił ${mL(rev, p.lid)} za ${uq(r.took, p.g)} ${G[p.g].n}`); }
     if (p.q - (r.took || 0) > 1e-9) pendNPC({ ...p, q: p.q - (r.took || 0) });
     save(); render(false);
   }).catch(() => {}).finally(() => { ui.pendBusy = false; });
@@ -3460,7 +3516,7 @@ document.addEventListener('visibilitychange', () => {
   if (document.hidden) { save(); cloudSave(true); }
   else if (S.setup) { advance(S, gNow()); save(); render(true); }
 });
-if (VERSION === 'dev') window.__xyx = { get S() { return S; }, get LM() { return LM; }, tc: c => { if (c) TCFG = { ...TC0, ...c }; return TCFG; }, timeSync, gNow, openAdmin, renderAdmin, ADM, advance, firmsOf, offersOf, stores, fetchRoute, parseSave, newState, LOCS, B, G, netH, lvCost, cumCost, vOut, vIn, SC, hour: n => { for (let i = 0; i < n; i++) hour(S); render(true); } };
+if (VERSION === 'dev') window.__xyx = { get S() { return S; }, get LM() { return LM; }, tc: c => { if (c) TCFG = { ...TC0, ...c }; return TCFG; }, timeSync, gNow, openAdmin, renderAdmin, ADM, finSum, capQ, OPEX, lBase, firmsOf, fPrice, taxOf, LD, fDepth, nBuy, popOf, LOC, cpf, distF, advance, firmsOf, offersOf, stores, fetchRoute, parseSave, newState, LOCS, B, G, netH, lvCost, cumCost, vOut, vIn, SC, hour: n => { for (let i = 0; i < n; i++) hour(S); render(true); } };
 registerCustom(null);
 if (FB) { au.mode = 'wait'; renderAuth(); firebase.auth().onAuthStateChanged(onUser); listenPlaces(); listenBld(); listenOrders(); listenOffers(); listenTime(); }
 else if (localStorage.getItem('xyx_guest') === '1') startGame(load(SAVE) || newState());
