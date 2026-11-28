@@ -7,8 +7,8 @@ const SEASON_H = 24 * 30;        // sezon = 30 dni gry
 const OFFLINE_MAX_H = 24 * 10;   // max 10 dni symulacji offline
 const VERSION = window.XYX_VERSION || 'dev';
 const REPO = 'matixpompayt/xyxword';
-const BRANCH_COST = 25000, PORT_COST = 15000, SHIP_COST = 30000, SHIP_CAP = 300;
-const GARAGE_COST = 8000;
+const BRANCH_COST = 2500000, PORT_COST = 15000000, SHIP_COST = 25000000, SHIP_CAP = 40000; // statek: 40 tys. t (masowiec Handysize)
+const GARAGE_COST = 200000;
 
 const CONT = [
   { id: 'eu', n: 'Europa',      r: { zboze: 1.2, drewno: 1.1, wegiel: 1.2, ruda: .8,  ropa: .4,  krzem: .7,  miedz: .6 } },
@@ -62,7 +62,7 @@ const EU = new Set('AT BE BG HR CY CZ DK EE FI FR DE GR HU IE IT LV LT LU MT NL 
 const HI = new Set('AT BE CH CZ DE DK EE ES FI FR GB IE IS IT LU NL NO PT SE SI SK PL HR LT LV GR MT CY HU US CA AU NZ JP KR SG IL AE SA QA KW BH OM UY CL PA TW HK'.split(' '));
 const MID = new Set('RU TR BR AR MX CN MY TH ZA KZ RO BG RS BY BA ME MK AL GE AM AZ MD UA CO PE EC VE DO CR CU JM BW NA GA LY DZ IR IQ JO LB TN MA EG ID PH VN IN MN TM UZ'.split(' '));
 const TIERS = [ // zamożność państwa: licencja, podatek od sprzedaży, mnożnik ceny działek
-  { n: 'bogate', lic: 35000, tax: .15, land: 1.3 }, { n: 'średnio zamożne', lic: 18000, tax: .10, land: 1 }, { n: 'biedne', lic: 8000, tax: .06, land: .7 }];
+  { n: 'bogate', lic: 3500000, tax: .15, land: 1.3 }, { n: 'średnio zamożne', lic: 1800000, tax: .10, land: 1 }, { n: 'biedne', lic: 800000, tax: .06, land: .7 }];
 const tierOf = cc => HI.has(cc) ? 0 : MID.has(cc) ? 1 : 2;
 const DUTY = .06; // cło od wartości towaru przy przekraczaniu granicy (poza UE)
 const RAW = ['zboze', 'drewno', 'wegiel', 'ruda', 'ropa', 'krzem', 'miedz'];
@@ -149,39 +149,48 @@ const canL = (lid, usd) => canC(S, curOf(lid), usd);
 const licCost = cc => Math.round(TIERS[tierOf(cc)].lic * (1 + Math.min(1, (CTRY_N[cc] || 0) / 3000)) / 1000) * 1000;
 const CAP = { eu: 'hamburg', na: 'nowyjork', sa: 'rio', af: 'lagos', as: 'szanghaj', au: 'sydney' };
 const TYPE = {
-  m: { n: 'Miasto', slots: 6, step: 2, maxX: 5, land: 6000, xCost: 15000, raw: 1, fac: 1.15, sell: 1.05,
+  m: { n: 'Miasto', slots: 6, step: 2, maxX: 5, land: 180000, xCost: 1500000, raw: 1, fac: 1.15, sell: 1.05,
        d: 'Drogie działki, dużo małych i mało dużych. Fabryki +15%, sprzedaż +5%.' },
-  w: { n: 'Wieś', slots: 4, step: 1, maxX: 2, land: 1500, xCost: 5000, raw: 1.25, fac: 1, sell: .95,
+  w: { n: 'Wieś', slots: 4, step: 1, maxX: 2, land: 45000, xCost: 500000, raw: 1.25, fac: 1, sell: .95,
        d: 'Tanie działki, dużo średnich i dużych. Farmy i kopalnie +25%, sprzedaż −5%.' },
 };
 const VEH = {
-  van:   { n: 'Dostawczy',     cap: 40,  spd: 90, cost: 9000,  fuel: .35 },
-  truck: { n: 'Ciężarówka',    cap: 160, spd: 75, cost: 28000, fuel: .8 },
-  tir:   { n: 'TIR z naczepą', cap: 400, spd: 70, cost: 70000, fuel: 1.6 },
+  van:   { n: 'Dostawczy',     cap: 1.5, spd: 90, cost: 45000,  fuel: .3 },   // ładowność w tonach
+  truck: { n: 'Ciężarówka',    cap: 12,  spd: 80, cost: 120000, fuel: .6 },
+  tir:   { n: 'TIR z naczepą', cap: 25,  spd: 75, cost: 170000, fuel: .9 },
 };
 const POS = { eu: [52, 24], na: [21, 26], sa: [31, 62], af: [53, 54], as: [77, 30], au: [86, 68] };
 
+// towary: realne jednostki (u), ceny w USD za jednostkę (p, stan ~XI 2026), waga jednostki w tonach (w) — do transportu
 const G = {
-  // surowce roślinne / zwierzęce
-  zboze: { n: 'Zboże', p: 4 }, ziemniaki: { n: 'Ziemniaki', p: 3 }, buraki: { n: 'Buraki cukrowe', p: 3.5 }, rzepak: { n: 'Rzepak', p: 6 },
-  owoce: { n: 'Owoce', p: 6 }, winogrona: { n: 'Winogrona', p: 8 }, chmiel: { n: 'Chmiel', p: 9 }, bawelna: { n: 'Bawełna', p: 7 }, kakao: { n: 'Kakao', p: 12 },
-  drewno: { n: 'Drewno', p: 6 }, kauczuk: { n: 'Kauczuk', p: 13 },
-  wegiel: { n: 'Węgiel', p: 8 }, ruda: { n: 'Ruda żelaza', p: 10 }, ropa: { n: 'Ropa', p: 14 }, gaz: { n: 'Gaz ziemny', p: 9 }, krzem: { n: 'Krzem', p: 12 },
-  miedz: { n: 'Miedź', p: 16 }, boksyt: { n: 'Boksyt', p: 11 }, kamien: { n: 'Kamień', p: 5 }, zloto: { n: 'Złoto', p: 400 },
-  // przetworzone
-  maka: { n: 'Mąka', p: 14 }, deski: { n: 'Deski', p: 18 }, sklejka: { n: 'Sklejka', p: 22 }, stal: { n: 'Stal', p: 60 }, aluminium: { n: 'Aluminium', p: 70 },
-  kable: { n: 'Kable', p: 70 }, plastik: { n: 'Plastik', p: 40 }, paliwo: { n: 'Paliwo', p: 30 }, nawozy: { n: 'Nawozy', p: 26 }, farby: { n: 'Farby', p: 55 },
-  chipy: { n: 'Chipy', p: 150 }, celuloza: { n: 'Celuloza', p: 16 }, papier: { n: 'Papier', p: 40 }, przedza: { n: 'Przędza', p: 20 }, tkanina: { n: 'Tkanina', p: 60 },
-  pasza: { n: 'Pasza', p: 9 }, bydlo: { n: 'Bydło', p: 90 }, mleko: { n: 'Mleko', p: 9 }, swinie: { n: 'Świnie', p: 45 }, drob: { n: 'Drób', p: 16 }, jaja: { n: 'Jaja', p: 3.5 },
-  mieso: { n: 'Mięso', p: 80 }, skory: { n: 'Skóry', p: 20 }, skora: { n: 'Skóra wyprawiona', p: 65 }, cukier: { n: 'Cukier', p: 22 }, olej: { n: 'Olej', p: 40 },
-  // produkty
-  chleb: { n: 'Chleb', p: 38 }, meble: { n: 'Meble', p: 95 }, komputery: { n: 'Komputery', p: 1800 }, auta: { n: 'Samochody', p: 9000 },
-  opony: { n: 'Opony', p: 100 }, opakowania: { n: 'Opakowania', p: 30 }, zabawki: { n: 'Zabawki', p: 120 }, leki: { n: 'Leki', p: 300 },
-  kartony: { n: 'Kartony', p: 60 }, ksiazki: { n: 'Książki', p: 160 }, ubrania: { n: 'Ubrania', p: 140 }, buty: { n: 'Buty', p: 200 }, bizuteria: { n: 'Biżuteria', p: 550 },
-  wedliny: { n: 'Wędliny', p: 170 }, filety: { n: 'Filety drobiowe', p: 45 }, ser: { n: 'Ser', p: 70 }, soki: { n: 'Soki', p: 28 },
-  piwo: { n: 'Piwo', p: 16 }, wino: { n: 'Wino', p: 60 }, wodka: { n: 'Wódka', p: 60 }, czekolada: { n: 'Czekolada', p: 80 }, ciastka: { n: 'Ciastka', p: 60 }, lody: { n: 'Lody', p: 50 },
-  telefony: { n: 'Telefony', p: 900 }, telewizory: { n: 'Telewizory', p: 700 }, agd: { n: 'Sprzęt AGD', p: 560 }, rowery: { n: 'Rowery', p: 350 }, traktory: { n: 'Traktory', p: 9000 },
+  zboze: { n: 'Zboże', u: 't', p: 260, w: 1 }, ziemniaki: { n: 'Ziemniaki', u: 't', p: 200, w: 1 }, buraki: { n: 'Buraki cukrowe', u: 't', p: 40, w: 1 },
+  rzepak: { n: 'Rzepak', u: 't', p: 520, w: 1 }, owoce: { n: 'Owoce', u: 't', p: 600, w: 1 }, winogrona: { n: 'Winogrona', u: 't', p: 700, w: 1 },
+  chmiel: { n: 'Chmiel', u: 't', p: 8000, w: 1 }, bawelna: { n: 'Bawełna', u: 't', p: 1600, w: 1 }, kakao: { n: 'Kakao', u: 't', p: 5400, w: 1 },
+  drewno: { n: 'Drewno', u: 'm³', p: 60, w: .7 }, kauczuk: { n: 'Kauczuk', u: 't', p: 1800, w: 1 },
+  wegiel: { n: 'Węgiel', u: 't', p: 130, w: 1 }, ruda: { n: 'Ruda żelaza', u: 't', p: 92, w: 1 }, ropa: { n: 'Ropa', u: 'bbl', p: 85, w: .136 },
+  gaz: { n: 'Gaz ziemny', u: 'tys. m³', p: 300, w: .75 }, krzem: { n: 'Piasek kwarcowy', u: 't', p: 60, w: 1 }, miedz: { n: 'Miedź', u: 't', p: 12000, w: 1 },
+  boksyt: { n: 'Boksyt', u: 't', p: 70, w: 1 }, kamien: { n: 'Kamień', u: 't', p: 15, w: 1 }, zloto: { n: 'Złoto', u: 'kg', p: 120000, w: .001 },
+  maka: { n: 'Mąka', u: 't', p: 480, w: 1 }, deski: { n: 'Deski', u: 'm³', p: 260, w: .6 }, sklejka: { n: 'Sklejka', u: 'm³', p: 550, w: .6 },
+  stal: { n: 'Stal', u: 't', p: 600, w: 1 }, aluminium: { n: 'Aluminium', u: 't', p: 2650, w: 1 }, kable: { n: 'Kable', u: 't', p: 15000, w: 1 },
+  plastik: { n: 'Plastik', u: 't', p: 1100, w: 1 }, paliwo: { n: 'Paliwo', u: 't', p: 900, w: 1 }, nawozy: { n: 'Nawozy', u: 't', p: 420, w: 1 },
+  farby: { n: 'Farby', u: 't', p: 2500, w: 1 }, chipy: { n: 'Chipy', u: 'tys. szt.', p: 25000, w: .01 }, celuloza: { n: 'Celuloza', u: 't', p: 600, w: 1 },
+  papier: { n: 'Papier', u: 't', p: 900, w: 1 }, przedza: { n: 'Przędza', u: 't', p: 2800, w: 1 }, tkanina: { n: 'Tkanina', u: 't', p: 4500, w: 1 },
+  pasza: { n: 'Pasza', u: 't', p: 310, w: 1 }, bydlo: { n: 'Bydło', u: 'szt.', p: 1600, w: .6 }, mleko: { n: 'Mleko', u: 't', p: 450, w: 1 },
+  swinie: { n: 'Świnie', u: 'szt.', p: 180, w: .11 }, drob: { n: 'Drób', u: 'szt.', p: 2.75, w: .0025 }, jaja: { n: 'Jaja', u: 'tys. szt.', p: 110, w: .065 },
+  mieso: { n: 'Mięso', u: 't', p: 3300, w: 1 }, skory: { n: 'Skóry surowe', u: 'szt.', p: 30, w: .03 }, skora: { n: 'Skóra wyprawiona', u: 'm²', p: 20, w: .0015 },
+  cukier: { n: 'Cukier', u: 't', p: 480, w: 1 }, olej: { n: 'Olej', u: 't', p: 1150, w: 1 },
+  chleb: { n: 'Chleb', u: 't', p: 1400, w: 1 }, meble: { n: 'Meble', u: 'szt.', p: 400, w: .04 }, komputery: { n: 'Komputery', u: 'szt.', p: 700, w: .01 },
+  auta: { n: 'Samochody', u: 'szt.', p: 28000, w: 1.4 }, opony: { n: 'Opony', u: 'szt.', p: 60, w: .01 }, opakowania: { n: 'Opakowania', u: 't', p: 1700, w: 1 },
+  zabawki: { n: 'Zabawki', u: 'tys. szt.', p: 8000, w: .3 }, leki: { n: 'Leki', u: 'tys. opak.', p: 10000, w: .05 }, kartony: { n: 'Kartony', u: 't', p: 1300, w: 1 },
+  ksiazki: { n: 'Książki', u: 'tys. szt.', p: 5000, w: .5 }, ubrania: { n: 'Ubrania', u: 'tys. szt.', p: 6000, w: .3 }, buty: { n: 'Buty', u: 'tys. par', p: 18000, w: .9 },
+  bizuteria: { n: 'Biżuteria', u: 'szt.', p: 1100, w: .0002 }, wedliny: { n: 'Wędliny', u: 't', p: 6500, w: 1 }, filety: { n: 'Mięso drobiowe', u: 't', p: 2800, w: 1 },
+  ser: { n: 'Ser', u: 't', p: 5200, w: 1 }, soki: { n: 'Soki', u: 'tys. l', p: 1300, w: 1.05 }, piwo: { n: 'Piwo', u: 'tys. l', p: 800, w: 1.05 },
+  wino: { n: 'Wino', u: 'tys. l', p: 3000, w: 1.1 }, wodka: { n: 'Wódka', u: 'tys. l', p: 3500, w: 1.1 }, czekolada: { n: 'Czekolada', u: 't', p: 6500, w: 1 },
+  ciastka: { n: 'Ciastka', u: 't', p: 3000, w: 1 }, lody: { n: 'Lody', u: 'tys. l', p: 1500, w: .6 },
+  telefony: { n: 'Telefony', u: 'szt.', p: 450, w: .0005 }, telewizory: { n: 'Telewizory', u: 'szt.', p: 300, w: .02 }, agd: { n: 'Sprzęt AGD', u: 'szt.', p: 350, w: .06 },
+  rowery: { n: 'Rowery', u: 'szt.', p: 250, w: .02 }, traktory: { n: 'Traktory', u: 'szt.', p: 60000, w: 5 },
 };
+const OLDP = {zboze: 4, ziemniaki: 3, buraki: 3.5, rzepak: 6, owoce: 6, winogrona: 8, chmiel: 9, bawelna: 7, kakao: 12, drewno: 6, kauczuk: 13, wegiel: 8, ruda: 10, ropa: 14, gaz: 9, krzem: 12, miedz: 16, boksyt: 11, kamien: 5, zloto: 400, maka: 14, deski: 18, sklejka: 22, stal: 60, aluminium: 70, kable: 70, plastik: 40, paliwo: 30, nawozy: 26, farby: 55, chipy: 150, celuloza: 16, papier: 40, przedza: 20, tkanina: 60, pasza: 9, bydlo: 90, mleko: 9, swinie: 45, drob: 16, jaja: 3.5, mieso: 80, skory: 20, skora: 65, cukier: 22, olej: 40, chleb: 38, meble: 95, komputery: 1800, auta: 9000, opony: 100, opakowania: 30, zabawki: 120, leki: 300, kartony: 60, ksiazki: 160, ubrania: 140, buty: 200, bizuteria: 550, wedliny: 170, filety: 45, ser: 70, soki: 28, piwo: 16, wino: 60, wodka: 60, czekolada: 80, ciastka: 60, lody: 50, telefony: 900, telewizory: 700, agd: 560, rowery: 350, traktory: 9000};
 const GK = Object.keys(G);
 
 // t: 0 surowce, 1 przetwórstwo, 2 produkty końcowe
@@ -194,98 +203,117 @@ const DEP = [
   { id: 'mieso', n: 'Branża mięsna', i: '🥩' }, { id: 'spoz', n: 'Branża spożywcza', i: '🍞' }, { id: 'alko', n: 'Branża alkoholowa', i: '🍺' },
   { id: 'slod', n: 'Branża słodyczy', i: '🍫' }, { id: 'elektr', n: 'Przemysł elektroniczny', i: '💻' }, { id: 'mech', n: 'Przemysł mechaniczny', i: '🚗' },
 ];
+// c: [wydajność na poziomie 1, na poziomie 10] — w jednostkach głównego produktu na godzinę (pierwszy w out);
+// in / out: ilości na 1 jednostkę głównego produktu. Maksima z realnych największych zakładów świata (przybliżone).
 const B = {
-  // Uprawa roślin
-  farma:     { n: 'Farma zboża',          d: 'uprawa', t: 0, cost: 2000,  out: { zboze: 10 } },
-  pole_ziem: { n: 'Pole ziemniaków',      d: 'uprawa', t: 0, cost: 1800,  out: { ziemniaki: 12 } },
-  pole_bur:  { n: 'Plantacja buraków',    d: 'uprawa', t: 0, cost: 2000,  out: { buraki: 12 } },
-  pole_rzep: { n: 'Pole rzepaku',         d: 'uprawa', t: 0, cost: 2600,  out: { rzepak: 8 } },
-  sad:       { n: 'Sad',                  d: 'uprawa', t: 0, cost: 3000,  out: { owoce: 9 } },
-  winnica:   { n: 'Winnica',              d: 'uprawa', t: 0, cost: 4500,  out: { winogrona: 7 } },
-  chmielnik: { n: 'Chmielnik',            d: 'uprawa', t: 0, cost: 4000,  out: { chmiel: 6 } },
-  pl_baw:    { n: 'Plantacja bawełny',    d: 'uprawa', t: 0, cost: 4000,  out: { bawelna: 8 } },
-  pl_kak:    { n: 'Plantacja kakao',      d: 'uprawa', t: 0, cost: 6000,  out: { kakao: 6 } },
+  // Uprawa roślin (plon/ha ÷ 8760 h; max ≈ największe agroholdingi)
+  farma:     { n: 'Farma zboża',           d: 'uprawa', t: 0, c: [1, 500],     out: { zboze: 1 } },
+  pole_ziem: { n: 'Pole ziemniaków',       d: 'uprawa', t: 0, c: [3, 900],     out: { ziemniaki: 1 } },
+  pole_bur:  { n: 'Plantacja buraków',     d: 'uprawa', t: 0, c: [6, 1500],    out: { buraki: 1 } },
+  pole_rzep: { n: 'Pole rzepaku',          d: 'uprawa', t: 0, c: [.4, 120],    out: { rzepak: 1 } },
+  sad:       { n: 'Sad',                   d: 'uprawa', t: 0, c: [1, 300],     out: { owoce: 1 } },
+  winnica:   { n: 'Winnica',               d: 'uprawa', t: 0, c: [.3, 80],     out: { winogrona: 1 } },
+  chmielnik: { n: 'Chmielnik',             d: 'uprawa', t: 0, c: [.03, 10],    out: { chmiel: 1 } },
+  pl_baw:    { n: 'Plantacja bawełny',     d: 'uprawa', t: 0, c: [.1, 60],     out: { bawelna: 1 } },
+  pl_kak:    { n: 'Plantacja kakao',       d: 'uprawa', t: 0, c: [.05, 25],    out: { kakao: 1 } },
   // Wydobycie
-  kamien:    { n: 'Kamieniołom',          d: 'wydob', t: 0, cost: 2500,  out: { kamien: 10 } },
-  kop_weg:   { n: 'Kopalnia węgla',       d: 'wydob', t: 0, cost: 5000,  out: { wegiel: 7 } },
-  kop_rud:   { n: 'Kopalnia rudy',        d: 'wydob', t: 0, cost: 7000,  out: { ruda: 6 } },
-  szyb:      { n: 'Szyb naftowy',         d: 'wydob', t: 0, cost: 12000, out: { ropa: 5 } },
-  szyb_gaz:  { n: 'Odwiert gazu',         d: 'wydob', t: 0, cost: 9000,  out: { gaz: 7 } },
-  kop_krz:   { n: 'Kopalnia krzemu',      d: 'wydob', t: 0, cost: 10000, out: { krzem: 5 } },
-  kop_mie:   { n: 'Kopalnia miedzi',      d: 'wydob', t: 0, cost: 12000, out: { miedz: 4 } },
-  kop_bok:   { n: 'Kopalnia boksytu',     d: 'wydob', t: 0, cost: 10000, out: { boksyt: 6 } },
-  kop_zlo:   { n: 'Kopalnia złota',       d: 'wydob', t: 0, cost: 30000, out: { zloto: .25 } },
+  kamien:    { n: 'Kamieniołom',           d: 'wydob', t: 0, c: [50, 1500],    out: { kamien: 1 } },
+  kop_weg:   { n: 'Kopalnia węgla',        d: 'wydob', t: 0, c: [300, 8500],   out: { wegiel: 1 } },   // North Antelope Rochelle ~76 Mt/rok
+  kop_rud:   { n: 'Kopalnia rudy żelaza',  d: 'wydob', t: 0, c: [1000, 50000], out: { ruda: 1 } },     // Serra Norte ~103 Mt/rok ≈ 11,7 tys. t/h
+  szyb:      { n: 'Pole naftowe',          d: 'wydob', t: 0, c: [100, 160000], out: { ropa: 1 } },     // Ghawar 3,8 mln bbl/dzień
+  szyb_gaz:  { n: 'Złoże gazu',            d: 'wydob', t: 0, c: [10, 3000],    out: { gaz: 1 } },      // Ghawar ~2,5 mld ft³/dzień
+  kop_krz:   { n: 'Kopalnia piasku kwarcowego', d: 'wydob', t: 0, c: [20, 600], out: { krzem: 1 } },
+  kop_mie:   { n: 'Kopalnia miedzi',       d: 'wydob', t: 0, c: [2, 150],      out: { miedz: 1 } },    // Escondida ~1,28 mln t/rok
+  kop_bok:   { n: 'Kopalnia boksytu',      d: 'wydob', t: 0, c: [100, 4000],   out: { boksyt: 1 } },
+  kop_zlo:   { n: 'Kopalnia złota',        d: 'wydob', t: 0, c: [.1, 10],      out: { zloto: 1 } },    // Muruntau ~83 t/rok
   // Leśnictwo
-  las:       { n: 'Wyrąb lasu',           d: 'lesn', t: 0, cost: 3000,  out: { drewno: 8 } },
-  pl_kau:    { n: 'Plantacja kauczuku',   d: 'lesn', t: 0, cost: 6000,  out: { kauczuk: 6 } },
+  las:       { n: 'Wyrąb lasu',            d: 'lesn', t: 0, c: [10, 3000],     out: { drewno: 1 } },
+  pl_kau:    { n: 'Plantacja kauczuku',    d: 'lesn', t: 0, c: [.1, 50],       out: { kauczuk: 1 } },
   // Drzewny
-  tartak:    { n: 'Tartak',               d: 'drzew', t: 1, cost: 8000,  in: { drewno: 8 }, out: { deski: 6 } },
-  sklejka:   { n: 'Wytwórnia sklejki',    d: 'drzew', t: 1, cost: 9000,  in: { drewno: 8 }, out: { sklejka: 5 } },
-  meblarnia: { n: 'Fabryka mebli',        d: 'drzew', t: 2, cost: 20000, in: { deski: 6 }, out: { meble: 2 } },
+  tartak:    { n: 'Tartak',                d: 'drzew', t: 1, c: [2, 130],      in: { drewno: 2 }, out: { deski: 1 } },
+  sklejka:   { n: 'Wytwórnia sklejki',     d: 'drzew', t: 1, c: [1, 60],       in: { drewno: 2.5 }, out: { sklejka: 1 } },
+  meblarnia: { n: 'Fabryka mebli',         d: 'drzew', t: 2, c: [5, 1500],     in: { deski: .3 }, out: { meble: 1 } },
   // Metalurgia
-  huta:      { n: 'Huta stali',           d: 'metal', t: 1, cost: 15000, in: { ruda: 6, wegiel: 6 }, out: { stal: 4 } },
-  huta_al:   { n: 'Huta aluminium',       d: 'metal', t: 1, cost: 16000, in: { boksyt: 6, wegiel: 3 }, out: { aluminium: 3 } },
-  kablownia: { n: 'Fabryka kabli',        d: 'metal', t: 1, cost: 14000, in: { miedz: 4, plastik: 1 }, out: { kable: 3 } },
+  huta:      { n: 'Huta stali',            d: 'metal', t: 1, c: [20, 2500],    in: { ruda: 1.6, wegiel: .8 }, out: { stal: 1 } },   // ~21 mln t/rok
+  huta_al:   { n: 'Huta aluminium',        d: 'metal', t: 1, c: [5, 175],      in: { boksyt: 4.5, wegiel: .6 }, out: { aluminium: 1 } }, // ~1,5 mln t/rok
+  kablownia: { n: 'Fabryka kabli',         d: 'metal', t: 1, c: [1, 40],       in: { miedz: .85, plastik: .2 }, out: { kable: 1 } },
   // Plastikowy
-  rafineria: { n: 'Rafineria (plastik)',  d: 'plast', t: 1, cost: 14000, in: { ropa: 5 }, out: { plastik: 4 } },
-  opakow:    { n: 'Fabryka opakowań',     d: 'plast', t: 2, cost: 12000, in: { plastik: 3 }, out: { opakowania: 6 } },
-  zabawki:   { n: 'Fabryka zabawek',      d: 'plast', t: 2, cost: 18000, in: { plastik: 3, farby: 1 }, out: { zabawki: 2.5 } },
-  opony:     { n: 'Fabryka opon',         d: 'plast', t: 2, cost: 20000, in: { kauczuk: 5, stal: 1 }, out: { opony: 2.5 } },
+  rafineria: { n: 'Zakład petrochemiczny', d: 'plast', t: 1, c: [5, 200],     in: { ropa: 8 }, out: { plastik: 1 } },
+  opakow:    { n: 'Fabryka opakowań',      d: 'plast', t: 2, c: [1, 80],       in: { plastik: 1.05 }, out: { opakowania: 1 } },
+  zabawki:   { n: 'Fabryka zabawek',       d: 'plast', t: 2, c: [.5, 100],     in: { plastik: .3, farby: .02 }, out: { zabawki: 1 } },
+  opony:     { n: 'Fabryka opon',          d: 'plast', t: 2, c: [20, 3000],    in: { kauczuk: .004, stal: .002 }, out: { opony: 1 } },
   // Chemia
-  raf_pal:   { n: 'Rafineria paliw',      d: 'chem', t: 1, cost: 13000, in: { ropa: 5 }, out: { paliwo: 5 } },
-  nawozy:    { n: 'Zakłady azotowe',      d: 'chem', t: 1, cost: 12000, in: { gaz: 6 }, out: { nawozy: 5 } },
-  farby:     { n: 'Fabryka farb',         d: 'chem', t: 1, cost: 13000, in: { ropa: 2, kamien: 3 }, out: { farby: 2 } },
-  leki:      { n: 'Fabryka leków',        d: 'chem', t: 2, cost: 40000, in: { gaz: 3, owoce: 4, opakowania: 1 }, out: { leki: 1 } },
+  raf_pal:   { n: 'Rafineria paliw',       d: 'chem', t: 1, c: [50, 6700],     in: { ropa: 8.7 }, out: { paliwo: 1 } },  // Jamnagar 1,4 mln bbl/dzień
+  nawozy:    { n: 'Zakłady azotowe',       d: 'chem', t: 1, c: [5, 650],       in: { gaz: .55 }, out: { nawozy: 1 } },   // QAFCO 5,6 mln t mocznika/rok
+  farby:     { n: 'Fabryka farb',          d: 'chem', t: 1, c: [1, 60],        in: { ropa: 2, kamien: .5 }, out: { farby: 1 } },
+  leki:      { n: 'Fabryka leków',         d: 'chem', t: 2, c: [.5, 50],       in: { gaz: .2, opakowania: .03 }, out: { leki: 1 } },
   // Celulozowo-papierniczy
-  celuloza:  { n: 'Celulozownia',         d: 'papier', t: 1, cost: 9000,  in: { drewno: 7 }, out: { celuloza: 5 } },
-  papiernia: { n: 'Papiernia',            d: 'papier', t: 1, cost: 11000, in: { celuloza: 5 }, out: { papier: 4 } },
-  kartonow:  { n: 'Kartonownia',          d: 'papier', t: 2, cost: 12000, in: { papier: 4 }, out: { kartony: 4 } },
-  drukarnia: { n: 'Drukarnia',            d: 'papier', t: 2, cost: 18000, in: { papier: 4, farby: 1 }, out: { ksiazki: 2 } },
+  celuloza:  { n: 'Celulozownia',          d: 'papier', t: 1, c: [5, 300],     in: { drewno: 4.2 }, out: { celuloza: 1 } },  // Suzano Cerrado 2,55 mln t/rok
+  papiernia: { n: 'Papiernia',             d: 'papier', t: 1, c: [2, 150],     in: { celuloza: 1.05 }, out: { papier: 1 } },
+  kartonow:  { n: 'Kartonownia',           d: 'papier', t: 2, c: [1, 100],     in: { papier: 1.1 }, out: { kartony: 1 } },
+  drukarnia: { n: 'Drukarnia',             d: 'papier', t: 2, c: [.2, 20],     in: { papier: .5, farby: .01 }, out: { ksiazki: 1 } },
   // Tekstylia
-  przedz:    { n: 'Przędzalnia',          d: 'tekst', t: 1, cost: 9000,  in: { bawelna: 8 }, out: { przedza: 5 } },
-  tkalnia:   { n: 'Tkalnia',              d: 'tekst', t: 1, cost: 12000, in: { przedza: 5 }, out: { tkanina: 3 } },
-  garbarnia: { n: 'Garbarnia',            d: 'tekst', t: 1, cost: 11000, in: { skory: 4 }, out: { skora: 2.5 } },
+  przedz:    { n: 'Przędzalnia',           d: 'tekst', t: 1, c: [.2, 15],      in: { bawelna: 1.15 }, out: { przedza: 1 } },
+  tkalnia:   { n: 'Tkalnia',               d: 'tekst', t: 1, c: [.2, 12],      in: { przedza: 1.05 }, out: { tkanina: 1 } },
+  garbarnia: { n: 'Garbarnia',             d: 'tekst', t: 1, c: [50, 6000],    in: { skory: .25 }, out: { skora: 1 } },
   // Odzież
-  szwalnia:  { n: 'Szwalnia',             d: 'odziez', t: 2, cost: 16000, in: { tkanina: 3 }, out: { ubrania: 2 } },
-  obuwie:    { n: 'Fabryka obuwia',       d: 'odziez', t: 2, cost: 20000, in: { skora: 2, kauczuk: 1 }, out: { buty: 1.2 } },
-  jubiler:   { n: 'Pracownia jubilerska', d: 'odziez', t: 2, cost: 35000, in: { zloto: .2 }, out: { bizuteria: .5 } },
+  szwalnia:  { n: 'Szwalnia',              d: 'odziez', t: 2, c: [.1, 25],     in: { tkanina: .25 }, out: { ubrania: 1 } },
+  obuwie:    { n: 'Fabryka obuwia',        d: 'odziez', t: 2, c: [.05, 15],    in: { skora: 150, kauczuk: .3 }, out: { buty: 1 } },
+  jubiler:   { n: 'Pracownia jubilerska',  d: 'odziez', t: 2, c: [2, 800],     in: { zloto: .005 }, out: { bizuteria: 1 } },
   // Pasze
-  paszarnia: { n: 'Wytwórnia pasz',       d: 'pasza', t: 1, cost: 6000,  in: { zboze: 5, ziemniaki: 4 }, out: { pasza: 9 } },
-  paszarnia2:{ n: 'Mieszalnia pasz rzepakowych', d: 'pasza', t: 1, cost: 8000, in: { rzepak: 4, nawozy: 1 }, out: { pasza: 9 } },
+  paszarnia: { n: 'Wytwórnia pasz',        d: 'pasza', t: 1, c: [2, 150],      in: { zboze: .6, ziemniaki: .3 }, out: { pasza: 1 } },
+  paszarnia2:{ n: 'Mieszalnia pasz rzepakowych', d: 'pasza', t: 1, c: [1, 80], in: { rzepak: .5, nawozy: .02 }, out: { pasza: 1 } },
   // Hodowla
-  obora:     { n: 'Ferma bydła',          d: 'hodowla', t: 1, cost: 12000, in: { pasza: 8 }, out: { bydlo: 1, mleko: 6 } },
-  chlewnia:  { n: 'Chlewnia',             d: 'hodowla', t: 1, cost: 9000,  in: { pasza: 6 }, out: { swinie: 2.5 } },
-  kurnik:    { n: 'Kurnik',               d: 'hodowla', t: 1, cost: 6000,  in: { pasza: 4 }, out: { drob: 3, jaja: 8 } },
+  obora:     { n: 'Ferma bydła mlecznego', d: 'hodowla', t: 1, c: [.5, 60],    in: { pasza: .9 }, out: { mleko: 1, bydlo: .05 } },
+  chlewnia:  { n: 'Chlewnia',              d: 'hodowla', t: 1, c: [2, 250],    in: { pasza: .3 }, out: { swinie: 1 } },   // Muyuan ~2,1 mln świń/rok
+  brojlery:  { n: 'Ferma brojlerów',       d: 'hodowla', t: 1, c: [100, 10000], in: { pasza: .004 }, out: { drob: 1 } },
+  kurnik:    { n: 'Ferma niosek',          d: 'hodowla', t: 1, c: [.2, 120],   in: { pasza: .15 }, out: { jaja: 1, drob: 2 } }, // CP Pinggu ~1 mld jaj/rok
   // Mięsna
-  ubojnia:   { n: 'Ubojnia',              d: 'mieso', t: 1, cost: 14000, in: { bydlo: 1, swinie: 2 }, out: { mieso: 3, skory: 1.5 } },
-  wedliny:   { n: 'Zakład wędliniarski',  d: 'mieso', t: 2, cost: 16000, in: { mieso: 3 }, out: { wedliny: 2 } },
-  drobiarnia:{ n: 'Zakład drobiarski',    d: 'mieso', t: 2, cost: 9000,  in: { drob: 3 }, out: { filety: 2 } },
+  ubojnia:   { n: 'Ubojnia',               d: 'mieso', t: 1, c: [1, 120],      in: { swinie: 9, bydlo: .3 }, out: { mieso: 1, skory: .3 } }, // Tar Heel ~32 tys. świń/dzień
+  wedliny:   { n: 'Zakład wędliniarski',   d: 'mieso', t: 2, c: [.5, 40],      in: { mieso: 1.2 }, out: { wedliny: 1 } },
+  drobiarnia:{ n: 'Zakład drobiarski',     d: 'mieso', t: 2, c: [.5, 60],      in: { drob: 570 }, out: { filety: 1 } },
   // Spożywcza
-  mlyn:      { n: 'Młyn',                 d: 'spoz', t: 1, cost: 7000,  in: { zboze: 10 }, out: { maka: 8 } },
-  cukrownia: { n: 'Cukrownia',            d: 'spoz', t: 1, cost: 9000,  in: { buraki: 12 }, out: { cukier: 4 } },
-  tlocznia:  { n: 'Olejarnia',            d: 'spoz', t: 1, cost: 9000,  in: { rzepak: 8 }, out: { olej: 2.5 } },
-  piekarnia: { n: 'Piekarnia',            d: 'spoz', t: 2, cost: 12000, in: { maka: 8 }, out: { chleb: 6 } },
-  mleczarnia:{ n: 'Mleczarnia',           d: 'spoz', t: 2, cost: 11000, in: { mleko: 10 }, out: { ser: 2.5 } },
-  sokownia:  { n: 'Tłocznia soków',       d: 'spoz', t: 2, cost: 8000,  in: { owoce: 8, opakowania: 1 }, out: { soki: 5 } },
+  mlyn:      { n: 'Młyn',                  d: 'spoz', t: 1, c: [2, 360],       in: { zboze: 1.33 }, out: { maka: 1 } },     // Bogasari ~11,6 tys. t pszenicy/dzień
+  cukrownia: { n: 'Cukrownia',             d: 'spoz', t: 1, c: [2, 130],       in: { buraki: 6.25 }, out: { cukier: 1 } },  // ~18 tys. t buraków/dzień
+  tlocznia:  { n: 'Olejarnia',             d: 'spoz', t: 1, c: [.5, 60],       in: { rzepak: 2.4 }, out: { olej: 1, pasza: 1.4 } },
+  piekarnia: { n: 'Piekarnia',             d: 'spoz', t: 2, c: [.2, 30],       in: { maka: .7 }, out: { chleb: 1 } },
+  mleczarnia:{ n: 'Mleczarnia',            d: 'spoz', t: 2, c: [.1, 25],       in: { mleko: 10 }, out: { ser: 1 } },
+  sokownia:  { n: 'Tłocznia soków',        d: 'spoz', t: 2, c: [.5, 100],      in: { owoce: 1.4, opakowania: .03 }, out: { soki: 1 } },
   // Alkohole
-  browar:    { n: 'Browar',               d: 'alko', t: 2, cost: 14000, in: { zboze: 6, chmiel: 2 }, out: { piwo: 6 } },
-  winiarnia: { n: 'Winiarnia',            d: 'alko', t: 2, cost: 15000, in: { winogrona: 6 }, out: { wino: 2 } },
-  gorzelnia: { n: 'Gorzelnia',            d: 'alko', t: 2, cost: 16000, in: { ziemniaki: 10, zboze: 4 }, out: { wodka: 2 } },
+  browar:    { n: 'Browar',                d: 'alko', t: 2, c: [1, 300],       in: { zboze: .17, chmiel: .0015 }, out: { piwo: 1 } }, // ~24 mln hl/rok
+  winiarnia: { n: 'Winiarnia',             d: 'alko', t: 2, c: [.1, 40],       in: { winogrona: 1.4 }, out: { wino: 1 } },
+  gorzelnia: { n: 'Gorzelnia',             d: 'alko', t: 2, c: [.1, 20],       in: { ziemniaki: 2, zboze: .5 }, out: { wodka: 1 } },
   // Słodycze
-  czekol:    { n: 'Fabryka czekolady',    d: 'slod', t: 2, cost: 18000, in: { kakao: 4, cukier: 2, mleko: 3 }, out: { czekolada: 2.5 } },
-  cukiernia: { n: 'Cukiernia',            d: 'slod', t: 2, cost: 12000, in: { maka: 3, cukier: 2, jaja: 6 }, out: { ciastka: 3 } },
-  lodziarnia:{ n: 'Wytwórnia lodów',      d: 'slod', t: 2, cost: 11000, in: { mleko: 6, cukier: 1, owoce: 2 }, out: { lody: 3 } },
+  czekol:    { n: 'Fabryka czekolady',     d: 'slod', t: 2, c: [.2, 45],       in: { kakao: .4, cukier: .45, mleko: 1 }, out: { czekolada: 1 } }, // Wieze ~1000 t/dzień
+  cukiernia: { n: 'Cukiernia',             d: 'slod', t: 2, c: [.2, 25],       in: { maka: .5, cukier: .3, jaja: 2 }, out: { ciastka: 1 } },
+  lodziarnia:{ n: 'Wytwórnia lodów',       d: 'slod', t: 2, c: [.5, 60],       in: { mleko: .6, cukier: .15, owoce: .1 }, out: { lody: 1 } },
   // Elektronika
-  fab_chip:  { n: 'Fabryka chipów',       d: 'elektr', t: 1, cost: 30000, in: { krzem: 4, miedz: 3 }, out: { chipy: 2 } },
-  fab_pc:    { n: 'Fabryka komputerów',   d: 'elektr', t: 2, cost: 50000, in: { chipy: 2, plastik: 2 }, out: { komputery: .5 } },
-  fab_tel:   { n: 'Fabryka telefonów',    d: 'elektr', t: 2, cost: 45000, in: { chipy: 1, plastik: 1, aluminium: 1 }, out: { telefony: .6 } },
-  fab_tv:    { n: 'Fabryka telewizorów',  d: 'elektr', t: 2, cost: 40000, in: { chipy: 1, plastik: 2, kable: 1 }, out: { telewizory: .7 } },
+  fab_chip:  { n: 'Fabryka chipów',        d: 'elektr', t: 1, c: [.3, 45],     in: { krzem: .02, miedz: .002, gaz: .5 }, out: { chipy: 1 } }, // GigaFab >100 tys. wafli/mies.
+  fab_pc:    { n: 'Fabryka komputerów',    d: 'elektr', t: 2, c: [5, 2000],    in: { chipy: .01, plastik: .005, aluminium: .003 }, out: { komputery: 1 } },
+  fab_tel:   { n: 'Fabryka telefonów',     d: 'elektr', t: 2, c: [50, 21000],  in: { chipy: .008, plastik: .0001, aluminium: .0002 }, out: { telefony: 1 } }, // Zhengzhou ~500 tys./dzień
+  fab_tv:    { n: 'Fabryka telewizorów',   d: 'elektr', t: 2, c: [10, 3000],   in: { chipy: .004, plastik: .008, kable: .001 }, out: { telewizory: 1 } },
   // Mechaniczny
-  fab_agd:   { n: 'Fabryka AGD',          d: 'mech', t: 2, cost: 35000, in: { stal: 3, plastik: 2, kable: 1 }, out: { agd: 1 } },
-  fab_row:   { n: 'Fabryka rowerów',      d: 'mech', t: 2, cost: 22000, in: { stal: 1, aluminium: 2, opony: 1 }, out: { rowery: 1.2 } },
-  fab_trak:  { n: 'Fabryka traktorów',    d: 'mech', t: 2, cost: 90000, in: { stal: 6, opony: 2, paliwo: 2 }, out: { traktory: .12 } },
-  fab_aut:   { n: 'Fabryka samochodów',   d: 'mech', t: 2, cost: 120000, in: { stal: 4, plastik: 3, chipy: 2 }, out: { auta: .2 } },
+  fab_agd:   { n: 'Fabryka AGD',           d: 'mech', t: 2, c: [10, 1500],     in: { stal: .04, plastik: .015, kable: .002 }, out: { agd: 1 } },
+  fab_row:   { n: 'Fabryka rowerów',       d: 'mech', t: 2, c: [5, 1000],      in: { stal: .008, aluminium: .006, opony: .2 }, out: { rowery: 1 } },
+  fab_trak:  { n: 'Fabryka traktorów',     d: 'mech', t: 2, c: [.1, 15],       in: { stal: 4, opony: 4, paliwo: .1 }, out: { traktory: 1 } },
+  fab_aut:   { n: 'Fabryka samochodów',    d: 'mech', t: 2, c: [1, 180],       in: { stal: 1, plastik: .2, chipy: .1, opony: 5 }, out: { auta: 1 } }, // Hyundai Ulsan ~1,5 mln/rok
 };
+// ===== POZIOMY I KOSZTY =====
+const LVMAX = 10, T0 = 150;                     // 10 poziomów; budowa zwraca się w ~150 h gry
+const vOut = d => Object.entries(d.out).reduce((a, [g, v]) => a + v * G[g].p, 0);
+const vIn = d => Object.entries(d.in || {}).reduce((a, [g, v]) => a + v * G[g].p, 0);
+const OPEX = id => .5 * Math.max(0, vOut(B[id]) - vIn(B[id]));             // koszt operacyjny na jednostkę (praca, energia)
+const capQ = (id, l) => { const [a, b] = B[id].c; return a * Math.pow(b / a, (Math.min(LVMAX, Math.max(1, l)) - 1) / (LVMAX - 1)); };
+const mainG = id => Object.keys(B[id].out)[0];
+const netH = (id, l) => capQ(id, l) * (vOut(B[id]) - vIn(B[id]) - OPEX(id));
+const r2 = v => { const e = Math.pow(10, Math.max(0, Math.floor(Math.log10(Math.max(1, v))) - 1)); return Math.round(v / e) * e; };
+const LVC = {};
+function lvCost(id, l) { // koszt wejścia na poziom l (l = 1 to budowa)
+  const k = id + l; if (LVC[k]) return LVC[k];
+  return LVC[k] = l <= 1 ? r2(Math.max(20000, netH(id, 1) * T0)) : r2((netH(id, l) - netH(id, l - 1)) * T0 * (1 + .12 * (l - 1)));
+}
+const cumCost = (id, l) => { let c = 0; for (let i = 1; i <= l; i++) c += lvCost(id, i); return c; };
+
 // gdzie powstaje towar (do przepisów i kategorii)
 B.drukarnia.sz = 1; B.kartonow.sz = 1; // lżejsze zakłady papiernicze na średniej działce
 const MADE = {}; for (const [id, d] of Object.entries(B)) for (const g in d.out) (MADE[g] = MADE[g] || []).push(id);
@@ -308,6 +336,7 @@ const $ = id => document.getElementById(id);
 const rnd = (a, b) => a + Math.random() * (b - a);
 const pick = a => a[Math.floor(Math.random() * a.length)];
 const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
+for (const id in B) B[id].cost = lvCost(id, 1);
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 function fmt(n) {
   const a = Math.abs(n), s = n < 0 ? '−' : '';
@@ -318,7 +347,9 @@ function fmt(n) {
   return s + a.toFixed(a % 1 ? 1 : 0).replace('.', ',');
 }
 const money = n => (n < 0 ? '−$' : '$') + fmt(Math.abs(n));
-const qty = n => n >= 100 ? Math.floor(n).toLocaleString('pl-PL') : (Math.floor(n * 10) / 10).toString().replace('.', ',');
+const qty = n => { const a = Math.abs(n); return a >= 100 ? Math.floor(n).toLocaleString('pl-PL') : (Math.floor(n * (a >= 10 ? 10 : a >= 1 ? 100 : 1000)) / (a >= 10 ? 10 : a >= 1 ? 100 : 1000)).toString().replace('.', ','); };
+const fl = x => Math.floor(x * 1000 + 1e-9) / 1000;
+const uq = (v, g) => `${qty(v)} ${G[g].u}`;
 function kmLL(la1, lo1, la2, lo2) {
   const r = Math.PI / 180;
   const h = Math.sin((la2 - la1) * r / 2) ** 2 + Math.cos(la1 * r) * Math.cos(la2 * r) * Math.sin((lo2 - lo1) * r / 2) ** 2;
@@ -327,18 +358,19 @@ function kmLL(la1, lo1, la2, lo2) {
 function km(a, b) { const A = LOC[a], B = LOC[b]; return kmLL(A.la, A.lo, B.la, B.lo); }
 const norm = t => t.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/ł/g, 'l');
 const popTxt = p => p >= 1e6 ? (p / 1e6).toFixed(1).replace('.', ',') + ' mln' : p >= 1000 ? Math.round(p / 1000) + ' tys.' : String(p);
-const FOUND = { w: 10000, m: 60000 };
+const FOUND = { w: 1000000, m: 6000000 };
 const kmTxt = k => Math.round(k).toLocaleString('pl-PL') + ' km';
-const SC = g => 3000 / Math.sqrt(G[g].p);  // skala nasycenia rynku
+const SCC = {};
+const SC = g => SCC[g] || (SCC[g] = 150 * Math.max(1, ...(MADE[g] || []).map(id => capQ(id, 6) * B[id].out[g]))); // głębokość rynku
 
 // ================== STAN ==================
 let S, ui = { tab: 'firma', bc: 'eu', bl: 'hamburg', ml: 'hamburg', buyG: 'zboze', buyQ: 100, sf: {}, vf: {}, z: {}, resetArm: false, update: null };
 
 const COLORS = ['#e0823f', '#3fcf7f', '#4aa3ff', '#c77dff', '#ff5d8f', '#f5c542'];
 const DIFF = [
-  { n: 'Łatwy', cash: 80000, ai: .8, d: '$80 tys. na start, wolniejsza konkurencja' },
-  { n: 'Normalny', cash: 50000, ai: 1, d: '$50 tys. na start' },
-  { n: 'Trudny', cash: 30000, ai: 1.25, d: '$30 tys. na start, agresywna konkurencja' },
+  { n: 'Łatwy', cash: 8000000, ai: .8, d: '$8 mln na start, wolniejsza konkurencja' },
+  { n: 'Normalny', cash: 5000000, ai: 1, d: '$5 mln na start' },
+  { n: 'Trudny', cash: 3000000, ai: 1.25, d: '$3 mln na start, agresywna konkurencja' },
 ];
 function mkAI(base, diff = 1) {
   const names = [...AI_NAMES].sort(() => Math.random() - .5).slice(0, 7), k = DIFF[diff].ai;
@@ -354,7 +386,7 @@ function newState(o = {}) {
     v: 2, created: Date.now(), setup: !!o.done, ceo: o.ceo || '', name: o.name || 'Moja Firma', color: o.color || COLORS[0], hq, hl, diff,
     w: { [curOfCC(LOC[hl].cc)]: cash * (FX0[curOfCC(LOC[hl].cc)] || 1) }, fx: {}, fxp: {}, hour: 0, last: Date.now(),
     c: { [hq]: {} }, lic: { [LOC[hl].cc]: true }, L: { [hl]: newLoc() }, ships: [], veh: [], custom: [], nid: 1, m, ai: mkAI(cash, diff),
-    pl: 1, season: 1, pp: 0, perk: { prod: 0, upk: 0, ship: 0, sell: 0 }, ev: [],
+    pl: 1, ec: 2, season: 1, pp: 0, perk: { prod: 0, upk: 0, ship: 0, sell: 0 }, ev: [],
     news: [], inc: 0, upk: 0, lastSeason: null, tut: { step: o.tut === false ? 99 : 0, sold: false, rew: false },
   };
   for (const g of GK) m[g].h = Array(8).fill(price(g, s));
@@ -393,6 +425,18 @@ function parseSave(raw) {
         s.news = s.news || []; s.news.unshift({ h: s.hour || 0, t: `Aktualizacja: waluty! Gotówka przeliczona na ${curName(hc)}. Kantor jest w zakładce Rynek.` });
       }
       if (!s.pl) migPlots(s);
+      if (s.ec !== 2) { // zapis sprzed realnych jednostek: pieniądze ×100, towary przeliczone wartością
+        for (const c in s.w) s.w[c] *= 100;
+        const cv = (g, q) => q * (OLDP[g] || G[g].p) * 100 / G[g].p;
+        for (const lid in s.L) { const L = s.L[lid]; for (const g in L.inv) { if (!G[g]) { delete L.inv[g]; continue; } L.inv[g] = cv(g, L.inv[g]); }
+          for (const b of L.bld) b.l = clamp(b.l, 1, LVMAX); }
+        for (const v of [...s.veh, ...s.ships]) if (v.q && v.g && G[v.g]) v.q = cv(v.g, v.q);
+        for (const a of s.ai || []) a.w *= 100;
+        s.inc = (s.inc || 0) * 100; s.upk = (s.upk || 0) * 100;
+        for (const g of GK) s.m[g] = { sat: 0, d: rnd(.9, 1.1), h: Array(8).fill(G[g].p) };
+        s.ec = 2; s.news = s.news || [];
+        s.news.unshift({ h: s.hour || 0, t: 'Aktualizacja: realna ekonomia! Towary w tonach, litrach i sztukach, realne ceny, zakłady z 10 poziomami wydajności. Gotówka ×100.' });
+      }
       if (!s.lic) { // zapis sprzed państw: licencje tam, gdzie gracz już działa, + stolice opłaconych kontynentów
         s.lic = {};
         const add = id => { const l = LOC[id]; if (l && l.cc) s.lic[l.cc] = true; };
@@ -493,8 +537,8 @@ function resF(s, lid, g) { // państwo × region × wydarzenia na kontynencie
 // mnożnik wydajności zakładu w miejscowości (bez poziomu)
 function locF(s, lid, d, g) { const t = T(lid); return d.in ? t.fac : t.raw * resF(s, lid, g); }
 const dutyOf = (a, b, g, q) => { const A = LOC[a].cc, B2 = LOC[b].cc; return !q || !g || A === B2 || (EU.has(A) && EU.has(B2)) ? 0 : Math.round(q * price(g) * DUTY); };
-function bldValue(b) { const d = B[b.t]; return d.cost * (1 + (b.l - 1) * .8) * .6 + (b.land || 0) * .5; }
-function upCost(b) { return Math.round(B[b.t].cost * b.l * .8); }
+function bldValue(b) { return cumCost(b.t, b.l) * .6 + (b.land || 0) * .5; }
+function upCost(b) { return b.l >= LVMAX ? Infinity : lvCost(b.t, b.l + 1); }
 const garUp = L => GARAGE_COST * L.gar;
 const xCost = (L, lid) => T(lid).xCost * (L.x + 1);
 function worth(s = S) {
@@ -514,9 +558,9 @@ function worth(s = S) {
 }
 const spdM = s => 1 + .2 * s.perk.ship;
 function shipHours(s, a, b) { return Math.max(6, Math.round(km(a, b) * 1.3 / (150 * spdM(s)))); }
-function shipFee(a, b, q) { return Math.round(km(a, b) * .6 + q * .5) + 100; }
+function shipFee(a, b, tn) { return Math.round(km(a, b) * tn * .004) + 20000; } // fracht ~0,004 $/t·km + opłaty portowe
 function vehHours(s, k, a, b) { return Math.ceil(km(a, b) * 1.25 / (VEH[k].spd * spdM(s))) + 1; }
-function vehFee(k, a, b) { return Math.round(km(a, b) * 1.25 * VEH[k].fuel) + 20; }
+function vehFee(k, a, b) { return Math.round(km(a, b) * 1.6 * VEH[k].fuel) + 50; }
 const garCap = (s, lid) => (s.L[lid] ? s.L[lid].gar : 0) * 2;
 const garUsed = (s, lid) => s.veh.filter(v => v.home === lid).length;
 function addNews(s, t) { s.news.unshift({ h: s.hour, t }); s.news.length = Math.min(s.news.length, 30); }
@@ -531,25 +575,26 @@ function hour(s) {
   for (const lid in s.L) {
     const L = s.L[lid], cur = curOf(lid); let u = 0;
     for (const b of L.bld) {
-      const d = B[b.t], k = b.l * prodM;
-      u += d.cost * .0012 * b.l * upkM;
+      const d = B[b.t], k = capQ(b.t, b.l) * prodM, ox = OPEX(b.t) * capQ(b.t, b.l) * upkM;
+      u += cumCost(b.t, b.l) * .0002 * upkM;
       if (d.in) {
         let f = 1; const miss = [];
         for (const g in d.in) { const r = (L.inv[g] || 0) / (d.in[g] * k); if (r < 1) miss.push(G[g].n); f = Math.min(f, r); }
         if (f <= .001) { b.st = 'Stoi — brak: ' + miss.join(', '); continue; }
         for (const g in d.in) { L.inv[g] -= d.in[g] * k * f; if (L.inv[g] < 1e-6) delete L.inv[g]; }
         for (const g in d.out) add(L, g, d.out[g] * k * f * locF(s, lid, d, g));
+        u += ox * f;
         b.st = f < .999 ? `Praca ${Math.round(f * 100)}% — mało: ${miss.join(', ')}` : '';
       } else {
         for (const g in d.out) add(L, g, d.out[g] * k * locF(s, lid, d, g));
-        b.st = '';
+        u += ox; b.st = '';
       }
     }
-    if (L.port) u += 30 * upkM;
-    if (L.gar) u += 15 * L.gar * upkM;
+    if (L.port) u += 3000 * upkM;
+    if (L.gar) u += 400 * L.gar * upkM;
     for (const p of plots(L)) u += plotCost(lid, p.sz) * .0003 * p.lv * upkM;
     payC(s, cur, u); upk += u;
-    for (const g in L.auto) if (L.auto[g] && (L.inv[g] || 0) >= 1) sell(s, lid, g, Math.floor(L.inv[g]));
+    for (const g in L.auto) if (L.auto[g] && (L.inv[g] || 0) > 1e-3) sell(s, lid, g, fl(L.inv[g]));
   }
   for (const v of s.veh) { const u = VEH[v.k].cost * .001 * upkM; payC(s, curOf(v.home), u); upk += u; }
   s.upk = upk;
@@ -609,7 +654,7 @@ function endSeason(s) {
   s.pp += pp; s.lastSeason = { season: s.season, pos: pos + 1, pp };
   addNews(s, `Koniec sezonu ${s.season}: miejsce ${pos + 1}. Nagroda: ${pp} pkt prestiżu.`);
   s.season++;
-  s.ai = mkAI(Math.max(50000, worth(s)), s.diff ?? 1);
+  s.ai = mkAI(Math.max(5000000, worth(s)), s.diff ?? 1);
   ui.seasonEnd = true;
 }
 
@@ -625,10 +670,10 @@ const TUT = [
     sel: () => ['[data-a=build][data-b=farma]', '[data-a=dep][data-v=uprawa]', '[data-a=dep][data-v=""]', `.chips [data-a=bl][data-l=${S.hl}]`, '[data-tab=budowa]'], done: () => hasB('farma') },
   { t: 'Poziom działki', d: 'Działka poziomu 1 mieści 1 budynek. Podnieś ją na poziom 2 — zmieści się drugi zakład.',
     sel: () => ['[data-a=pLv]', '[data-tab=budowa]'], done: () => Object.values(S.L).some(L => (L.P || []).some(p => p.lv >= 2)) || hasB('mlyn') },
-  { t: 'Młyn', d: 'Młyn przerabia 10 zboża na 8 mąki, a mąka jest ponad 3× droższa. Tak działają łańcuchy produkcji. Zbuduj Młyn (Branża spożywcza) na tej samej działce.',
+  { t: 'Młyn', d: 'Młyn mieli 1,33 t zboża na 1 t mąki, a mąka jest prawie 2× droższa. Tak działają łańcuchy produkcji. Zbuduj Młyn (Branża spożywcza) na tej samej działce.',
     sel: () => ['[data-a=build][data-b=mlyn]', '[data-a=dep][data-v=spoz]', '[data-a=dep][data-v=""]', `.chips [data-a=bl][data-l=${S.hl}]`, '[data-tab=budowa]'], done: () => hasB('mlyn') },
-  { t: 'Produkcja trwa', d: () => `Zakłady pracują same: 1 godzina gry = 4 s. Każdy ma też koszt utrzymania co godzinę. Poczekaj na mąkę: ${qty(Math.min(5, hqInv('maka')))} / 5.`,
-    done: () => hqInv('maka') >= 5 || S.tut.sold },
+  { t: 'Produkcja trwa', d: () => `Zakłady pracują same: 1 godzina gry = 4 s. Każdy ma też koszt utrzymania co godzinę. Poczekaj na mąkę: ${qty(Math.min(2, hqInv('maka')))} / 2 t.`,
+    done: () => hqInv('maka') >= 2 || S.tut.sold },
   { t: 'Rynek', d: 'Mąka gotowa! Otwórz zakładkę Rynek.', sel: () => ['[data-tab=magazyn]'], done: () => ui.tab === 'magazyn' },
   { t: 'Sprzedaż', d: 'Sprzedaj mąkę przyciskiem „Wszystko”. Im więcej sprzedajesz naraz, tym niższa cena — rynek się nasyca i odbija z czasem.',
     sel: () => ['[data-a=sell][data-g=maka][data-f="1"]', `[data-a=ml][data-l=${S.hl}]`, '[data-tab=magazyn]'], done: () => S.tut.sold },
@@ -639,7 +684,7 @@ const TUT = [
   { t: 'Garaże i ciężarówki', d: 'Każda miejscowość ma własny magazyn. Postaw garaż na działce (mała — dostawczaki, średnia — ciężarówki, duża — TIR-y), kup pojazd lub ciężarówkę i woź zboże ze wsi do młyna w mieście. Zakładka Transport.', next: true, sel: () => ['[data-tab=logistyka]'] },
   { t: 'Porty i statki', d: 'Między kontynentami (i na wyspy, np. Tokio) wozisz towar statkami. Port możesz postawić tylko w miastach nad morzem.', next: true, sel: () => ['[data-tab=logistyka]'] },
   { t: 'Ranking i sezony', d: 'Sezon trwa 30 dni gry, ranking liczy wartość firmy. Za miejsce dostajesz punkty prestiżu na stałe ulepszenia.', next: true, sel: () => ['[data-tab=ranking]'] },
-  { t: 'Gotowe!', d: () => S.tut.rew ? 'Samouczek ukończony. Powodzenia!' : 'Nagroda za ukończenie samouczka: $5 tys. Powodzenia!', next: true, btn: 'Zakończ', fin: true },
+  { t: 'Gotowe!', d: () => S.tut.rew ? 'Samouczek ukończony. Powodzenia!' : `Nagroda za ukończenie samouczka: ${mH(500000)}. Powodzenia!`, next: true, btn: 'Zakończ', fin: true },
 ];
 function renderTut() {
   document.querySelectorAll('.tut-hl').forEach(e => e.classList.remove('tut-hl'));
@@ -743,9 +788,9 @@ function spark(h) {
 }
 function chg(g) { const h = S.m[g].h, a = h[0], b = price(g); return (b - a) / a * 100; }
 function flowTxt(d, k, lid) {
-  const o = Object.entries(d.out).map(([g, v]) => `<em>${qty(v * k * (lid ? locF(S, lid, d, g) : 1))}</em> ${G[g].n}`).join(', ');
+  const o = Object.entries(d.out).map(([g, v]) => `<em>${qty(v * k * (lid ? locF(S, lid, d, g) : 1))}</em> ${G[g].u} ${G[g].n}`).join(', ');
   if (!d.in) return `→ ${o} /h`;
-  return Object.entries(d.in).map(([g, v]) => `${qty(v * k)} ${G[g].n}`).join(' + ') + ` → ${o} /h`;
+  return Object.entries(d.in).map(([g, v]) => `${qty(v * k)} ${G[g].u} ${G[g].n}`).join(' + ') + ` → ${o} /h`;
 }
 const tag = l => `<span class="ltag ${l.t}">${TYPE[l.t].n}</span>`;
 function contChips(sel) {
@@ -1201,7 +1246,7 @@ function bldSheet(p) {
     const d = b && B[b.t];
     $('modal').innerHTML = `<div class="sheet"><div class="row"><span class="dot" style="background:${esc(S.color)}"></span><b class="grow" style="font-size:17px">${b ? d.n + ' · poz. ' + b.l : 'Garaż · poz. ' + L.gar}</b><button class="btn s" data-a="close">Zamknij</button></div>
       <div class="mut small" style="margin:4px 0 8px">Twoja firma · ${flag(l.cc)} ${esc(l.n)}</div>
-      ${b ? `<div class="card"><div class="flow">${flowTxt(d, b.l * (1 + .08 * S.perk.prod), p.lid)}</div>${b.st ? `<div class="warn">${esc(b.st)}</div>` : ''}</div>` : `<div class="card">${garUsed(S, p.lid)}/${garCap(S, p.lid)} pojazdów</div>`}
+      ${b ? `<div class="card"><div class="flow">${flowTxt(d, capQ(b.t, b.l) * (1 + .08 * S.perk.prod), p.lid)}</div>${b.st ? `<div class="warn">${esc(b.st)}</div>` : ''}</div>` : `<div class="card">${garUsed(S, p.lid)}/${garCap(S, p.lid)} pojazdów</div>`}
       <div class="btns"><button class="btn p" data-a="bMove" data-l="${p.lid}" data-id="${p.bid}">Przenieś na mapie</button><button class="btn" data-a="bGo" data-l="${p.lid}">Pokaż w Budowie</button></div></div>`;
   } else {
     const o = OTH.find(x => x.uid === p.uid) || {}, n = (o.items || []).length, l = LOC[p.lid];
@@ -1223,7 +1268,7 @@ function plotSheet(lid, pid) {
     <div class="card">${it.length ? it.map(x => x === 'gar'
         ? `<div class="row pit"><span class="grow">🚚 <b>Garaż</b> poz. ${p.g} <span class="mut small">· ${garUsed(S, lid)}/${garCap(S, lid)} pojazdów · do: ${['dostawczaków', 'ciężarówek', 'TIR-ów'][p.sz]}</span></span>
            <button class="btn s g" data-a="garUp" data-l="${lid}" data-p="${p.id}" ${!canL(lid, garUpP(p)) ? 'disabled' : ''}>+2 miejsca — ${mL(garUpP(p), lid)}</button></div>`
-        : `<div class="row pit"><span class="grow"><b>${B[x.t].n}</b> poz. ${x.l}${x.st ? ` <span class="neg small">${esc(x.st)}</span>` : ''}<div class="flow">${flowTxt(B[x.t], x.l * (1 + .08 * S.perk.prod), lid)}</div></span></div>`).join('')
+        : `<div class="row pit"><span class="grow"><b>${B[x.t].n}</b> poz. ${x.l}${x.st ? ` <span class="neg small">${esc(x.st)}</span>` : ''}<div class="flow">${flowTxt(B[x.t], capQ(x.t, x.l) * (1 + .08 * S.perk.prod), lid)}</div></span></div>`).join('')
       : '<span class="mut">Pusta działka.</span>'}</div>
     <div class="btns">
       ${fr > 0 ? `<button class="btn p" data-a="pBuild" data-l="${lid}" data-p="${p.id}">Buduj tutaj (${fr} wolne)</button>` : ''}
@@ -1398,10 +1443,11 @@ function vBudowa() {
   h += `<h2>Zakłady — ${l.n}</h2>`;
   if (!L.bld.length) h += `<div class="card mut">Brak zakładów. Zbuduj coś poniżej.</div>`;
   for (const b of L.bld) {
-    const d = B[b.t], k = b.l * (1 + .08 * S.perk.prod), uc = upCost(b);
-    h += `<div class="card"><div class="row"><div class="grow"><span class="tier t${d.t}">${TIER[d.t]}</span><span class="bname">${d.n}</span> <span class="mut">poz. ${b.l}</span></div></div>
+    const d = B[b.t], k = capQ(b.t, b.l) * (1 + .08 * S.perk.prod), uc = upCost(b), mg = mainG(b.t);
+    h += `<div class="card"><div class="row"><div class="grow"><span class="tier t${d.t}">${TIER[d.t]}</span><span class="bname">${d.n}</span> <span class="mut">poz. ${b.l}/${LVMAX}</span></div></div>
+      <div class="lvbar"><i style="width:${b.l / LVMAX * 100}%"></i></div>
       <div class="flow">${flowTxt(d, k, lid)}</div>${b.st ? `<div class="warn">${esc(b.st)}</div>` : ''}
-      <div class="btns"><button class="btn s g" data-a="up" data-l="${lid}" data-id="${b.id}" ${!canL(lid, uc) ? 'disabled' : ''}>Ulepsz — ${mL(uc, lid)}</button>
+      <div class="btns">${b.l < LVMAX ? `<button class="btn s g" data-a="up" data-l="${lid}" data-id="${b.id}" ${!canL(lid, uc) ? 'disabled' : ''}>Ulepsz do ${uq(capQ(b.t, b.l + 1), mg)}/h — ${mL(uc, lid)}</button>` : '<span class="pos small" style="align-self:center">Maksymalny poziom</span>'}
       ${b.p ? `<button class="btn s" data-a="pInfo" data-l="${lid}" data-p="${b.p}">Działka</button>` : ''}
       <button class="btn s" data-a="demo" data-l="${lid}" data-id="${b.id}">Sprzedaj za ${mL(bldValue(b), lid)}</button></div></div>`;
   }
@@ -1419,7 +1465,7 @@ function vBudowa() {
     const rb = !d.in ? Object.keys(d.out).map(g => resF(S, lid, g)).reduce((a, b) => Math.max(a, b), 0) : 1, tot = bon * rb;
     h += `<div class="card rise"><div class="row"><div class="grow"><span class="tier t${ti}">${TIER[ti]}</span><span class="bname">${d.n}</span>${Math.abs(tot - 1) > .005 ? ` <span class="${tot > 1 ? 'pos' : 'neg'} small">${tot > 1 ? '+' : '−'}${Math.round(Math.abs(tot - 1) * 100)}%</span>` : ''}</div>
       <button class="btn s p" data-a="build" data-l="${lid}" data-b="${id}" data-p="${tp ? tp.id : ''}" ${!canL(lid, cost) || !tp || !lic ? 'disabled' : ''}>${mL(cost, lid)}</button></div>
-      <div class="flow">${flowTxt(d, 1 + .08 * S.perk.prod, lid)}</div><div class="mut small" style="margin-top:4px"><span class="psz s${r}"></span> ${PSZ[r].n} działka${r < 2 ? ' lub większa' : ''}${tp ? '' : ' — <span class="neg">brak wolnego miejsca</span>'}</div></div>`;
+      <div class="flow">${flowTxt(d, capQ(id, 1) * (1 + .08 * S.perk.prod), lid)}</div><div class="mut small" style="margin-top:4px">Poziomy 1–${LVMAX}: ${uq(d.c[0], mainG(id))} → ${uq(d.c[1], mainG(id))} /h · <span class="psz s${r}"></span> ${PSZ[r].n} działka${r < 2 ? ' lub większa' : ''}${tp ? '' : ' — <span class="neg">brak wolnego miejsca</span>'}</div></div>`;
   }
   return h;
 }
@@ -1429,14 +1475,15 @@ function openRecipes() {
   $('modal').hidden = false;
   const q = (ui.rq || '').toLowerCase(), dsel = ui.rdep || '';
   const rows = Object.entries(B).filter(([, d]) => (!dsel || d.d === dsel) && (!q || d.n.toLowerCase().includes(q) || Object.keys({ ...d.in, ...d.out }).some(g => G[g].n.toLowerCase().includes(q))));
-  const gl = (o) => Object.entries(o).map(([g, v]) => `<span class="rg">${qty(v)} ${G[g].n}</span>`).join(' + ');
+  const gl = (o) => Object.entries(o).map(([g, v]) => `<span class="rg">${qty(v)} ${G[g].u} ${G[g].n}</span>`).join(' + ');
   const body = DEP.filter(x => rows.some(([, d]) => d.d === x.id)).map(x => `<h2>${x.i} ${x.n}</h2>` + rows.filter(([, d]) => d.d === x.id).map(([id, d]) =>
-    `<div class="card rcp"><div class="row"><div class="grow"><span class="tier t${d.t}">${TIER[d.t]}</span><span class="bname">${d.n}</span></div><span class="mut small">${mH(d.cost)}</span></div>
-      <div class="flow">${d.in ? gl(d.in) + ' → ' : ''}${gl(d.out)} <span class="mut">/h</span></div></div>`).join('')).join('') || '<div class="card mut">Nic nie znaleziono.</div>';
+    `<div class="card rcp"><div class="row"><div class="grow"><span class="tier t${d.t}">${TIER[d.t]}</span><span class="bname">${d.n}</span></div><span class="mut small">od ${mH(d.cost)}</span></div>
+      <div class="flow">${d.in ? gl(d.in) + ' → ' : ''}${gl(d.out)}</div>
+      <div class="mut small">Wydajność: ${uq(d.c[0], mainG(id))}/h (poz. 1) → ${uq(d.c[1], mainG(id))}/h (poz. ${LVMAX})</div></div>`).join('')).join('') || '<div class="card mut">Nic nie znaleziono.</div>';
   $('modal').innerHTML = `<div class="sheet tall"><div class="row"><b class="grow" style="font-size:17px">☰ Przepisy na produkty</b><button class="btn s" data-a="close">Zamknij</button></div>
     <div class="grid2" style="margin:10px 0"><input id="rq" data-rq="1" placeholder="Szukaj towaru lub zakładu" value="${esc(ui.rq || '')}">
     <select data-in="rdep"><option value="">Wszystkie działy</option>${DEP.map(x => `<option value="${x.id}" ${x.id === dsel ? 'selected' : ''}>${x.i} ${x.n}</option>`).join('')}</select></div>
-    <div class="mut small" style="margin-bottom:6px">Wartości na 1 poziom zakładu, bez bonusów miejscowości. Ceny w ${homeCur()}.</div><div id="rcpBody">${body}</div></div>`;
+    <div class="mut small" style="margin-bottom:6px">Przepis na 1 jednostkę produktu. Ceny w ${homeCur()}.</div><div id="rcpBody">${body}</div></div>`;
   if (q) { const i = $('rq'); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }
 }
 // ===== MAPA CEN =====
@@ -1520,7 +1567,7 @@ function vMagazyn() {
   for (const [g, q] of items) {
     const p = sellPrice(g, Math.max(q, 1)) * lpf(lid, g) * T(lid).sell * (1 - taxOf(lid));
     h += `<div style="padding:8px 0;border-bottom:1px solid var(--line)">
-      <div class="row"><div class="grow"><b>${G[g].n}</b> <span class="mut">· ${mL(price(g) * lpf(lid, g) * T(lid).sell, lid)}/szt.</span></div><div class="q"><b>${qty(q)}</b></div></div>
+      <div class="row"><div class="grow"><b>${G[g].n}</b> <span class="mut">· ${uq(q, g)} · ${mL(price(g) * lpf(lid, g) * T(lid).sell, lid)}/${G[g].u}</span></div><div class="q"><b>${qty(q)}</b></div></div>
       <div class="btns">
         <button class="btn s g" data-a="sell" data-l="${lid}" data-g="${g}" data-f=".5" ${q < 1 ? 'disabled' : ''}>Sprzedaj ½</button>
         <button class="btn s g" data-a="sell" data-l="${lid}" data-g="${g}" data-f="1" ${q < 1 ? 'disabled' : ''}>Wszystko ≈ ${mL(p * Math.floor(q), lid)}</button>
@@ -1528,7 +1575,7 @@ function vMagazyn() {
       </div></div>`;
   }
   h += `</div>`;
-  const bq = Math.max(1, Math.floor(ui.buyQ) || 1), bc = buyPrice(ui.buyG, bq) * lpf(lid, ui.buyG) * bq;
+  const bq = Math.max(.001, fl(+ui.buyQ || 1)), bc = buyPrice(ui.buyG, bq) * lpf(lid, ui.buyG) * bq;
   h += `<h2>Kup na rynku → ${l.n}</h2><div class="card"><div class="grid2">
     <div><label class="f" for="buyG">Towar</label><select id="buyG" data-in="buyG">${DEP.map(x => { const gs = GK.filter(g => GDEP(g) === x.id); return gs.length ? `<optgroup label="${x.n}">${gs.map(g => `<option value="${g}" ${g === ui.buyG ? 'selected' : ''}>${G[g].n}</option>`).join('')}</optgroup>` : ''; }).join('')}</select></div>
     <div><label class="f" for="buyQ">Ilość</label><input id="buyQ" data-in="buyQ" type="number" inputmode="numeric" min="1" value="${bq}"></div></div>
@@ -1546,14 +1593,14 @@ function vMagazyn() {
 function sendForm(kind, u, dests, cap, hrsF, feeF) {
   const st = ui[kind], f = st[u.id] || (st[u.id] = {});
   if (!dests.includes(f.to)) f.to = dests[0];
-  const inv = (S.L[u.at] || newLoc()).inv, goods = Object.keys(inv).filter(g => inv[g] >= 1);
+  const inv = (S.L[u.at] || newLoc()).inv, goods = Object.keys(inv).filter(g => inv[g] > 1e-3);
   if (!f.gs ? !goods.includes(f.g) : (f.g && !goods.includes(f.g))) f.g = f.gs ? '' : (goods[0] || '');
-  const maxQ = f.g ? Math.min(cap, Math.floor(inv[f.g])) : 0;
-  const q = f.g ? clamp(Math.floor(f.q ?? maxQ), 0, maxQ) : 0;
-  const duty = dutyOf(u.at, f.to, f.g, q), hrs = hrsF(f.to), fee = feeF(f.to, q) + duty;
+  const maxQ = f.g ? fl(Math.min(cap / G[f.g].w, inv[f.g])) : 0;
+  const q = f.g ? clamp(fl(f.q ?? maxQ), 0, maxQ) : 0;
+  const duty = dutyOf(u.at, f.to, f.g, q), hrs = hrsF(f.to), fee = feeF(f.to, f.g ? q * G[f.g].w : 0) + duty;
   return `<div class="grid2"><div><label class="f">Cel</label><select data-in="${kind}" data-s="${u.id}" data-k="to">${dests.map(d => `<option value="${d}" ${d === f.to ? 'selected' : ''}>${flag(LOC[d].cc)} ${LOC[d].n} · ${kmTxt(km(u.at, d))}</option>`).join('')}</select></div>
-    <div><label class="f">Ładunek</label><select data-in="${kind}" data-s="${u.id}" data-k="g"><option value="">— pusty —</option>${goods.map(g => `<option value="${g}" ${g === f.g ? 'selected' : ''}>${G[g].n} (${qty(inv[g])})</option>`).join('')}</select></div></div>
-    ${f.g ? `<label class="f">Ilość (max ${maxQ})</label><input type="number" inputmode="numeric" data-in="${kind}" data-s="${u.id}" data-k="q" value="${q}" min="0" max="${maxQ}">` : ''}
+    <div><label class="f">Ładunek</label><select data-in="${kind}" data-s="${u.id}" data-k="g"><option value="">— pusty —</option>${goods.map(g => `<option value="${g}" ${g === f.g ? 'selected' : ''}>${G[g].n} (${uq(inv[g], g)})</option>`).join('')}</select></div></div>
+    ${f.g ? `<label class="f">Ilość (max ${uq(maxQ, f.g)} · ${qty(maxQ * G[f.g].w)} t)</label><input type="number" inputmode="decimal" step="any" data-in="${kind}" data-s="${u.id}" data-k="q" value="${q}" min="0" max="${maxQ}">` : ''}
     <div class="btns"><button class="btn p" data-a="${kind === 'sf' ? 'send' : 'drive'}" data-id="${u.id}" ${!canL(u.at, fee) ? 'disabled' : ''}>Wyślij · ${hrs} h · ${mL(fee, u.at)}</button>${duty ? `<span class="mut small" style="align-self:center">w tym cło ${mL(duty, u.at)} (${cName(LOC[u.at].cc)} → ${cName(LOC[f.to].cc)})</span>` : ''}</div>`;
 }
 const NEAR = {};
@@ -1576,7 +1623,7 @@ function vLogistyka() {
     h += `<div class="card"><div class="grid2">
       <div><label class="f">Garaż</label><select data-in="garAt">${gars.map(l => `<option value="${l}" ${l === ui.garAt ? 'selected' : ''}>${LOC[l].n} (${garUsed(S, l)}/${garCap(S, l)})</option>`).join('')}</select></div>
       <div><label class="f">Pojazd</label><select data-in="vehK">${Object.entries(VEH).map(([k, v]) => `<option value="${k}" ${k === ui.vehK ? 'selected' : ''}>${v.n}${VCLS[k] > gc ? ' 🔒' : ''}</option>`).join('')}</select></div></div>
-      <div class="flow">${vk.n}: ładowność ${vk.cap} szt. · ${vk.spd} km/h · paliwo ${mL(vk.fuel, ui.garAt)}/km</div>
+      <div class="flow">${vk.n}: ładowność ${String(vk.cap).replace('.', ',')} t · ${vk.spd} km/h · paliwo ${mL(vk.fuel, ui.garAt)}/km</div>
       <div class="btns"><button class="btn p" data-a="veh" ${!canL(ui.garAt, vk.cost) || full || big ? 'disabled' : ''}>${big ? `Wymaga garażu na ${['małej', 'średniej', 'dużej'][VCLS[ui.vehK]]} działce` : full ? 'Garaż pełny — rozbuduj' : `Kup — ${mL(vk.cost, ui.garAt)}`}</button></div></div>`;
   }
   for (const v of S.veh) {
@@ -1604,7 +1651,7 @@ function vLogistyka() {
     if (!ports.includes(ui.shipAt)) ui.shipAt = ports[0];
     h += `<div class="card"><div class="row"><div class="grow"><select data-in="shipAt">${ports.map(l => `<option value="${l}" ${l === ui.shipAt ? 'selected' : ''}>Port: ${LOC[l].n}</option>`).join('')}</select></div>
       <button class="btn p" data-a="ship" ${!canL(ui.shipAt, SHIP_COST) ? 'disabled' : ''}>Kup statek — ${mL(SHIP_COST, ui.shipAt)}</button></div>
-      <div class="mut small" style="margin-top:6px">Ładowność ${SHIP_CAP} szt. Port wymagany w obu miejscach.</div></div>`;
+      <div class="mut small" style="margin-top:6px">Ładowność ${SHIP_CAP.toLocaleString('pl-PL')} t. Port wymagany w obu miejscach.</div></div>`;
   } else h += `<div class="card mut">Zbuduj port, żeby kupić statek. Statki wożą towar między portami (inne kontynenty, wyspy).</div>`;
   for (const sh of S.ships) {
     if (sh.st === 'sail') {
@@ -1843,8 +1890,8 @@ function act(a, d) {
       payC(S, curOf(d.l), cost); L.bld.push(b); toast(`${def.n} — ${pName(p).toLowerCase()}, ${LOC[d.l].n}`); break;
     }
     case 'up': {
-      const b = S.L[d.l].bld.find(x => x.id == d.id), c = upCost(b); if (!canL(d.l, c)) return;
-      payC(S, curOf(d.l), c); b.l++; toast(`${B[b.t].n}: poziom ${b.l}`); break;
+      const b = S.L[d.l].bld.find(x => x.id == d.id), c = upCost(b); if (b.l >= LVMAX || !canL(d.l, c)) return;
+      payC(S, curOf(d.l), c); b.l++; toast(`${B[b.t].n}: poziom ${b.l} — ${uq(capQ(b.t, b.l), mainG(b.t))}/h`); break;
     }
     case 'demo': {
       const L = S.L[d.l], i = L.bld.findIndex(x => x.id == d.id); if (i < 0) return;
@@ -1857,13 +1904,13 @@ function act(a, d) {
       toast(`${k.n} w garażu: ${LOC[ui.garAt].n}`); break;
     }
     case 'sell': {
-      const q = Math.floor((S.L[d.l].inv[d.g] || 0) * +d.f); const r = sell(S, d.l, d.g, q);
-      if (r) toast(`Sprzedano ${qty(q)} ${G[d.g].n} za ${mL(r, d.l)}`); break;
+      const q = fl((S.L[d.l].inv[d.g] || 0) * +d.f); const r = sell(S, d.l, d.g, q);
+      if (r) toast(`Sprzedano ${uq(q, d.g)} ${G[d.g].n} za ${mL(r, d.l)}`); break;
     }
     case 'auto': { const L = S.L[d.l]; L.auto[d.g] = !L.auto[d.g]; if (!L.auto[d.g]) delete L.auto[d.g]; break; }
     case 'buy': {
-      const q = Math.max(1, Math.floor(ui.buyQ) || 1), c = buy(S, d.l, ui.buyG, q);
-      toast(c ? `Kupiono ${q} ${G[ui.buyG].n} za ${mL(c, d.l)}` : `Za mało ${curOf(d.l)} — wymień w kantorze`); break;
+      const q = Math.max(.001, fl(+ui.buyQ || 1)), c = buy(S, d.l, ui.buyG, q);
+      toast(c ? `Kupiono ${uq(q, ui.buyG)} ${G[ui.buyG].n} za ${mL(c, d.l)}` : `Za mało ${curOf(d.l)} — wymień w kantorze`); break;
     }
     case 'port': if (!canL(d.l, PORT_COST) || !hasLic(d.l)) return; payC(S, curOf(d.l), PORT_COST); ensureL(S, d.l).port = true; addNews(S, `Port otwarty: ${LOC[d.l].n}`); break;
     case 'ship':
@@ -1873,8 +1920,8 @@ function act(a, d) {
       const isShip = a === 'send', list = isShip ? S.ships : S.veh, u = list.find(x => x.id == d.id);
       const f = (isShip ? ui.sf : ui.vf)[d.id] || {}; if (!u || u.st !== 'idle' || !f.to) return;
       const cap = isShip ? SHIP_CAP : VEH[u.k].cap, inv = ensureL(S, u.at).inv;
-      const q = f.g ? clamp(Math.floor(f.q ?? Math.min(cap, inv[f.g] || 0)), 0, Math.min(cap, Math.floor(inv[f.g] || 0))) : 0;
-      const duty = dutyOf(u.at, f.to, f.g, q), fee = (isShip ? shipFee(u.at, f.to, q) : vehFee(u.k, u.at, f.to)) + duty; if (!canL(u.at, fee)) return;
+      const mx = f.g ? fl(Math.min(cap / G[f.g].w, inv[f.g] || 0)) : 0, q = f.g ? clamp(fl(f.q ?? mx), 0, mx) : 0;
+      const duty = dutyOf(u.at, f.to, f.g, q), fee = (isShip ? shipFee(u.at, f.to, f.g ? q * G[f.g].w : 0) : vehFee(u.k, u.at, f.to)) + duty; if (!canL(u.at, fee)) return;
       if (duty) addNews(S, `Cło ${mL(duty, u.at)}: ${cName(LOC[u.at].cc)} → ${cName(LOC[f.to].cc)}`);
       payC(S, curOf(u.at), fee);
       if (q) { inv[f.g] -= q; if (inv[f.g] < 1e-6) delete inv[f.g]; }
@@ -1887,7 +1934,7 @@ function act(a, d) {
     case 'close': $('modal').hidden = true; return;
     case 'name': { const v = $('nm').value.trim().slice(0, 24), c = $('ceo').value.trim().slice(0, 20); if (v) S.name = v; S.ceo = c; $('modal').hidden = true; break; }
     case 'tutAgain': S.tut.step = 0; ui.tab = 'firma'; $('modal').hidden = true; break;
-    case 'tutNext': { const st = TUT[S.tut.step]; if (st && st.fin && !S.tut.rew) { S.tut.rew = true; earnC(S, homeCur(), 5000); toast(`+${mH(5000)} za samouczek`); } S.tut.step++; break; }
+    case 'tutNext': { const st = TUT[S.tut.step]; if (st && st.fin && !S.tut.rew) { S.tut.rew = true; earnC(S, homeCur(), 500000); toast(`+${mH(500000)} za samouczek`); } S.tut.step++; break; }
     case 'tutSkip': S.tut.step = TUT.length; break;
     case 'wzSet':
       if (d.k === 'hq') { wz.hq = d.v; wz.hl = ''; wz.cc = ''; wz.rg = null; wz.lvl = 'ctry'; wz.q = ''; }
@@ -2363,7 +2410,7 @@ document.addEventListener('visibilitychange', () => {
     acc = 0; prev = performance.now(); save(); render(true);
   }
 });
-if (VERSION === 'dev') window.__xyx = { get S() { return S; }, get LM() { return LM; }, parseSave, newState, LOCS, hour: n => { for (let i = 0; i < n; i++) hour(S); render(true); } };
+if (VERSION === 'dev') window.__xyx = { get S() { return S; }, get LM() { return LM; }, parseSave, newState, LOCS, B, G, netH, lvCost, cumCost, vOut, vIn, SC, hour: n => { for (let i = 0; i < n; i++) hour(S); render(true); } };
 registerCustom(null);
 if (FB) { au.mode = 'wait'; renderAuth(); firebase.auth().onAuthStateChanged(onUser); listenPlaces(); listenBld(); }
 else if (localStorage.getItem('xyx_guest') === '1') startGame(load(SAVE) || newState());
