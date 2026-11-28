@@ -25,7 +25,7 @@ header#top{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:1
 .seasonbar{position:absolute;left:0;right:0;bottom:-1px;height:3px;background:var(--line)}
 .seasonbar i{display:block;height:100%;width:0;background:var(--acc);transition:width .5s}
 main{padding:12px 12px calc(84px + var(--safe-b));max-width:720px;margin:0 auto}
-nav#nav{position:fixed;left:0;right:0;bottom:0;z-index:6;display:grid;grid-template-columns:repeat(5,1fr);background:var(--bg2);border-top:1px solid var(--line);padding-bottom:var(--safe-b)}
+nav#nav{position:fixed;left:0;right:0;bottom:0;z-index:6;display:grid;grid-template-columns:repeat(6,1fr);background:var(--bg2);border-top:1px solid var(--line);padding-bottom:var(--safe-b)}
 nav button{background:none;border:0;padding:8px 0 7px;display:flex;flex-direction:column;align-items:center;gap:2px;font-size:11px;color:var(--mut);min-height:56px}
 nav svg{width:22px;height:22px;fill:currentColor}
 nav button.on{color:var(--acc)}
@@ -310,3 +310,9 @@ header#top{flex-wrap:wrap}
 .firm .fgs{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
 .fg{font-size:12px;border:1px solid var(--line);border-radius:8px;padding:4px 7px;display:inline-flex;align-items:center;gap:5px}
 .fg .satb{width:28px}
+
+.lblrow{display:flex;align-items:flex-end;justify-content:space-between;gap:8px}.lblrow .btn{margin-top:8px}
+.spsel{margin:8px 0;min-height:20px}
+.sprow{display:flex;width:100%;gap:8px;align-items:center;text-align:left;background:none;border:0;border-top:1px solid var(--line);color:inherit;font:inherit;font-size:13px;padding:9px 2px}
+.sprow:first-child{border-top:0}.sprow small{color:var(--mut);white-space:nowrap}
+.offer .n{text-align:right;white-space:nowrap}

@@ -18,6 +18,20 @@ service cloud.firestore {
         (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['left', 'ts'])
          && request.resource.data.left < resource.data.left && request.resource.data.left >= 0));
     }
+    // oferty sprzedaży: właściciel tworzy/usuwa; kupujący mogą tylko zmniejszyć "left" (odbiór)
+    match /offers/{id} {
+      allow read: if true;
+      allow create: if request.auth != null && request.resource.data.uid == request.auth.uid;
+      allow delete: if request.auth != null && resource.data.uid == request.auth.uid;
+      allow update: if request.auth != null && (resource.data.uid == request.auth.uid ||
+        (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['left', 'ts'])
+         && request.resource.data.left < resource.data.left && request.resource.data.left >= 0));
+    }
+    // płatności za odebrany towar: tworzy kupujący, czyta i usuwa sprzedający
+    match /payments/{id} {
+      allow create: if request.auth != null && request.resource.data.from == request.auth.uid;
+      allow read, delete: if request.auth != null && resource.data.to == request.auth.uid;
+    }
     // dostawy: tworzy dostawca, czyta i usuwa odbiorca
     match /deliveries/{id} {
       allow create: if request.auth != null && request.resource.data.from == request.auth.uid;

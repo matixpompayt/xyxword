@@ -386,7 +386,7 @@ function newState(o = {}) {
     v: 2, created: Date.now(), setup: !!o.done, ceo: o.ceo || '', name: o.name || 'Moja Firma', color: o.color || COLORS[0], hq, hl, diff,
     w: { [curOfCC(LOC[hl].cc)]: cash * (FX0[curOfCC(LOC[hl].cc)] || 1) }, fx: {}, fxp: {}, hour: 0, last: Date.now(),
     c: { [hq]: {} }, lic: { [LOC[hl].cc]: true }, L: { [hl]: newLoc() }, ships: [], veh: [], custom: [], nid: 1, m, ai: mkAI(cash, diff),
-    pl: 1, ec: 2, tr: 1, rt: 1, clock: Date.now(), fm: {}, ct: [], pend: [], season: 1, pp: 0, perk: { prod: 0, upk: 0, ship: 0, sell: 0 }, ev: [],
+    pl: 1, ec: 2, tr: 1, rt: 2, clock: Date.now(), fm: {}, ct: [], pend: [], season: 1, pp: 0, perk: { prod: 0, upk: 0, ship: 0, sell: 0 }, ev: [],
     news: [], inc: 0, upk: 0, lastSeason: null, tut: { step: o.tut === false ? 99 : 0, sold: false, rew: false },
   };
   for (const g of GK) m[g].h = Array(8).fill(price(g, s));
@@ -425,6 +425,7 @@ function parseSave(raw) {
         s.news = s.news || []; s.news.unshift({ h: s.hour || 0, t: `Aktualizacja: waluty! Gotówka przeliczona na ${curName(hc)}. Kantor jest w zakładce Rynek.` });
       }
       if (!s.pl) migPlots(s);
+      if (s.rt === 1) { s.rt = 2; for (const u of [...s.veh, ...s.ships]) if (u.r && !u.r.pk) delete u.r; }
       if (!s.tr) { s.tr = 1; s.lm = {}; for (const L of Object.values(s.L)) L.auto = {}; s.news = s.news || []; s.news.unshift({ h: s.hour || 0, t: 'Aktualizacja: magazyny i handel! Zakłady trzymają ~4 h produkcji — postaw magazyn. Sprzedajesz pojazdami w dowolnej miejscowości, każda ma swoją cenę. Auto-sprzedaż zastąpiły trasy.' }); }
       if (s.ec !== 2) { // zapis sprzed realnych jednostek: pieniądze ×100, towary przeliczone wartością
         for (const c in s.w) s.w[c] *= 100;
@@ -786,64 +787,87 @@ function fetchRoute(a, b, ship) {
     const r = { km: rt.distance / 1000, s: rt.duration, geo, cf }; rtPut(key, r); return r;
   }).catch(() => { const r = estRoute(a, b); RTC[key] = r; return r; }).finally(() => { delete RTP[key]; });
 }
-function planTimes(s, u, ship, p) { // czasy kursu (s) i koszt
-  const tn = p.q && p.g ? p.q * G[p.g].w : 0, spd = spdM(s);
-  const ld = p.job === 'buy' ? 0 : loadMin(u, ship, tn) * 60;
+function planTimes(s, u, ship, p) { // czasy odcinka (s) i koszt; p: from, to, rt, g, q (ładunek w drodze), ldT / endT (tony załadunku na starcie / pracy na końcu)
+  const spd = spdM(s), from = p.from || u.at, ld = loadMin(u, ship, p.ldT || 0) * 60, end = loadMin(u, ship, p.endT || 0) * 60;
   const drive = (ship ? p.rt.km / 37 * 3600 : p.rt.s * VEH[u.k].sf) / spd;
-  const pk = ship ? 0 : (peakMin(u.at, s.clock) + peakMin(p.to, s.clock + (ld + drive) * 1e3)) * 60;
-  const end = p.job === 'buy' ? loadMin(u, ship, Math.min(uCap(u, ship), (p.bq || 0) * G[p.g].w)) * 60 : (p.job === 'sell' || p.job === 'unload') ? loadMin(u, ship, tn) * 60 : 0;
-  const tot = ld + drive + pk + end, duty = p.job === 'buy' ? 0 : dutyOf(u.at, p.to, p.g, p.q);
-  return { ld, drive, pk, end, tot, duty, fee: tripCost(u, ship, u.at, p.rt.km, tot / 3600, tn) + duty };
+  const pk = ship || p.rt.km < .3 ? 0 : (peakMin(from, s.clock) + peakMin(p.to, s.clock + (ld + drive) * 1e3)) * 60;
+  const tot = ld + drive + pk + end, tn = p.q && p.g ? p.q * G[p.g].w : 0, duty = tn ? dutyOf(from, p.to, p.g, p.q) : 0;
+  return { ld, drive, pk, end, tot, duty, fee: (p.rt.km < .3 && !tn ? 0 : tripCost(u, ship, from, p.rt.km, tot / 3600, tn)) + duty };
 }
-function depart(s, u, ship, p) { // wyjazd; zwraca koszt albo 0, gdy brak pieniędzy
-  const T = planTimes(s, u, ship, p);
-  if (!canC(s, curOf(u.at), T.fee)) return 0;
-  payC(s, curOf(u.at), T.fee);
-  if (T.duty) addNews(s, `Cło ${mL(T.duty, u.at)}: ${cName(LOC[u.at].cc)} → ${cName(LOC[p.to].cc)}`);
+// punkty odbioru / dostawy: { k: 'st' | 'f' | 'of' | 'o', lid, id, la, lo, n }
+const spPos = sp => [sp.la, sp.lo];
+const near = (a, b) => a && b && kmLL(a[0], a[1], b[0], b[1]) < .3;
+function depart(s, u, ship, p) { // wyjazd odcinka; zwraca koszt albo 0, gdy brak pieniędzy
+  const T = planTimes(s, u, ship, p), from = p.from || u.at;
+  if (!canC(s, curOf(from), T.fee)) return 0;
+  if (T.fee) payC(s, curOf(from), T.fee);
+  if (T.duty) addNews(s, `Cło ${mL(T.duty, from)}: ${cName(LOC[from].cc)} → ${cName(LOC[p.to].cc)}`);
   const t0 = s.clock;
-  Object.assign(u, { st: ship ? 'sail' : 'go', from: u.at, to: p.to, a: p.a, b: p.b, rk: rkey(p.a, p.b), km: p.rt.km, g: p.q ? p.g : (u.q ? u.g : null), q: p.q || 0,
-    job: p.job || null, bg: p.job === 'buy' ? p.g : null, bq: p.bq || 0, fid: p.fid || null, sid: p.sid || null,
+  Object.assign(u, { st: ship ? 'sail' : 'go', from, to: p.to, a: p.a, b: p.b, rk: rkey(p.a, p.b), km: p.rt.km, g: p.q ? p.g : null, q: p.q || 0,
+    job: p.job || null, pk: p.pk || null, dr: p.dr || null, want: p.want || 0, wg: p.wg || null,
     t0, tD: t0 + T.ld * 1e3, tA: t0 + (T.ld + T.drive + T.pk) * 1e3, t1: t0 + T.tot * 1e3, wait: '' });
-  if (s.tut && p.job === 'sell') s.tut.sent = true;
-  return T.fee;
+  if (s.tut && p.dr && p.dr.k !== 'st' && p.q) s.tut.sent = true;
+  return T.fee || .001;
+}
+const legRt = (a, b, ship, fb) => rtGet(rkey(a, b)) || fb || estRoute(a, b, ship);
+function goPick(s, u, ship, pk, dr, g, want) { // jazda (pusto) po towar
+  const a = u.pos || [LOC[u.at].la, LOC[u.at].lo], b = spPos(pk);
+  return depart(s, u, ship, { from: u.at, to: pk.lid, a, b, rt: legRt(a, b, ship), job: 'pick', pk, dr, wg: g, want, endT: want * G[g].w });
+}
+function goDrop(s, u, ship, ldT) { // jazda z ładunkiem do celu
+  const dr = u.dr, a = u.pos || [LOC[u.at].la, LOC[u.at].lo], b = spPos(dr);
+  return depart(s, u, ship, { from: u.at, to: dr.lid, a, b, rt: legRt(a, b, ship, u.r && u.r.rt2), job: dr.k === 'st' ? 'unload' : 'sell', g: u.g, q: u.q, dr, ldT, endT: u.q * G[u.g].w });
+}
+function doPick(s, u, ship) { // odbiór w punkcie: swój skład / zakup u firmy; oferta gracza — rozliczana przez serwer
+  const pk = u.pk, g = u.wg, want = u.want; let got = 0;
+  if (pk.k === 'st') { const L = s.L[pk.lid]; got = L ? fl(takeL(L, g, want, pk.id)) : 0; }
+  else if (pk.k === 'f') { const f = firmById(pk.lid, pk.id); got = f ? buyFrom(s, f, g, want) : 0; if (got) addNews(s, `${uName(u, ship)}: kupiono ${uq(got, g)} ${G[g].n} — ${f.n}`); }
+  else if (pk.k === 'of') { (s.pend = s.pend || []).push({ t: 'of', vid: u.id, ship, oid: pk.id, g, q: want, lid: pk.lid }); u.wait = 'rozliczenie z graczem…'; u.pend = 1; return 'async'; }
+  if (got > 0) { u.g = g; u.q = got; }
+  return got;
+}
+function afterPick(s, u, ship) { // po odbiorze: dalej do celu
+  if (u.q > 0 && u.dr) { if (!goDrop(s, u, ship, 0)) u.wait = 'brak pieniędzy na kurs'; }
+  else if (u.r) u.wait = 'czeka na towar';
+  else addNews(s, `${uName(u, ship)}: nie udało się odebrać towaru w ${LOC[u.at].n}`);
 }
 function arrive(s, u, ship) {
-  const lid = u.to, nm = uName(u, ship);
-  Object.assign(u, { st: 'idle', at: lid, to: null, pos: u.b });
-  if (u.job === 'sell' && u.q) {
-    if (u.fid && u.fid.startsWith('o:')) { (s.pend = s.pend || []).push({ fid: u.fid, lid, g: u.g, q: u.q }); addNews(s, `${nm}: dostarczono ${uq(u.q, u.g)} ${G[u.g].n} do zakładu gracza`); u.g = null; u.q = 0; }
+  const lid = u.to, nm = uName(u, ship); let job = u.job;
+  Object.assign(u, { st: 'idle', at: lid, to: null, pos: u.b, job: null });
+  if (job === 'buy' && u.bg) { u.pk = { k: 'f', lid, id: u.fid }; u.wg = u.bg; u.want = u.bq || uCap(u, ship) / G[u.bg].w; job = 'pick'; }
+  if (!u.dr && (u.fid || u.sid)) u.dr = { k: u.sid ? 'st' : 'f', lid, id: u.sid || u.fid };
+  delete u.fid; delete u.sid; delete u.bg; delete u.bq;
+  if (job === 'pick') { const r = doPick(s, u, ship); if (r === 'async') return; return afterPick(s, u, ship); }
+  if (job === 'sell' && u.q) {
+    const fid = u.dr && u.dr.id;
+    if (fid && fid.startsWith('o:')) { (s.pend = s.pend || []).push({ fid, lid, g: u.g, q: u.q }); addNews(s, `${nm}: dostarczono ${uq(u.q, u.g)} ${G[u.g].n} do zakładu gracza`); u.g = null; u.q = 0; }
     else {
-      const f = firmById(lid, u.fid) || bestFirm(s, lid, u.g);
+      const f = firmById(lid, fid) || bestFirm(s, lid, u.g);
       if (f && !f.player) { const r = sellNPC(s, f, u.g, u.q); addNews(s, `${nm}: ${f.n} (${LOC[lid].n}) kupił ${uq(u.q, u.g)} ${G[u.g].n} za ${mL(r, lid)}`); u.g = null; u.q = 0; }
       else addNews(s, `${nm}: w ${LOC[lid].n} nikt nie kupuje: ${G[u.g].n}`);
     }
-  } else if (u.job === 'unload' && u.q) {
-    const L = s.L[lid], fit = L ? fl(putL(L, u.g, u.q, u.sid)) : 0;
+  } else if (job === 'unload' && u.q) {
+    const L = s.L[lid], fit = L ? fl(putL(L, u.g, u.q, u.dr && u.dr.id)) : 0;
     u.q = fl(u.q - fit);
     addNews(s, `${nm}: rozładowano ${uq(fit, u.g)} ${G[u.g].n} w ${LOC[lid].n}` + (u.q > 0 ? ` — brak miejsca na ${uq(u.q, u.g)}` : ''));
     if (u.q <= 0) { u.g = null; u.q = 0; }
-  } else if (u.job === 'buy' && u.bg) {
-    const f = firmById(lid, u.fid) || firmsOf(lid).find(x => x.gs.includes(u.bg));
-    const got = f && !f.player ? buyFrom(s, f, u.bg, Math.min(u.bq || Infinity, uCap(u, ship) / G[u.bg].w)) : 0;
-    if (got > 0) { u.g = u.bg; u.q = got; }
-    addNews(s, got > 0 ? `${nm}: kupiono ${uq(got, u.bg)} ${G[u.bg].n} — ${f.n}, ${LOC[lid].n}` : `${nm}: zakup nieudany w ${LOC[lid].n} (brak ${curOf(lid)} albo sprzedawcy)`);
   } else if (!u.r) addNews(s, `${nm} dotarł do: ${LOC[lid].n}`);
-  Object.assign(u, { job: null, bg: null, bq: 0, fid: null, sid: null });
   if (u.r) routeNext(s, u, ship);
 }
-function routeNext(s, u, ship) { // trasa A ⇄ B: sprzedaż albo zakup, w kółko (też offline)
-  const r = u.r; if (!r || !G[r.g]) { delete u.r; return; }
-  const cap = uCap(u, ship) / G[r.g].w, L = s.L[r.a];
-  const go = (to, job, g, q, bq, a, b, fid, sid) => depart(s, u, ship, { to, job, g, q, bq, a, b, rt: rtGet(rkey(a, b)) || { km: r.km, s: r.s }, fid, sid });
-  if (u.at === r.a) {
-    if (u.q && u.g) { const fit = L ? putL(L, u.g, u.q, r.src) : 0; u.q = fl(u.q - fit); if (u.q <= 0) { u.q = 0; u.g = null; } else { u.wait = 'brak miejsca w składzie'; return; } }
-    if (r.m === 'sell') {
-      const st = r.src ? stById(L, r.src) : null, have = st ? (st.inv[r.g] || 0) : invOf(L, r.g), q = fl(Math.min(cap, have));
-      if (q <= 0 || (q < cap * .5 && s.clock - (u.wt || s.clock) < 2 * HOUR)) { if (!u.wait) u.wt = s.clock; u.wait = 'czeka na towar'; return; }
-      const took = fl(takeL(L, r.g, q, r.src));
-      if (!go(r.b, 'sell', r.g, took, 0, r.aP, r.bP, r.fid)) { putL(L, r.g, took, r.src); u.wait = 'brak pieniędzy na kurs'; }
-    } else if (!go(r.b, 'buy', r.g, 0, cap, r.aP, r.bP, r.fid)) u.wait = 'brak pieniędzy na kurs';
-  } else if (!go(r.a, u.q ? 'unload' : null, u.g, u.q, 0, u.pos || r.bP, r.aP, null, r.src)) u.wait = 'brak pieniędzy na kurs';
+function routeNext(s, u, ship) { // trasa w kółko: odbiór → dostawa → odbiór …
+  const r = u.r; if (!r || !r.pk || !G[r.g]) { delete u.r; return; }
+  if (u.st !== 'idle' || (u.pend)) return;
+  const want = fl(Math.min(r.want || Infinity, uCap(u, ship) / G[r.g].w));
+  u.dr = r.dr;
+  if (u.q > 0 && u.g) { if (!goDrop(s, u, ship, 0)) u.wait = 'brak pieniędzy na kurs'; return; }
+  if (r.pk.k === 'st' && u.at === r.pk.lid && (ship || near(u.pos, spPos(r.pk)))) { // stoi przy swoim składzie
+    const L = s.L[r.pk.lid], st = stById(L, r.pk.id), have = st ? (st.inv[r.g] || 0) : invOf(L, r.g), q = fl(Math.min(want, have));
+    if (q <= 0 || (q < want * .5 && s.clock - (u.wt || s.clock) < 2 * HOUR)) { if (u.wait !== 'czeka na towar') u.wt = s.clock; u.wait = 'czeka na towar'; return; }
+    u.g = r.g; u.q = fl(takeL(L, r.g, q, r.pk.id));
+    if (!goDrop(s, u, ship, u.q * G[r.g].w)) { putL(L, r.g, u.q, r.pk.id); u.g = null; u.q = 0; u.wait = 'brak pieniędzy na kurs'; }
+    return;
+  }
+  if (!goPick(s, u, ship, r.pk, r.dr, r.g, want)) u.wait = 'brak pieniędzy na kurs';
 }
 function uPos(u, t = Date.now()) { // pozycja pojazdu na mapie [la, lo]
   if (u.st === 'idle' || !u.a) return u.pos || [LOC[u.at].la, LOC[u.at].lo];
@@ -1071,8 +1095,6 @@ document.addEventListener('input', e => {
   if (t.dataset.rq) { ui.rq = t.value; clearTimeout(ui.rqT); ui.rqT = setTimeout(openRecipes, 250); }
   if (t.dataset.exa && ui.ex) { ui.ex.amt = t.value; const o = $('exOut'); if (o) o.innerHTML = exPreview(); }
   if (t.dataset.wzq) { wz.q = t.value; const r = $('wzList'); if (r) r.innerHTML = wzList(); }
-  if (t.dataset.fs) { const o = ui[t.dataset.fs], f = o[t.dataset.id] || (o[t.dataset.id] = {}); f.qs = t.value;
-    const u = (t.dataset.fs === 'sf' ? S.ships : S.veh).find(x => x.id == t.dataset.id), r = $(`fs-${t.dataset.fs}-${t.dataset.id}`); if (u && r) r.innerHTML = fsRes(t.dataset.fs, u); }
   if (t.dataset.pq) { ui.pq = t.value; const r = $('pqRes'); if (r) r.innerHTML = pqRes(); }
   if (t.dataset.q) { ui.locQ = t.value; const r = $('locRes'); if (r) r.innerHTML = locRes(ui.bc, ui.bl); }
   if (t.dataset.np && ui.np) ui.np[t.dataset.np] = t.value;
@@ -1940,34 +1962,57 @@ function findLocs(q, filt, n = 8) {
   for (const l of LOCS) { if (!filt(l)) continue; const nn = l.n.toLowerCase(); if (nn.startsWith(q)) a.push(l); else if (nn.includes(q)) b.push(l); if (a.length >= n) break; }
   return [...a, ...b].slice(0, n);
 }
-function fsRes(kind, u) {
-  const ship = kind === 'sf', at = LOC[u.at], f = ui[kind][u.id] || {};
-  return findLocs(f.qs, l => l.id !== u.at && (ship ? l.port : l.ld === at.ld)).map(l => `<button class="chipb" data-a="fTo" data-k="${kind}" data-id="${u.id}" data-v="${l.id}">${flag(l.cc)} ${esc(l.n)} <small>${kmTxt(km(u.at, l.id))}</small></button>`).join('');
+// ===== FORMULARZ KURSU: towar → skąd → dokąd =====
+const okLoc = (u, ship) => { const at = LOC[u.at]; return l => !!l && (ship ? !!l.port : l.ld === at.ld); };
+const sameSp = (a, b) => a && b && a.k === b.k && a.id === b.id && a.lid === b.lid;
+function townsNear(lid, ship, n) { return [...new Set([lid, ...(ship ? portDests(lid) : vehDests(lid))])].slice(0, n); }
+function pickOpts(u, ship, g, nT = 40, nF = 8) { // skąd: swoje składy z towarem, oferty graczy, firmy-sprzedawcy
+  const ok = okLoc(u, ship), me = USER && USER.uid, res = [], U = G[g].u;
+  for (const lid in S.L) { if (!ok(LOC[lid])) continue;
+    for (const st of stores(S.L[lid])) if ((st.inv[g] || 0) > 1e-3) { const [la, lo] = ship ? [LOC[lid].la, LOC[lid].lo] : stPos(lid, st);
+      res.push({ k: 'st', lid, id: st.id, la, lo, g, have: st.inv[g], n: `📦 ${st.n} (${LOC[lid].n}) — ${uq(st.inv[g], g)}` }); } }
+  for (const o of OFF) if (o.g === g && o.left > 1e-6 && o.uid !== me && ok(LOC[o.lid]))
+    res.push({ k: 'of', lid: o.lid, id: o.id, la: ship ? LOC[o.lid].la : o.la, lo: ship ? LOC[o.lid].lo : o.lo, g, have: o.left, pr: o.price, n: `👤 ${clean(o.name || '?')} (${LOC[o.lid].n}) — ${mL(o.price, o.lid)}/${U} · ${uq(o.left, g)}` });
+  townsNear(u.at, ship, nT).flatMap(id => firmsOf(id).filter(f => f.gs.includes(g))).map(f => ({ f, p: fPrice(S, f, g) * 1.15 })).sort((a, b) => a.p - b.p).slice(0, nF)
+    .forEach(({ f, p }) => res.push({ k: 'f', lid: f.lid, id: f.id, la: ship ? LOC[f.lid].la : f.la, lo: ship ? LOC[f.lid].lo : f.lo, g, pr: p, n: `🏪 ${f.n} (${LOC[f.lid].n}) — ${mL(p, f.lid)}/${U}` }));
+  return res;
 }
-function fPlan(kind, u) { // formularz → plan kursu
-  const ship = kind === 'sf', f = ui[kind][u.id] || (ui[kind][u.id] = {}), capT = uCap(u, ship), L = S.L[u.at];
-  if (!f.to || !LOC[f.to]) return null;
-  const p = { to: f.to }, ownTo = !!S.L[p.to], here = u.pos || [LOC[u.at].la, LOC[u.at].lo];
-  const ss = L ? stores(L).filter(st => Object.values(st.inv).some(v => v > 1e-3)) : [];
-  if (u.q > 0) { p.g = u.g; p.q = u.q; p.job = ownTo && f.job === 'unload' ? 'unload' : 'sell'; p.a = here; p.cargo = 1; }
-  else if (f.mode === 'buy' || !ss.length) { p.job = 'buy'; p.g = G[f.bg] ? f.bg : 'zboze'; const mx = fl(capT / G[p.g].w); p.bq = clamp(fl(f.bq ?? mx), 0, mx); p.q = 0; p.a = here; }
+function dropOpts(u, ship, g, pick, nT = 45, nF = 10) { // dokąd: firmy i gracze, którzy kupują, albo swoje składy
+  const ok = okLoc(u, ship), res = [], U = G[g].u, from = pick ? pick.lid : u.at;
+  townsNear(from, ship, nT).flatMap(id => buyers(id, g)).map(f => ({ f, p: fPrice(S, f, g) })).sort((a, b) => b.p - a.p).slice(0, nF)
+    .forEach(({ f, p }) => res.push({ k: 'f', lid: f.lid, id: f.id, la: ship ? LOC[f.lid].la : f.la, lo: ship ? LOC[f.lid].lo : f.lo, g, pr: p,
+      n: `${f.player ? '👤' : ctFor(f.id, g) ? '📄' : '🏪'} ${f.n} (${LOC[f.lid].n}) — ${mL(ctFor(f.id, g) ? ctFor(f.id, g).price : p, f.lid)}/${U}${f.player ? ` · chce ${uq(f.left, g)}` : ''}` }));
+  for (const lid in S.L) { if (!ok(LOC[lid])) continue;
+    for (const st of stores(S.L[lid])) if (st.k !== 'y' && !(pick && pick.k === 'st' && pick.id === st.id && pick.lid === lid)) { const [la, lo] = ship ? [LOC[lid].la, LOC[lid].lo] : stPos(lid, st);
+      res.push({ k: 'st', lid, id: st.id, la, lo, g, n: `📦 ${st.n} (${LOC[lid].n}) — wolne ${qty(stFreeOf(st))} t` }); } }
+  return res;
+}
+function defG(u, ship) { // domyślny towar: najcenniejszy w składach przy pojeździe
+  const L = S.L[u.at]; let b = null, bv = 0;
+  for (const [g, q] of Object.entries(invAll(L))) if (q * G[g].p > bv) { bv = q * G[g].p; b = g; }
+  return b || 'zboze';
+}
+function fPlan(kind, u) {
+  const ship = kind === 'sf', f = ui[kind][u.id] || (ui[kind][u.id] = {}), capT = uCap(u, ship), here = u.pos || [LOC[u.at].la, LOC[u.at].lo], P = { ship, here, f };
+  if (u.q > 0) { P.g = u.g; P.pick = { k: 'veh', lid: u.at, la: here[0], lo: here[1], g: u.g, have: u.q, n: `🚚 W pojeździe — ${uq(u.q, u.g)}` }; P.po = [P.pick]; }
   else {
-    const val = x => Object.entries(x.inv).reduce((a, [g, q]) => a + q * G[g].p, 0);
-    const st = ss.find(x => x.id === f.src) || [...ss].sort((a, b) => val(b) - val(a))[0]; p.src = st.id; p.st = st;
-    const gs = Object.keys(st.inv).filter(g => st.inv[g] > 1e-3).sort((a, b) => st.inv[b] * G[b].p - st.inv[a] * G[a].p); p.g = gs.includes(f.g) ? f.g : gs[0];
-    p.mx = fl(Math.min(capT / G[p.g].w, st.inv[p.g])); p.q = clamp(fl(f.q ?? p.mx), 0, p.mx);
-    p.job = ownTo && f.job === 'unload' ? 'unload' : 'sell'; p.a = ship ? here : stPos(u.at, st);
+    if (!G[f.g]) f.g = defG(u, ship); P.g = f.g;
+    P.po = pickOpts(u, ship, P.g);
+    const fp = f.pick && f.pick.g === P.g ? f.pick : null;
+    if (fp && !P.po.some(x => sameSp(x, fp))) P.po.unshift(fp);
+    P.pick = fp ? P.po.find(x => sameSp(x, fp)) : P.po[0];
   }
-  if (p.job === 'unload') {
-    const ds = stores(S.L[p.to]).filter(x => x.k !== 'y'), d = ds.find(x => x.id === f.sid) || ds.find(x => x.k === 'b' && (B[x.o.t].in || {})[p.g]) || ds.find(x => x.k === 'm') || ds[0];
-    p.sid = d ? d.id : null; p.b = ship ? [LOC[p.to].la, LOC[p.to].lo] : stPos(p.to, d);
-  } else {
-    const fs = p.job === 'buy' ? firmsOf(p.to).filter(x => x.gs.includes(p.g)) : buyers(p.to, p.g);
-    const fr = fs.find(x => x.id === f.fid) || (p.job === 'buy' ? fs[0] : bestFirm(S, p.to, p.g));
-    p.fid = fr ? fr.id : null; p.firm = fr; p.fs = fs; p.b = ship || !fr ? [LOC[p.to].la, LOC[p.to].lo] : [fr.la, fr.lo];
-  }
-  p.rt = rtGet(rkey(p.a, p.b)); if (p.rt && p.rt.est && !ship && !RTP[rkey(p.a, p.b)] && !p.rt.retried) { p.rt.retried = 1; fetchRoute(p.a, p.b, ship).then(() => render()); }
-  return p;
+  if (!P.pick) return P;
+  if (P.pick.k === 'st') { const st = stById(S.L[P.pick.lid], P.pick.id); P.have = st ? (st.inv[P.g] || 0) : 0; } else P.have = P.pick.have ?? Infinity;
+  P.mx = fl(Math.min(capT / G[P.g].w, P.have)); P.q = clamp(fl(f.q ?? P.mx), 0, P.mx);
+  P.do = dropOpts(u, ship, P.g, P.pick);
+  const fd = f.drop && f.drop.g === P.g ? f.drop : null;
+  if (fd && !P.do.some(x => sameSp(x, fd))) P.do.unshift(fd);
+  P.drop = fd ? P.do.find(x => sameSp(x, fd)) : P.do[0];
+  P.pp = spPos(P.pick); P.dp = P.drop ? spPos(P.drop) : null;
+  P.leg0 = P.pick.k !== 'veh' && !(ship ? u.at === P.pick.lid : near(here, P.pp));
+  P.r0 = P.leg0 ? rtGet(rkey(here, P.pp)) : null; P.r1 = P.drop ? rtGet(rkey(P.pp, P.dp)) : null;
+  return P;
 }
 function revEst(f, g, q, lid) {
   if (f.player) return f.price * Math.min(q, f.left) * (1 - taxOf(lid));
@@ -1975,60 +2020,91 @@ function revEst(f, g, q, lid) {
   if (c) { const left = Math.max(0, c.per - (c.done[cDay(S, c)] || 0)), qc = Math.min(qq, left); r += qc * c.price; qq -= qc; }
   return (r + (qq > 0 ? fPrice(S, f, g, qq / 2) * qq : 0)) * (1 + .04 * S.perk.sell) * (1 - taxOf(lid));
 }
-function sendForm(kind, u, dests) {
-  const ship = kind === 'sf', f = ui[kind][u.id] || (ui[kind][u.id] = {}), L = S.L[u.at];
-  if (!f.to) f.to = dests.find(d => d !== u.at) || u.at;
-  if (!dests.includes(f.to)) dests = [f.to, ...dests];
-  const p = fPlan(kind, u); if (!p) return '';
-  const ownTo = !!S.L[p.to], o = (v, t, on) => `<option value="${esc(v)}" ${on ? 'selected' : ''}>${t}</option>`, sel = (k, x) => `<select data-in="${kind}" data-s="${u.id}" data-k="${k}">${x}</select>`;
+function sendForm(kind, u) {
+  const ship = kind === 'sf', P = fPlan(kind, u), f = P.f, opt = (v, t, on) => `<option value="${v}" ${on ? 'selected' : ''}>${t}</option>`;
+  const sel = (k, x) => `<select data-in="${kind}" data-s="${u.id}" data-k="${k}">${x}</select>`;
+  ui.opts = ui.opts || {}; ui.opts[kind + u.id] = { po: P.po, do: P.do || [] };
   let h = '';
-  if (p.cargo) h += `<div class="flow">W pojeździe: <b>${uq(u.q, u.g)} ${G[u.g].n}</b></div>`;
-  else {
-    const ss = L ? stores(L).filter(st => Object.values(st.inv).some(v => v > 1e-3)) : [];
-    h += `<label class="f">Co robisz</label>` + sel('mode', (ss.length ? o('carry', 'Wiozę towar ze składu', p.job !== 'buy') : '') + o('buy', 'Jadę kupić towar', p.job === 'buy'));
-    if (p.job !== 'buy') h += `<div class="grid2"><div><label class="f">Skąd</label>${sel('src', ss.map(x => o(x.id, `${x.n}`, x.id === p.src)).join(''))}</div>
-        <div><label class="f">Towar</label>${sel('g', Object.keys(p.st.inv).filter(g => p.st.inv[g] > 1e-3).map(g => o(g, `${G[g].n} — ${uq(p.st.inv[g], g)}`, g === p.g)).join(''))}</div></div>
-        <label class="f">Ilość (max ${uq(p.mx, p.g)} · ${qty(p.mx * G[p.g].w)} t)</label><input type="number" inputmode="decimal" step="any" data-in="${kind}" data-s="${u.id}" data-k="q" value="${p.q}" min="0" max="${p.mx}">`;
-    else { const mx = fl(uCap(u, ship) / G[p.g].w);
-      h += `<div class="grid2"><div><label class="f">Towar</label>${sel('bg', goodsOpts(p.g))}</div>
-        <div><label class="f">Ilość (max ${uq(mx, p.g)})</label><input type="number" inputmode="decimal" step="any" data-in="${kind}" data-s="${u.id}" data-k="bq" value="${p.bq}" min="0" max="${mx}"></div></div>`; }
+  if (P.pick && P.pick.k === 'veh') h += `<div class="flow">W pojeździe: <b>${uq(u.q, u.g)} ${G[u.g].n}</b></div>`;
+  else h += `<label class="f">Towar</label>${sel('g', goodsOpts(P.g))}`;
+  if (!P.pick || P.pick.k !== 'veh') {
+    h += `<div class="lblrow"><label class="f">Skąd (${P.po.length})</label><button class="btn s" data-a="spMap" data-k="${kind}" data-id="${u.id}" data-w="pick">🗺 Wybierz na mapie</button></div>`;
+    h += P.po.length ? sel('pick', P.po.map((x, i) => opt(i, esc(x.n), x === P.pick)).join('')) : `<div class="warn">Nigdzie w okolicy nie ma: ${G[P.g].n}. Wybierz inny towar.</div>`;
   }
-  h += `<label class="f">Dokąd</label>${sel('to', dests.map(d => o(d, `${flag(LOC[d].cc)} ${LOC[d].n}${d === u.at ? ' (tutaj)' : ' · ' + kmTxt(km(u.at, d))}${S.L[d] ? ' ★' : ''} · ${fmt(popOf(d))} mieszk. · ${firmsOf(d).length} firm`, d === p.to)).join(''))}
-    <input class="fsq" placeholder="…albo wpisz dowolną miejscowość${ship ? ' portową' : ''}" data-fs="${kind}" data-id="${u.id}" value="${esc(f.qs || '')}"><div class="chips2" id="fs-${kind}-${u.id}">${fsRes(kind, u)}</div>`;
-  if (p.job !== 'buy' && ownTo) h += `<label class="f">Na miejscu</label>` + sel('job', o('sell', 'Sprzedaj firmie', p.job === 'sell') + o('unload', 'Rozładuj do swojego składu', p.job === 'unload'));
-  let ok = !!p.rt;
-  if (p.job === 'unload') h += `<label class="f">Do składu</label>` + sel('sid', stores(S.L[p.to]).filter(x => x.k !== 'y').map(x => o(x.id, `${x.n} (wolne ${qty(stFreeOf(x))} t)`, x.id === p.sid)).join(''));
-  else if (!p.fs.length) { ok = false; h += `<div class="warn">W ${esc(LOC[p.to].n)} nikt ${p.job === 'buy' ? 'nie sprzedaje' : 'nie kupuje'}: ${G[p.g].n}. Wybierz większe miasto albo port.</div>`; }
-  else h += `<label class="f">${p.job === 'buy' ? 'U kogo' : 'Komu'} (${p.fs.length})</label>` + sel('fid', p.fs.map(x => { const c = ctFor(x.id, p.g), pr = p.job === 'buy' ? fPrice(S, x, p.g) * 1.15 : c ? c.price : fPrice(S, x, p.g);
-      return o(x.id, `${x.player ? '👤 ' : ''}${c ? '📄 ' : ''}${esc(x.n)} — ${mL(pr, p.to)}/${G[p.g].u}${x.player ? ` · chce ${uq(x.left, p.g)}` : ''}`, x.id === p.fid); }).join(''));
-  let est = '', fee = 0;
-  if (!p.rt) { est = `<div class="flow mut">🛣 Liczę trasę po drogach…</div>`; fetchRoute(p.a, p.b, ship).then(() => render()); }
-  else {
-    const T = planTimes(S, u, ship, { ...p, rt: p.rt }); fee = T.fee;
-    est = `<div class="flow">🛣 ${qty(p.rt.km)} km${p.rt.est ? ' (szacunek, brak trasy z OSM)' : ''} · jazda ${durTxt(T.drive * 1e3)}${T.ld ? ` · załadunek ${durTxt(T.ld * 1e3)}` : ''}${T.end ? ` · ${p.job === 'buy' ? 'załadunek' : 'rozładunek'} ${durTxt(T.end * 1e3)}` : ''}${T.pk ? ` · korki +${durTxt(T.pk * 1e3)}` : ''} = <b>${durTxt(T.tot * 1e3)}</b>
-      <div class="mut small">Koszt: ${ship ? 'fracht' : `paliwo ${qty(p.rt.km * (VEH[u.k].l100 / 100))} l + kierowca`} ${mL(T.fee - T.duty, u.at)}${T.duty ? ` + cło ${mL(T.duty, u.at)}` : ''}</div></div>`;
-    if (p.job === 'sell' && p.firm && p.q > 0) est += `<div class="flow">Przychód ≈ <b>${mL(revEst(p.firm, p.g, p.q, p.to), p.to)}</b> (po podatku)</div>`;
-    if (p.job === 'buy' && p.firm) est += `<div class="flow">Koszt towaru ≈ <b>${mL(fPrice(S, p.firm, p.g, -p.bq / 2) * 1.15 * p.bq, p.to)}</b></div>`;
+  if (!P.pick) return h;
+  h += `<label class="f">Ilość (max ${uq(P.mx, P.g)} · ${qty(P.mx * G[P.g].w)} t)</label><input type="number" inputmode="decimal" step="any" data-in="${kind}" data-s="${u.id}" data-k="q" value="${P.q}" min="0" max="${P.mx}">`;
+  h += `<div class="lblrow"><label class="f">Dokąd (${P.do.length})</label><button class="btn s" data-a="spMap" data-k="${kind}" data-id="${u.id}" data-w="drop">🗺 Wybierz na mapie</button></div>`;
+  h += P.do.length ? sel('drop', P.do.map((x, i) => opt(i, esc(x.n), x === P.drop)).join('')) : `<div class="warn">W okolicy nikt nie kupuje: ${G[P.g].n}.</div>`;
+  let est = '', fee = 0, ok = !!P.drop && P.q > 0;
+  if (P.drop) {
+    if ((P.leg0 && !P.r0) || !P.r1) { ok = false; est = `<div class="flow mut">🛣 Liczę trasę po drogach…</div>`;
+      Promise.all([P.leg0 ? fetchRoute(P.here, P.pp, ship) : null, fetchRoute(P.pp, P.dp, ship)]).then(() => render()); }
+    else {
+      const tn = P.q * G[P.g].w;
+      const T0 = P.leg0 ? planTimes(S, u, ship, { from: u.at, to: P.pick.lid, rt: P.r0, endT: tn }) : null;
+      const T1 = planTimes(S, u, ship, { from: P.pick.lid, to: P.drop.lid, rt: P.r1, g: P.g, q: P.q, ldT: P.leg0 || P.pick.k === 'veh' ? 0 : tn, endT: tn });
+      fee = (T0 ? T0.fee : 0) + T1.fee;
+      const buyC = P.pick.k === 'f' ? fPrice(S, firmById(P.pick.lid, P.pick.id) || {}, P.g, -P.q / 2) * 1.15 * P.q : P.pick.k === 'of' ? P.pick.pr * P.q : 0;
+      const fr = P.drop.k === 'f' ? firmById(P.drop.lid, P.drop.id) : null, rev = fr ? revEst(fr, P.g, P.q, P.drop.lid) : 0;
+      const tt = (T0 ? T0.tot : 0) + T1.tot, usd = rev / 1 - buyC - fee;
+      est = `<div class="flow">${T0 ? `🚚 Dojazd po towar: ${qty(P.r0.km)} km · ${durTxt(T0.tot * 1e3)} (z załadunkiem)<br>` : ''}🛣 Kurs: ${qty(P.r1.km)} km${P.r1.est ? ' (szacunek)' : ''} · jazda ${durTxt(T1.drive * 1e3)}${T1.ld ? ` · załadunek ${durTxt(T1.ld * 1e3)}` : ''} · ${P.drop.k === 'st' ? 'rozładunek' : 'rozładunek u odbiorcy'} ${durTxt(T1.end * 1e3)}${T1.pk ? ` · korki +${durTxt(T1.pk * 1e3)}` : ''}
+        <div>Razem: <b>${durTxt(tt * 1e3)}</b> · koszt transportu ${mL(fee, u.at)}${T1.duty ? ` (w tym cło ${mL(T1.duty, u.at)})` : ''}</div>
+        ${buyC ? `<div>Zakup towaru ≈ ${mL(buyC, P.pick.lid)}</div>` : ''}${rev ? `<div>Sprzedaż ≈ <b>${mL(rev, P.drop.lid)}</b> (po podatku)</div>` : ''}
+        ${rev || buyC ? `<div class="${usd >= 0 ? 'pos' : 'neg'}">Wynik kursu ≈ <b>${mH(usd)}</b></div>` : ''}</div>`;
+    }
   }
-  const canRt = !!L && !p.cargo && p.to !== u.at && p.job !== 'unload';
-  return h + est + (canRt ? `<label class="chk"><input type="checkbox" data-in="${kind}" data-s="${u.id}" data-k="rt" ${f.rt ? 'checked' : ''}> Powtarzaj w kółko (trasa ${esc(LOC[u.at].n)} ⇄ ${esc(LOC[p.to].n)})</label>` : '')
-    + `<div class="btns"><button class="btn p" data-a="go" data-k="${kind}" data-id="${u.id}" ${!ok || !canL(u.at, fee) || (p.job !== 'buy' && !(p.q > 0)) || (p.job === 'buy' && !(p.bq > 0)) ? 'disabled' : ''}>${canRt && f.rt ? 'Start trasy' : 'Wyślij'}${fee ? ' · ' + mL(fee, u.at) : ''}</button></div>`;
+  const canRt = P.pick.k !== 'veh' && !!P.drop && !sameSp(P.pick, P.drop);
+  return h + est + (canRt ? `<label class="chk"><input type="checkbox" data-in="${kind}" data-s="${u.id}" data-k="rt" ${f.rt ? 'checked' : ''}> Powtarzaj w kółko (trasa)</label>` : '')
+    + `<div class="btns"><button class="btn p" data-a="go" data-k="${kind}" data-id="${u.id}" ${!ok || !canL(u.at, fee) ? 'disabled' : ''}>${canRt && f.rt ? 'Start trasy' : 'Wyślij'}${fee ? ' · ' + mL(fee, u.at) : ''}</button></div>`;
+}
+// mapa wyboru: pokazuje tylko miejsca, gdzie da się kupić / sprzedać towar
+let PKMAP = null;
+function openSpMap(kind, uid, w) {
+  const ship = kind === 'sf', u = (ship ? S.ships : S.veh).find(x => x.id == uid); if (!u) return;
+  const P = fPlan(kind, u), g = P.g; if (!g) return;
+  const list = w === 'pick' ? pickOpts(u, ship, g, 90, 80) : dropOpts(u, ship, g, P.pick, 90, 80);
+  ui.spList = { kind, uid, w, list };
+  const prs = list.filter(x => x.pr).map(x => x.pr), mn = Math.min(...prs, Infinity), mx = Math.max(...prs, 0);
+  $('modal').hidden = false;
+  $('modal').innerHTML = `<div class="sheet tall"><div class="row"><b class="grow" style="font-size:17px">🗺 ${w === 'pick' ? 'Skąd wziąć' : 'Dokąd zawieźć'}: ${G[g].n}</b><button class="btn s" data-a="close">Zamknij</button></div>
+    <div class="mut small" style="margin:6px 0">${w === 'pick' ? 'Twoje składy (niebieskie), oferty graczy (fioletowe) i firmy, które sprzedają — zielone = taniej.' : 'Firmy i gracze, którzy to kupują — zielone = drożej płacą. Niebieskie = Twoje składy.'} Dotknij punktu.</div>
+    <div id="spmap" class="pmap" style="height:330px"></div><div id="spSel" class="spsel mut small">Nic nie wybrano.</div>
+    <div class="card" style="margin-top:8px">${list.map((x, i) => `<button class="sprow" data-a="spPick" data-i="${i}"><span class="grow">${esc(x.n)}</span><small>${kmTxt(kmLL(P.here[0], P.here[1], x.la, x.lo))}</small></button>`).join('') || '<div class="mut">Brak miejsc w zasięgu.</div>'}</div></div>`;
+  const el = $('spmap');
+  if (!window.maplibregl || ui.noGL) { el.remove(); return; }
+  try { if (PKMAP) PKMAP.remove(); } catch (e) {}
+  try {
+    const m = PKMAP = new maplibregl.Map({ container: el, style: styleUrl('caros'), center: [P.here[1], P.here[0]], zoom: 8.5, attributionControl: { compact: true }, dragRotate: false, pitchWithRotate: false });
+    m.touchZoomRotate.disableRotation();
+    const col = x => x.k === 'st' ? '#3fa3ff' : x.k === 'of' || (x.id || '').startsWith('o:') ? '#b07cff' : (() => { const k = mx > mn ? (x.pr - mn) / (mx - mn) : .5, v = w === 'pick' ? 1 - k : k; return v > .66 ? '#3fcf7f' : v > .33 ? '#f5c542' : '#ff6a4f'; })();
+    m.on('style.load', () => {
+      try { applyCaros(m); } catch (e) {}
+      m.addSource('sp', { type: 'geojson', data: { type: 'FeatureCollection', features: [
+        ...list.map((x, i) => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [x.lo, x.la] }, properties: { i, c: col(x), t: x.n.replace(/^\S+\s/, '').replace(/ \(.*?\)/, '') } })),
+        { type: 'Feature', geometry: { type: 'Point', coordinates: [P.here[1], P.here[0]] }, properties: { i: -1, c: '#ffffff', t: uName(u, ship) } }] } });
+      m.addLayer({ id: 'sp-c', type: 'circle', source: 'sp', paint: { 'circle-radius': ['interpolate', ['linear'], ['zoom'], 6, 5, 13, 10], 'circle-color': ['get', 'c'], 'circle-stroke-width': 2, 'circle-stroke-color': '#0b0e12' } });
+      m.addLayer({ id: 'sp-t', type: 'symbol', source: 'sp', minzoom: 9.5, layout: { 'text-field': ['get', 't'], 'text-size': 11, 'text-offset': [0, 1.3], 'text-font': ['Noto Sans Bold'], 'text-max-width': 12 },
+        paint: { 'text-color': '#e8eef5', 'text-halo-color': '#0b0e12', 'text-halo-width': 1.4 } });
+      const pts = list.map(x => [x.lo, x.la]); if (pts.length) { const b = pts.reduce((a, p) => [[Math.min(a[0][0], p[0]), Math.min(a[0][1], p[1])], [Math.max(a[1][0], p[0]), Math.max(a[1][1], p[1])]], [[P.here[1], P.here[0]], [P.here[1], P.here[0]]]); m.fitBounds(b, { padding: 30, maxZoom: 12, animate: false }); }
+      m.on('click', 'sp-c', e => { const i = e.features[0].properties.i; if (i < 0) return; const x = list[i];
+        $('spSel').innerHTML = `<div class="row"><span class="grow">${esc(x.n)}</span><button class="btn s p" data-a="spPick" data-i="${i}">Wybierz</button></div>`; });
+    });
+  } catch (e) { el.remove(); }
 }
 function uCard(u, ship) {
   const nm = uName(u, ship), t = Date.now(), k = ship ? 'sf' : 'vf';
-  const rt = u.r ? `<div class="route">🔁 ${esc(LOC[u.r.a].n)} ⇄ ${esc(LOC[u.r.b].n)} · ${G[u.r.g].n} · ${u.r.m === 'sell' ? 'sprzedaż' : 'zakup'}${u.r.fid ? ' · ' + esc((firmById(u.r.b, u.r.fid) || {}).n || '') : ''}${u.wait && u.st === 'idle' ? ` · <span class="neg">${esc(u.wait)}</span>` : ''}
+  const rt = u.r ? `<div class="route">🔁 ${esc((u.r.pk.n || '').replace(/ —.*/, ''))} → ${esc((u.r.dr.n || '').replace(/ —.*/, ''))} · ${G[u.r.g].n}${u.wait && u.st === 'idle' ? ` · <span class="neg">${esc(u.wait)}</span>` : ''}
     <button class="btn s" data-a="rtStop" data-k="${k}" data-id="${u.id}">Zakończ trasę</button></div>` : '';
   const map = `<button class="btn s" data-a="vFocus" data-k="${k}" data-id="${u.id}">📍 Mapa</button>`;
   if (u.st !== 'idle') {
-    const ph = t < u.tD ? `załadunek (${durTxt(u.tD - t)})` : t < u.tA ? `w drodze ${qty(clamp((t - u.tD) / (u.tA - u.tD), 0, 1) * u.km)} / ${qty(u.km)} km` : u.job === 'buy' ? 'załadunek u sprzedawcy' : u.job ? 'rozładunek' : 'na miejscu';
-    const dest = u.fid ? (firmById(u.to, u.fid) || {}).n : u.sid ? (stById(S.L[u.to], u.sid) || {}).n : '';
+    const ph = t < u.tD ? `załadunek (${durTxt(u.tD - t)})` : t < u.tA ? `w drodze ${qty(clamp((t - u.tD) / (u.tA - u.tD), 0, 1) * u.km)} / ${qty(u.km)} km` : u.job === 'pick' ? 'załadunek' : u.job ? 'rozładunek' : 'na miejscu';
+    const dest = u.job === 'pick' ? `po towar: ${(u.pk && u.pk.n || '').replace(/ —.*/, '')}` : u.dr ? (u.dr.n || '').replace(/ —.*/, '') : '';
     return `<div class="card"><div class="row"><b class="grow">${nm}</b><span class="mut small">do celu ${durTxt(u.t1 - t)}</span>${map}</div>
-      <div class="flow">${LOC[u.from].n} → ${LOC[u.to].n}${dest ? ' · ' + esc(dest) : ''}${u.q ? ` · ${uq(u.q, u.g)} ${G[u.g].n}` : u.bg ? ` · kupi ${G[u.bg].n}` : ' · pusty'} · ${ph}</div>
+      <div class="flow">${LOC[u.from].n} → ${LOC[u.to].n}${dest ? ' · ' + esc(dest) : ''}${u.q ? ` · ${uq(u.q, u.g)} ${G[u.g].n}` : u.wg ? ` · ${G[u.wg].n}` : ' · pusty'} · ${ph}</div>
       <div class="bar ${ship ? '' : 'y'}"><i style="width:${clamp((t - u.t0) / (u.t1 - u.t0), 0, 1) * 100}%"></i></div>${rt}</div>`;
   }
-  const dests = ship ? portDests(u.at) : [u.at, ...vehDests(u.at)];
   return `<div class="card"><div class="row"><b class="grow">${nm}</b><span class="mut small">${ship ? 'w porcie' : 'stoi w'}: ${LOC[u.at].n}</span>${map}</div>${rt}
-    ${u.r ? '' : sendForm(k, u, dests)}</div>`;
+    ${u.pend ? '<div class="flow mut">⏳ Rozliczenie z graczem…</div>' : u.r ? '' : sendForm(k, u)}</div>`;
 }
 function portDests(at) {
   const k = 'p' + at;
@@ -2079,6 +2155,46 @@ function vLogistyka() {
   return h;
 }
 
+// ===== GIEŁDA GRACZY =====
+function vGielda() {
+  const me = USER && USER.uid, gf = ui.gg || '', hqs = Object.keys(S.L);
+  const dist = lid => hqs.length ? Math.min(...hqs.map(h => km(h, lid))) : 0;
+  let h = `<h2>Giełda graczy</h2>`;
+  if (!me || !DB) return h + `<div class="card">Handel z innymi graczami działa po zalogowaniu (konto online). W ustawieniach możesz założyć konto — gra gościa przeniesie się na nie.</div>`;
+  h += `<div class="card"><label class="f">Towar</label><select data-in="gg"><option value="">Wszystkie</option>${goodsOpts(gf)}</select>
+    <div class="mut small" style="margin-top:6px">Oferty sprzedaży odbierasz własnym pojazdem (płacisz przy odbiorze). Zlecenia skupu realizujesz, dowożąc towar do zakładu gracza.</div></div>`;
+  const offs = OFF.filter(o => o.uid !== me && o.left > 1e-6 && G[o.g] && LOC[o.lid] && (!gf || o.g === gf)).sort((a, b) => dist(a.lid) - dist(b.lid)).slice(0, 40);
+  h += `<h2>Sprzedają (${offs.length})</h2>` + (offs.map(o => `<div class="card offer"><div class="row"><div class="grow"><b>${G[o.g].n}</b> · ${uq(o.left, o.g)}
+      <div class="mut small">👤 ${esc(clean(o.name || '?'))} · ${flag(LOC[o.lid].cc)} ${esc(LOC[o.lid].n)} · ${kmTxt(dist(o.lid))} od Ciebie</div></div>
+      <div class="n"><b>${mL(o.price, o.lid)}</b><div class="mut small">/${G[o.g].u}</div></div></div>
+      <div class="btns"><button class="btn s p" data-a="offGet" data-id="${o.id}">🚚 Odbierz i kup</button></div></div>`).join('') || '<div class="card mut small">Brak ofert.</div>');
+  const ords = ORD.filter(o => o.uid !== me && o.left > 1e-6 && G[o.g] && LOC[o.lid] && (!gf || o.g === gf)).sort((a, b) => dist(a.lid) - dist(b.lid)).slice(0, 40);
+  h += `<h2>Kupują (${ords.length})</h2>` + (ords.map(o => `<div class="card offer"><div class="row"><div class="grow"><b>${G[o.g].n}</b> · chce ${uq(o.left, o.g)}
+      <div class="mut small">👤 ${esc(clean(o.name || '?'))} · ${bName(o.bt)} · ${flag(LOC[o.lid].cc)} ${esc(LOC[o.lid].n)} · ${kmTxt(dist(o.lid))} od Ciebie</div></div>
+      <div class="n"><b>${mL(o.price, o.lid)}</b><div class="mut small">/${G[o.g].u}</div></div></div>
+      <div class="btns"><button class="btn s g" data-a="ordFill" data-id="${o.id}">🚚 Dostarcz</button></div></div>`).join('') || '<div class="card mut small">Brak zleceń skupu.</div>');
+  const mo = OFF.filter(o => o.uid === me), mz = ORD.filter(o => o.uid === me);
+  h += `<h2>Moje oferty i zlecenia</h2><div class="card">${[...mo.map(o => `<div class="ctr"><div class="grow">📤 Sprzedaję <b>${G[o.g].n}</b> · ${uq(o.left, o.g)} · ${mL(o.price, o.lid)}/${G[o.g].u}<div class="mut small">${esc(LOC[o.lid].n)}</div></div><button class="btn s" data-a="offDel" data-id="${o.id}">Zdejmij</button></div>`),
+    ...mz.map(o => `<div class="ctr"><div class="grow">📥 Kupuję <b>${G[o.g].n}</b> · zostało ${uq(o.left, o.g)} · ${mL(o.price, o.lid)}/${G[o.g].u}<div class="mut small">${bName(o.bt)} · ${esc(LOC[o.lid].n)}</div></div><button class="btn s" data-a="ordDel" data-id="${o.id}" data-l="${o.lid}" data-b="${o.bid}">Anuluj</button></div>`)].join('') || '<span class="mut small">Nic nie wystawiono. Zlecenie skupu wystawisz przy zakładzie w Budowie („👤 Skup od graczy”).</span>'}</div>`;
+  // wystaw ofertę sprzedaży
+  const og = ui.og || (ui.og = {}), locs = Object.keys(S.L).filter(id => stores(S.L[id]).some(st => Object.values(st.inv).some(v => v > 1e-3)));
+  if (!locs.includes(og.lid)) og.lid = locs[0];
+  h += `<h2>Wystaw ofertę sprzedaży</h2><div class="card">`;
+  if (!og.lid) h += `<span class="mut small">Nie masz towaru w składach.</span>`;
+  else {
+    const ss = stores(S.L[og.lid]).filter(st => Object.values(st.inv).some(v => v > 1e-3)); if (!ss.some(x => x.id === og.sid)) og.sid = ss[0].id;
+    const st = ss.find(x => x.id === og.sid), gs = Object.keys(st.inv).filter(g => st.inv[g] > 1e-3); if (!gs.includes(og.g)) og.g = gs[0];
+    const c = curOf(og.lid), base = lBase(S, og.lid, og.g);
+    h += `<div class="grid2"><div><label class="f">Miejscowość</label><select data-in="og" data-k="lid">${locs.map(id => `<option value="${id}" ${id === og.lid ? 'selected' : ''}>${LOC[id].n}</option>`).join('')}</select></div>
+      <div><label class="f">Skład</label><select data-in="og" data-k="sid">${ss.map(x => `<option value="${x.id}" ${x.id === og.sid ? 'selected' : ''}>${esc(x.n)}</option>`).join('')}</select></div></div>
+      <label class="f">Towar</label><select data-in="og" data-k="g">${gs.map(g => `<option value="${g}" ${g === og.g ? 'selected' : ''}>${G[g].n} — ${uq(st.inv[g], g)}</option>`).join('')}</select>
+      <div class="grid2"><div><label class="f">Ilość (${G[og.g].u})</label><input id="ogQ" type="number" inputmode="decimal" step="any" value="${fl(st.inv[og.g])}"></div>
+      <div><label class="f">Cena (${c}/${G[og.g].u})</label><input id="ogP" type="number" inputmode="decimal" step="any" value="${Math.round(base * rate(c) * 100) / 100}"></div></div>
+      <div class="mut small">Rynkowo w ${esc(LOC[og.lid].n)} ok. ${mL(base, og.lid)}/${G[og.g].u}. Towar zostaje zablokowany w ofercie, zdjęcie oferty go zwraca.</div>
+      <div class="btns"><button class="btn p" data-a="offNew">Wystaw ofertę</button></div>`;
+  }
+  return h + `</div>`;
+}
 function vRanking() {
   const r = ranking(), day = Math.floor((S.hour % SEASON_H) / 24) + 1;
   let h = `<h2>Sezon ${S.season} · dzień ${day}/30 · nagrody: ${SEASON_PP.slice(0, 3).join(' / ')} pkt za podium</h2>
@@ -2095,7 +2211,7 @@ function vRanking() {
   return h;
 }
 
-const VIEWS = { firma: vFirma, budowa: vBudowa, magazyn: vMagazyn, logistyka: vLogistyka, ranking: vRanking };
+const VIEWS = { firma: vFirma, budowa: vBudowa, magazyn: vMagazyn, logistyka: vLogistyka, gielda: vGielda, ranking: vRanking };
 const RM = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
 function tweenCash() { // licznik gotówki płynnie dobija do wartości
   const el = $('cash'), hc = homeCur(), to = wal(S, hc), from = ui.cashShown ?? to;
@@ -2338,14 +2454,28 @@ function act(a, d) {
       if (!ui.shipAt || !canL(ui.shipAt, SHIP_COST)) return;
       payC(S, curOf(ui.shipAt), SHIP_COST); S.ships.push({ id: S.nid++, st: 'idle', at: ui.shipAt, to: null, from: null, g: null, q: 0, eta: 0, dur: 1 }); toast('Nowy statek w porcie'); break;
     case 'pqSet': ui.pl = d.v; ui.pq = ''; break;
-    case 'goSell': {
-      const v = S.veh.find(x => x.st === 'idle' && x.at === d.l && !x.r && !x.q);
+    case 'goSell': { // z Rynku: najbliższy wolny pojazd na tym lądzie
+      const l0 = LOC[d.l], vs = S.veh.filter(x => x.st === 'idle' && !x.r && !x.q && !x.pend && LOC[x.at].ld === l0.ld).sort((a, b) => km(a.at, d.l) - km(b.at, d.l));
       ui.tab = 'logistyka';
-      if (!v) { toast(`Brak wolnego pojazdu w: ${LOC[d.l].n}`); break; }
-      const bn = bestNear(d.l, d.g); ui.vf[v.id] = { mode: 'carry', src: d.src, g: d.g, job: 'sell', to: bn ? bn.id : undefined, fid: bn ? bn.f.id : undefined };
-      setTimeout(() => { const e = document.querySelector(`[data-a=go][data-id="${v.id}"]`); if (e) e.scrollIntoView({ behavior: 'smooth', block: 'center' }); }, 120); break;
+      if (!vs.length) { toast('Brak wolnego pojazdu na tym lądzie'); break; }
+      const v = vs[0], st = stById(S.L[d.l], d.src), [la, lo] = stPos(d.l, st);
+      ui.vf[v.id] = { g: d.g, pick: { k: 'st', lid: d.l, id: d.src, la, lo, g: d.g, n: `📦 ${st.n} (${LOC[d.l].n})` } };
+      setTimeout(() => { const e = document.querySelector(`[data-a=go][data-id="${v.id}"]`); if (e) e.scrollIntoView({ behavior: 'smooth', block: 'center' }); }, 150); break;
     }
-    case 'fTo': { const f = ui[d.k][d.id] || (ui[d.k][d.id] = {}); f.to = d.v; f.qs = ''; delete f.fid; break; }
+    case 'offNew': { const og = ui.og; offCreate(og.lid, og.sid, og.g, +($('ogQ') || {}).value, +($('ogP') || {}).value / rate(curOf(og.lid))); return; }
+    case 'offDel': offCancel(d.id); return;
+    case 'offGet': case 'ordFill': {
+      const o = (a === 'offGet' ? OFF : ORD).find(x => x.id === d.id); if (!o || !LOC[o.lid]) return;
+      const vs = S.veh.filter(x => x.st === 'idle' && !x.r && !x.q && !x.pend && LOC[x.at].ld === LOC[o.lid].ld).sort((x, y) => km(x.at, o.lid) - km(y.at, o.lid));
+      ui.tab = 'logistyka'; if (!vs.length) { toast('Brak wolnego pojazdu na tym lądzie'); break; }
+      const v = vs[0];
+      if (a === 'offGet') ui.vf[v.id] = { g: o.g, pick: { k: 'of', lid: o.lid, id: o.id, la: o.la, lo: o.lo, g: o.g, have: o.left, pr: o.price, n: `👤 ${clean(o.name || '?')} (${LOC[o.lid].n})` } };
+      else ui.vf[v.id] = { g: o.g, drop: { k: 'f', lid: o.lid, id: 'o:' + o.id, la: o.la || LOC[o.lid].la, lo: o.lo || LOC[o.lid].lo, g: o.g, n: `👤 ${bName(o.bt)} — ${clean(o.name || '?')} (${LOC[o.lid].n})` } };
+      setTimeout(() => { const e = document.querySelector(`[data-a=go][data-id="${v.id}"]`); if (e) e.scrollIntoView({ behavior: 'smooth', block: 'center' }); }, 150); break;
+    }
+    case 'spMap': openSpMap(d.k, d.id, d.w); return;
+    case 'spPick': { const L = ui.spList, x = L && L.list[+d.i]; if (!x) return; const f = ui[L.kind][L.uid] || (ui[L.kind][L.uid] = {}); f[L.w] = x; if (L.w === 'pick') delete f.q;
+      $('modal').hidden = true; try { if (PKMAP) { PKMAP.remove(); PKMAP = null; } } catch (e) {} break; }
     case 'rtStop': { const u = (d.k === 'sf' ? S.ships : S.veh).find(x => x.id == d.id); if (u) { delete u.r; u.wait = ''; toast('Trasa zakończona — pojazd dokończy bieżący kurs'); } break; }
     case 'vFocus': { const u = (d.k === 'sf' ? S.ships : S.veh).find(x => x.id == d.id); if (!u) return; ui.flyV = uPos(u); ui.tab = 'logistyka'; window.scrollTo({ top: 0, behavior: 'smooth' }); break; }
     case 'ctAcc': {
@@ -2363,22 +2493,21 @@ function act(a, d) {
     case 'ordNew': { const g = d.g, pr = +($('ordP_' + g) || {}).value, q = +($('ordQ_' + g) || {}).value; ordCreate(d.l, d.id, g, pr / rate(curOf(d.l)), q); return; }
     case 'ordDel': ordCancel(d.id, d.l, d.b); return;
     case 'go': {
-      const ship = d.k === 'sf', u = (ship ? S.ships : S.veh).find(x => x.id == d.id); if (!u || u.st !== 'idle') return;
-      const p = fPlan(d.k, u); if (!p) return;
-      if (p.job !== 'unload' && !p.fid) { toast('Brak odbiorcy'); return; }
-      if ((p.job !== 'buy' && !(p.q > 0)) || (p.job === 'buy' && !(p.bq > 0))) return;
-      const f = ui[d.k][d.id] || {};
-      fetchRoute(p.a, p.b, ship).then(rt => {
+      const ship = d.k === 'sf', u = (ship ? S.ships : S.veh).find(x => x.id == d.id); if (!u || u.st !== 'idle' || u.pend) return;
+      const P = fPlan(d.k, u), f = P.f; if (!P.pick || !P.drop || !(P.q > 0)) return;
+      Promise.all([P.leg0 ? fetchRoute(P.here, P.pp, ship) : null, fetchRoute(P.pp, P.dp, ship)]).then(([r0, r1]) => {
         advance(S, Date.now()); if (u.st !== 'idle') return;
-        let took = 0;
-        if (p.src && !p.cargo) { took = fl(takeL(S.L[u.at], p.g, p.q, p.src)); if (took <= 0) return; p.q = took; }
-        const from = u.at, fee = depart(S, u, ship, { to: p.to, job: p.job, g: p.g, q: p.q, bq: p.bq, a: p.a, b: p.b, rt, fid: p.fid, sid: p.sid });
-        if (!fee) { if (took) putL(S.L[from], p.g, took, p.src); toast(`Za mało ${curOf(from)} na kurs`); render(); return; }
-        if (f.rt && S.L[from] && p.to !== from && p.job !== 'unload' && !p.cargo) {
-          const src = p.src || (() => { const b = S.L[from].bld.find(b => (B[b.t].in || {})[p.g]); return b ? 'b' + b.id : undefined; })();
-          u.r = { a: from, b: p.to, src, fid: p.fid, g: p.g, m: p.job, aP: p.a, bP: p.b, km: rt.km, s: rt.s }; rtRev(p.a, p.b);
-        }
-        delete ui[d.k][d.id]; save(); toast(`${uName(u, ship)} → ${LOC[p.to].n} · ${durTxt(u.t1 - u.t0)}${u.r ? ' · trasa' : ''}`); render();
+        const g = P.g, want = P.q; let fee = 0;
+        u.dr = P.drop;
+        if (P.pick.k === 'veh') fee = goDrop(S, u, ship, 0);
+        else if (!P.leg0 && P.pick.k === 'st') { // towar ze składu na miejscu
+          const L = S.L[P.pick.lid], took = fl(takeL(L, g, want, P.pick.id)); if (took <= 0) return;
+          u.g = g; u.q = took; u.pos = P.pp; fee = goDrop(S, u, ship, took * G[g].w);
+          if (!fee) { putL(L, g, took, P.pick.id); u.g = null; u.q = 0; }
+        } else fee = goPick(S, u, ship, P.pick, P.drop, g, want);
+        if (!fee) { toast(`Za mało ${curOf(u.at)} na kurs`); render(); return; }
+        if (f.rt && P.pick.k !== 'veh') { u.r = { pk: P.pick, dr: P.drop, g, want, rt2: { km: r1.km, s: r1.s } }; rtRev(P.pp, P.dp); }
+        delete ui[d.k][d.id]; save(); toast(`${uName(u, ship)} w drodze · ${durTxt(u.t1 - u.t0)}${u.r ? ' · trasa' : ''}`); render();
       });
       return;
     }
@@ -2439,6 +2568,8 @@ document.addEventListener('change', e => {
   else if (k === 'shipAt') ui.shipAt = t.value;
   else if (k === 'garAt') ui.garAt = t.value;
   else if (k === 'pdep') ui.pdep = t.value;
+  else if (k === 'gg') ui.gg = t.value;
+  else if (k === 'og') { ui.og[t.dataset.k] = t.value; if (t.dataset.k === 'lid') { delete ui.og.sid; delete ui.og.g; } if (t.dataset.k === 'sid') delete ui.og.g; }
   else if (k === 'rdep') { ui.rdep = t.value; openRecipes(); return; }
   else if (k === 'pmg') { ui.pmg = t.value; openPriceMap(); return; }
   else if (k === 'exFrom') { ui.ex.from = t.value; ui.ex.amt = ''; }
@@ -2448,8 +2579,10 @@ document.addEventListener('change', e => {
     const ls = t.value === '' ? BYC[cid].filter(l => l.cc === cc) : BYC[cid].filter(l => l.rg === +t.value);
     ui.rgSel = t.value !== ''; if (ls.length) { const own = ls.find(l => S.L[l.id]); ui.bl = (own || ls[0]).id; fitTo(ls); } }
   else if (k === 'sf' || k === 'vf') { const o = ui[k], f = o[t.dataset.s] || (o[t.dataset.s] = {}), kk = t.dataset.k;
-    f[kk] = kk === 'rt' ? t.checked : (kk === 'q' || kk === 'bq') ? +t.value : t.value;
-    if (kk === 'g' || kk === 'src') { delete f.q; delete f.fid; } if (kk === 'bg') { delete f.bq; delete f.fid; } if (kk === 'to') { delete f.job; delete f.fid; delete f.sid; } if (kk === 'mode' || kk === 'job') delete f.fid; }
+    const op = (ui.opts || {})[k + t.dataset.s] || {};
+    if (kk === 'pick') { f.pick = op.po[+t.value]; delete f.q; } else if (kk === 'drop') f.drop = op.do[+t.value];
+    else f[kk] = kk === 'rt' ? t.checked : kk === 'q' ? +t.value : t.value;
+    if (kk === 'g') { delete f.q; delete f.pick; delete f.drop; } }
   else if (k === 'vehK') ui.vehK = t.value;
   t.blur(); render(true);
 });
@@ -2645,7 +2778,7 @@ async function onUser(user) {
   if (!user) { if (!S) { au.mode = au.mode === 'wait' ? 'login' : au.mode; renderAuth(); } return; }
   if (S && SAVE_KEY === SAVE + '_' + user.uid) return;
   if (user.email === ADMIN_EMAIL) { S = null; $('wiz').hidden = true; openAdmin(); return; }
-  setTimeout(listenDeliv, 1500);
+  setTimeout(() => { listenDeliv(); listenPay(); }, 1500);
   au.mode = 'wait'; renderAuth();
   SAVE_KEY = SAVE + '_' + user.uid;
   let local = load(), cloud = null;
@@ -2744,9 +2877,55 @@ function ordCancel(id, lid, bid) {
 function pendNPC(p) { const f = firmsOf(p.lid).filter(x => x.gs.includes(p.g)).sort((a, b) => fPrice(S, b, p.g) - fPrice(S, a, p.g))[0];
   if (f) { const r = sellNPC(S, f, p.g, p.q); addNews(S, `Zakład gracza nie przyjął całości — ${uq(p.q, p.g)} ${G[p.g].n} sprzedano firmie ${f.n} za ${mL(r, p.lid)}`); }
   else { const L = ensureL(S, p.lid); L.yard = L.yard || {}; L.yard[p.g] = (L.yard[p.g] || 0) + p.q; } }
-function processPend() { // rozliczenie dostaw do zakładów innych graczy
+// ===== GIEŁDA: oferty sprzedaży graczy (towar zablokowany w ofercie) i płatności =====
+let OFF = [];
+function listenOffers() { if (!DB || ui.offUnsub) return; ui.offUnsub = DB.collection('offers').onSnapshot(sn => { OFF = sn.docs.map(d => ({ id: d.id, ...d.data() })); if (S && ui.tab === 'gielda') render(false); }, () => {}); }
+function listenPay() {
+  if (!DB || !USER || ui.payUnsub) return;
+  ui.payUnsub = DB.collection('payments').where('to', '==', USER.uid).onSnapshot(sn => { for (const d of sn.docs) recvPay(d); }, () => {});
+}
+function recvPay(doc) {
+  const x = doc.data(); if (!S || !S.setup) return;
+  S.gotDel = S.gotDel || {}; if (S.gotDel[doc.id]) { doc.ref.delete().catch(() => {}); return; }
+  const lid = LOC[x.lid] ? x.lid : S.hl; earnC(S, curOf(lid), x.amt * (1 - taxOf(lid)));
+  S.gotDel[doc.id] = Date.now();
+  addNews(S, `Gracz ${clean(x.fromName || '?')} odebrał ${uq(x.q, x.g)} ${G[x.g] ? G[x.g].n : x.g} z Twojej oferty — +${mL(x.amt * (1 - taxOf(lid)), lid)}`); save();
+  doc.ref.delete().catch(() => {});
+}
+function offCreate(lid, sid, g, q, price) {
+  if (!USER || !DB) { toast('Zaloguj się, żeby wystawiać oferty'); return; }
+  const L = S.L[lid], st = stById(L, sid); if (!st || !(q > 0) || !(price > 0)) { toast('Podaj ilość i cenę'); return; }
+  q = fl(Math.min(q, st.inv[g] || 0)); if (q <= 0) return;
+  st.inv[g] -= q; if (st.inv[g] < 1e-9) delete st.inv[g];
+  const [la, lo] = stPos(lid, st); save();
+  DB.collection('offers').add({ uid: USER.uid, name: S.name, lid, la, lo, g, price, left: q, ts: Date.now() })
+    .then(() => { toast(`Oferta wystawiona: ${uq(q, g)} ${G[g].n}`); ui.og = {}; render(); })
+    .catch(() => { add(L, g, q); save(); toast('Nie udało się wystawić oferty (sprawdź reguły Firestore)'); });
+}
+function offCancel(id) {
+  const ref = DB.collection('offers').doc(id);
+  DB.runTransaction(tx => tx.get(ref).then(d => { if (!d.exists) return null; const x = d.data(); tx.delete(ref); return x; }))
+    .then(x => { if (x && x.left > 0) { const L = ensureL(S, x.lid); add(L, x.g, x.left); toast(`Oferta zdjęta — ${uq(x.left, x.g)} ${G[x.g].n} wraca do składu`); save(); render(); } })
+    .catch(() => toast('Nie udało się zdjąć oferty'));
+}
+function pendOffer(p) { // kupno z oferty gracza przy odbiorze
+  const u = (p.ship ? S.ships : S.veh).find(x => x.id === p.vid), done = (took, txt) => {
+    if (u) { u.pend = 0; u.wait = ''; if (took > 0) { u.g = p.g; u.q = took; } addNews(S, txt); afterPick(S, u, p.ship); } save(); render(false); };
+  if (!DB || !USER) { S.pend.shift(); done(0, 'Oferta gracza niedostępna offline'); return; }
+  ui.pendBusy = true;
+  const ref = DB.collection('offers').doc(p.oid), c = curOf(p.lid);
+  DB.runTransaction(tx => tx.get(ref).then(d => {
+    if (!d.exists) return { took: 0 };
+    const x = d.data(), afford = wal(S, c) / rate(c) / x.price, took = fl(Math.min(p.q, x.left, afford));
+    if (took > 0) { tx.update(ref, { left: x.left - took, ts: Date.now() }); tx.set(DB.collection('payments').doc(), { to: x.uid, from: USER.uid, fromName: S.name, lid: x.lid, g: x.g, q: took, amt: took * x.price, ts: Date.now() }); }
+    return { took, price: x.price, name: x.name };
+  })).then(r => { S.pend.shift(); if (r.took > 0) payC(S, c, r.took * r.price); done(r.took, r.took > 0 ? `Kupiono od gracza ${clean(r.name || '?')}: ${uq(r.took, p.g)} ${G[p.g].n} za ${mL(r.took * r.price, p.lid)}` : 'Oferta gracza już niedostępna albo brak pieniędzy'); })
+    .catch(() => {}).finally(() => { ui.pendBusy = false; });
+}
+function processPend() { // rozliczenia z innymi graczami
   if (!S || !S.pend || !S.pend.length || ui.pendBusy) return;
   const p = S.pend[0];
+  if (p.t === 'of') { pendOffer(p); return; }
   if (!DB || !USER) { S.pend.shift(); pendNPC(p); return; }
   ui.pendBusy = true;
   const ref = DB.collection('orders').doc(p.fid.slice(2));
@@ -2925,7 +3104,7 @@ document.addEventListener('visibilitychange', () => {
 });
 if (VERSION === 'dev') window.__xyx = { get S() { return S; }, get LM() { return LM; }, advance, firmsOf, offersOf, stores, fetchRoute, parseSave, newState, LOCS, B, G, netH, lvCost, cumCost, vOut, vIn, SC, hour: n => { for (let i = 0; i < n; i++) hour(S); render(true); } };
 registerCustom(null);
-if (FB) { au.mode = 'wait'; renderAuth(); firebase.auth().onAuthStateChanged(onUser); listenPlaces(); listenBld(); listenOrders(); }
+if (FB) { au.mode = 'wait'; renderAuth(); firebase.auth().onAuthStateChanged(onUser); listenPlaces(); listenBld(); listenOrders(); listenOffers(); }
 else if (localStorage.getItem('xyx_guest') === '1') startGame(load(SAVE) || newState());
 else renderAuth();
 setInterval(loop, 1000);
