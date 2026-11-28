@@ -295,3 +295,14 @@ header#top{flex-wrap:wrap}
 .pbuy small{font-size:11px;opacity:.85;font-weight:500}
 .pit{padding:6px 0;border-bottom:1px solid var(--line)}.pit:last-child{border:0}
 .lvbar{height:4px;border-radius:2px;background:var(--line);margin:6px 0 2px;overflow:hidden}.lvbar i{display:block;height:100%;background:linear-gradient(90deg,var(--acc),var(--ok))}
+/* handel */
+.fsq{margin:6px 0 4px}
+.chips2{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px}
+.chipb{border:1px solid var(--line);background:var(--bg2);color:inherit;border-radius:999px;padding:6px 10px;font:inherit;font-size:13px}
+.chipb small{color:var(--mut);margin-left:4px}
+.chk{display:flex;align-items:center;gap:8px;margin:10px 0 2px;font-size:14px}
+.chk input{width:20px;height:20px}
+.route{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:6px;padding:8px;border-radius:10px;background:rgba(63,207,127,.08);border:1px solid rgba(63,207,127,.3);font-size:13px}
+.route .btn{margin-left:auto}
+.bar.r i{background:var(--bad)}
+.satb{display:inline-block;width:46px;height:6px;border-radius:3px;background:var(--line);overflow:hidden;vertical-align:middle}.satb i{display:block;height:100%;background:linear-gradient(90deg,var(--ok),#f5c542,var(--bad))}
