@@ -1,5 +1,7 @@
 # XyxWord
 
+## ▶ [Zagraj w przeglądarce: matixpompayt.github.io/xyxword](https://matixpompayt.github.io/xyxword/)
+
 Ekonomiczna gra strategiczna w czasie rzeczywistym (w stylu Economy World).
 Zaczynasz od farmy albo kopalni, budujesz łańcuchy produkcji aż do fabryk komputerów i samochodów,
 wozisz surowce statkami między kontynentami i walczysz w sezonowym rankingu z firmami AI.
@@ -15,7 +17,7 @@ Nowy APK instaluje się na starym (ten sam podpis), zapis gry zostaje.
 Każdy push do `main` → GitHub Actions buduje APK (Capacitor) → tworzy Release z kolejną wersją: `v0.1`, `v0.2`, `v0.3`….
 
 ## Struktura
-- `www/` – cała gra (HTML/CSS/JS), ten sam kod pójdzie później na przeglądarkę
+- `www/` – cała gra (HTML/CSS/JS), ten sam kod działa na Androidzie i w przeglądarce (GitHub Pages)
 - `capacitor.config.json` – konfiguracja aplikacji Android
 - `.github/workflows/android.yml` – automatyczny build APK + release
 - `keystore/xyxword.jks` – stały klucz podpisu APK (dzięki niemu aktualizacje instalują się na starej wersji)
