@@ -996,10 +996,10 @@ const TUT = [
     sel: () => ['[data-a=pMag]', '[data-a=plotBuy][data-sz="0"]', '[data-a=plotPick][data-sz="0"]', '[data-a=pbAuto]', '[data-tab=budowa]'], done: () => Object.values(S.L).some(L => (L.P || []).some(p => p.mg)) },
   { t: 'Garaż', d: 'Towar sprzedajesz, wysyłając pojazd do miejscowości. Podnieś małą działkę na poziom 2 i postaw garaż (dostawczaki).',
     sel: () => ['[data-a=pGar]', '[data-a=pLv]', '[data-tab=budowa]'], done: () => Object.values(S.L).some(L => (L.P || []).some(p => p.g)) },
-  { t: 'Dostawczak', d: 'W zakładce Transport kup dostawczy (1,5 t).', sel: () => ['[data-a=veh]', '[data-tab=logistyka]'], done: () => S.veh.length > 0 },
-  { t: 'Sprzedaż', d: 'Skąd: Młyn, towar: Mąka. Dokąd: np. Gorzów, Komu: wybierz firmę (piekarnia, hurtownia…) — każda płaci inaczej. Auto pojedzie po prawdziwych drogach (załadunek, jazda, rozładunek) — zobaczysz je na mapie. Częsta sprzedaż jednej firmie obniża jej cenę.',
-    sel: () => ['[data-a=go]', '[data-tab=logistyka]'], done: () => S.tut.sold || S.tut.sent },
-  { t: 'Trasy', d: 'Zaznacz „Powtarzaj w kółko”, a pojazd sam będzie woził towar na sprzedaż (albo kupował surowce) i wracał — także gdy gra jest zamknięta. Brakujące surowce kupujesz tak samo: „Jadę kupić towar”.', next: true, sel: () => ['[data-tab=logistyka]'] },
+  { t: 'Dostawczak', d: 'W zakładce Transport otwórz „Kup pojazd” i kup dostawczy (1,5 t).', sel: () => ['[data-a=veh]', 'details[data-k=gar] summary', '[data-tab=logistyka]'], done: () => S.veh.length > 0 },
+  { t: 'Sprzedaż', d: 'Dotknij „Wyślij towar”. Skąd: Twój młyn. Towar: mąka. Dokąd: firma, która płaci najwięcej (zielona na mapie). W ostatnim kroku zobaczysz trasę, czas i zysk. Auto pojedzie po prawdziwych drogach. Częsta sprzedaż jednej firmie obniża jej cenę.',
+    sel: () => ['[data-a=dpGo]', '[data-a=dpSel]', '[data-a=dpG]', '[data-a=dpNew][data-v=send]', '[data-tab=logistyka]'], done: () => S.tut.sold || S.tut.sent },
+  { t: 'Trasy i zakupy', d: 'W ostatnim kroku kursu zaznacz „Powtarzaj w kółko”, a pojazd sam będzie woził towar i wracał — także gdy gra jest zamknięta. Surowce kupujesz przyciskiem „Zakupy”: pojazd pojedzie do firmy i przywiezie towar do Twojego składu.', next: true, sel: () => ['[data-tab=logistyka]'] },
   { t: 'Działki, miasta i wsie', d: 'Mała działka — garaż. Średnia — farmy, hodowla, kopalnie, lekkie przetwórstwo. Duża — fabryki i huty. Wieś: tanie działki, dużo dużych, farmy i kopalnie +25%. Miasto: drogie działki, mało dużych, fabryki +15% i sprzedaż +5%.', next: true, sel: () => ['[data-tab=budowa]'] },
   { t: 'Ciężarówki i TIR-y', d: 'Garaż na średniej działce mieści ciężarówki (12 t), na dużej TIR-y (25 t). Każda miejscowość ma własny magazyn — zboże ze wsi możesz wozić do młyna w mieście.', next: true, sel: () => ['[data-tab=logistyka]'] },
   { t: 'Porty i statki', d: 'Między kontynentami (i na wyspy, np. Tokio) wozisz towar statkami. Port możesz postawić tylko w miastach nad morzem.', next: true, sel: () => ['[data-tab=logistyka]'] },
@@ -1098,6 +1098,7 @@ document.addEventListener('input', e => {
   if (t.dataset.pq) { ui.pq = t.value; const r = $('pqRes'); if (r) r.innerHTML = pqRes(); }
   if (t.dataset.q) { ui.locQ = t.value; const r = $('locRes'); if (r) r.innerHTML = locRes(ui.bc, ui.bl); }
   if (t.dataset.np && ui.np) ui.np[t.dataset.np] = t.value;
+  if (t.dataset.in === 'dpQ' && ui.dp && G[ui.dp.g]) { const q = fl(+t.value), o = $('dpQv'); t.style.setProperty('--p', (+t.max ? q / +t.max * 100 : 0) + '%'); if (o) o.textContent = uq(q, ui.dp.g); }
 });
 
 // ================== RENDER ==================
@@ -1128,7 +1129,7 @@ function vFirma() {
   const day = Math.floor((S.hour % SEASON_H) / 24) + 1;
   let h = '';
   if (!bldCount() && S.tut.step >= TUT.length) h += `<div class="card hint"><b>Jak zacząć</b><div class="mut" style="margin-top:4px">W <b>Budowa</b> postaw Farmę i Młyn w swojej siedzibie, potem Piekarnię. Na wsiach farmy i kopalnie dają więcej, w miastach fabryki. Towar między miejscowościami wożą ciężarówki, między kontynentami statki.</div><div class="btns"><button class="btn p" data-a="tab" data-t="budowa">Do budowy</button></div></div>`;
-  h += mapSvg();
+  if (!lmapOn()) h += mapSvg();
   h += `<div class="kpis">
     <div class="kpi"><span>Wartość firmy</span><b>${mH(worth())}</b></div>
     <div class="kpi"><span>Przepływ gotówki /h</span><b class="${S.inc >= 0 ? 'pos' : 'neg'}">${mH(S.inc)}</b></div>
@@ -1375,13 +1376,16 @@ function foundSheet() {
 }
 
 // ================== MAPA SZCZEGÓŁOWA (MapLibre + OpenFreeMap: drogi, zabudowa; wymaga internetu) ==================
-const MSTYLES = { caros: 'Ciemna 3D (jak CAR OS)', fiord: 'Granatowa', dark: 'Ciemna płaska', liberty: 'Jasna 3D' };
-const styleUrl = k => 'https://tiles.openfreemap.org/styles/' + (k === 'caros' ? 'liberty' : k);
+const MSTYLES = { caros: 'Ciemna 3D (Nocna zmiana)', szklo: 'Granatowa 3D (Szkło)', liberty: 'Jasna 3D (Hala)', fiord: 'Granatowa płaska', dark: 'Ciemna płaska' };
+const styleUrl = k => 'https://tiles.openfreemap.org/styles/' + (k === 'caros' || k === 'szklo' ? 'liberty' : k);
 // styl CAR OS: „Liberty” z OpenFreeMap przemalowany na ciemno + własne budynki 3D (port z CarMapStyle.kt)
-const CP = { bg: '#0B0E12', water: '#0C1A25', green: '#0E1914', building: '#171C23', aero: '#1A1F27', pier: '#151A21', land: '#10141A',
+const CPD = { bg: '#0B0E12', water: '#0C1A25', green: '#0E1914', building: '#171C23', aero: '#1A1F27', pier: '#151A21', land: '#10141A',
   lWater: '#15344B', lBoundary: '#3A404A', lRail: '#262C34', lCasing: '#06080B', lMotorway: '#677180', lPrimary: '#535C69', lSecondary: '#434B56',
   lPath: '#232931', lAero: '#2B313A', lRoad: '#333A44', text: '#C3C9D0', textPoi: '#8C96A3', textWater: '#4E7FA3', halo: '#0A0C0F', b0: '#1B212A', b1: '#232B36', b2: '#2C3644' };
-function applyCaros(map) {
+const CPS = { bg: '#0A0F1F', water: '#0A1C33', green: '#0C1826', building: '#141A31', aero: '#171E38', pier: '#131A2E', land: '#0D1327',
+  lWater: '#1B4870', lBoundary: '#4A4F7A', lRail: '#222944', lCasing: '#060914', lMotorway: '#7484D0', lPrimary: '#5A64A6', lSecondary: '#454E86',
+  lPath: '#1E2544', lAero: '#283055', lRoad: '#333B66', text: '#CBD3F2', textPoi: '#8F99C6', textWater: '#5FA7D8', halo: '#070A16', b0: '#19203F', b1: '#222B55', b2: '#2D386E' };
+function applyCaros(map, CP = CPD) {
   const has = (id, ...k) => k.some(x => id.includes(x));
   const L = map.getStyle().layers;
   for (const ly of L) {
@@ -1427,7 +1431,7 @@ function lmapOn() { return (!S || S.mapMode !== 'svg') && !ui.noGL && !!window.m
 function ensureLM() {
   if (LM) return LM;
   const el = document.createElement('div'); el.className = 'lmapL';
-  const sty = S && MSTYLES[S.mapStyle] ? S.mapStyle : 'caros';
+  const sty = S && MSTYLES[S.mapStyle] ? S.mapStyle : THEMES[theme()].map;
   let map;
   try {
     map = new maplibregl.Map({ container: el, style: styleUrl(sty), center: [14.55, 53.43], zoom: 9, pitch: 50, maxPitch: 70,
@@ -1437,12 +1441,16 @@ function ensureLM() {
   map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-left');
   map.addControl(new TiltCtl(), 'top-left');
   LM = { map, el, sty, cid: null, mk: [], ready: false, srcCid: null };
-  map.on('style.load', () => { LM.ready = true; LM.srcCid = null; setupLayers(); drawLM(); });
+  map.on('style.load', () => { LM.ready = true; LM.srcCid = null; LM.dpSig = null; setupLayers(); drawLM(); drawDP(); });
   map.on('error', e => { if (!LM.ready && !LM.err) { LM.err = true; toast('Mapa szczegółowa się nie wczytała (internet?) — Ustawienia → Mapa'); } });
-  map.on('movestart', () => { ui.gesture = true; });
+  map.on('movestart', e => { if (e.originalEvent) ui.gesture = true; });
   map.on('moveend', () => { ui.gesture = false; });
   map.on('click', e => {
     if (ui.placeB && S) { placeBld(e.lngLat.lat, e.lngLat.lng); return; }
+    if (S && ui.dp && ui.tab === 'logistyka' && map.getLayer('xy-dp-c')) {
+      const f = map.queryRenderedFeatures([[e.point.x - 16, e.point.y - 16], [e.point.x + 16, e.point.y + 16]], { layers: ['xy-dp-c'] }).find(x => x.properties.i >= 0);
+      if (f) { act('dpSel', { i: String(f.properties.i) }); return; }
+    }
     const bb = [[e.point.x - 12, e.point.y - 12], [e.point.x + 12, e.point.y + 12]];
     const fb = map.getLayer('xy-bld-c') && map.queryRenderedFeatures(bb, { layers: ['xy-bld-c', 'xy-bld-s'] })[0];
     if (fb && S) { bldSheet(fb.properties); return; }
@@ -1611,7 +1619,9 @@ function plotSheet(lid, pid) {
 }
 function setupLayers() {
   const map = LM.map;
-  if ((S && S.mapStyle ? S.mapStyle : 'caros') === 'caros' || (!S && LM.sty === 'caros')) applyCaros(map);
+  const sty = S && S.mapStyle ? S.mapStyle : LM.sty, lt = sty === 'liberty' || sty === 'bright' || sty === 'positron';
+  const TX = lt ? '#17202A' : '#eef0f3', HA = lt ? '#FFFFFF' : '#0a0c0f';
+  if (sty === 'caros') applyCaros(map); else if (sty === 'szklo') applyCaros(map, CPS);
   // polskie nazwy na podkładzie, gdzie są dostępne
   for (const ly of map.getStyle().layers) {
     if (ly.type !== 'symbol') continue;
@@ -1624,13 +1634,13 @@ function setupLayers() {
   for (const [id, lo, hi, minz] of PL_LAYERS) map.addLayer({ id, type: 'circle', source: 'xy-pl', minzoom: minz,
     filter: ['all', ['>=', ['get', 'p'], lo], ['<', ['get', 'p'], hi]],
     paint: { 'circle-radius': ['interpolate', ['linear'], ['zoom'], 3, ['*', .7, popR], 10, ['*', 1.2, popR], 15, ['*', 1.8, popR]],
-      'circle-color': ['case', ['==', ['get', 't'], 'm'], '#a9bfd6', '#86c98a'], 'circle-opacity': .9,
-      'circle-stroke-color': '#0b131b', 'circle-stroke-width': 1 } });
+      'circle-color': ['case', ['==', ['get', 't'], 'm'], lt ? '#3E6A96' : '#a9bfd6', lt ? '#3F8A4A' : '#86c98a'], 'circle-opacity': .9,
+      'circle-stroke-color': lt ? '#FFFFFF' : '#0b131b', 'circle-stroke-width': 1 } });
   map.addLayer({ id: 'xy-veh-l', type: 'line', source: 'xy-veh', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#f5c542', 'line-width': ['interpolate', ['linear'], ['zoom'], 6, 2, 14, 5], 'line-opacity': .75 } });
   map.addSource('xy-vp', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
   map.addLayer({ id: 'xy-vp-c', type: 'circle', source: 'xy-vp', paint: { 'circle-radius': ['interpolate', ['linear'], ['zoom'], 5, 4, 14, 9], 'circle-color': ['case', ['==', ['get', 'mv'], 1], '#f5c542', '#9aa4ae'], 'circle-stroke-color': '#0b0e12', 'circle-stroke-width': 2 } });
   map.addLayer({ id: 'xy-vp-s', type: 'symbol', source: 'xy-vp', minzoom: 8, layout: { 'text-field': ['get', 'n'], 'text-size': 11, 'text-offset': [0, 1.4], 'text-font': ['Noto Sans Bold'], 'text-allow-overlap': false },
-    paint: { 'text-color': '#f5d27a', 'text-halo-color': '#0a0c0f', 'text-halo-width': 1.4 } });
+    paint: { 'text-color': lt ? '#6A4A00' : '#f5d27a', 'text-halo-color': HA, 'text-halo-width': 1.4 } });
   map.addSource('xy-rad', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
   map.addLayer({ id: 'xy-rad-f', type: 'fill', source: 'xy-rad', paint: { 'fill-color': '#e0823f', 'fill-opacity': .08 } });
   map.addLayer({ id: 'xy-rad-l', type: 'line', source: 'xy-rad', paint: { 'line-color': '#e0823f', 'line-width': 2, 'line-dasharray': [2, 2] } });
@@ -1648,12 +1658,24 @@ function setupLayers() {
   map.addLayer({ id: 'xy-bld-s', type: 'symbol', source: 'xy-bld', minzoom: 10,
     layout: { 'icon-image': ['get', 'ic'], 'icon-size': ['interpolate', ['linear'], ['zoom'], 10, .28, 13, .5, 16, .75], 'icon-allow-overlap': true,
       'text-field': ['step', ['zoom'], '', 12.5, ['get', 'lb']], 'text-font': ['Noto Sans Regular'], 'text-size': 11, 'text-offset': [0, 1.5], 'text-anchor': 'top', 'text-optional': true },
-    paint: { 'text-color': '#eef0f3', 'text-halo-color': '#0a0c0f', 'text-halo-width': 1.4, 'icon-opacity': ['step', ['zoom'], 1, 15, 0] } });
+    paint: { 'text-color': TX, 'text-halo-color': HA, 'text-halo-width': 1.4, 'icon-opacity': ['step', ['zoom'], 1, 15, 0] } });
+  // nowy kurs: trasa (rysowana animacją) i punkty do wyboru
+  const E = { type: 'FeatureCollection', features: [] }, LL = { 'line-cap': 'round', 'line-join': 'round' }, acc = cssV('--acc'), sec = cssV('--sec');
+  map.addSource('xy-dpr', { type: 'geojson', lineMetrics: true, data: E });
+  map.addLayer({ id: 'xy-dpr-0', type: 'line', source: 'xy-dpr', filter: ['==', ['get', 'k'], 'l0'], layout: LL, paint: { 'line-color': '#9FB3C8', 'line-opacity': .8, 'line-width': ['interpolate', ['linear'], ['zoom'], 5, 2, 14, 4], 'line-dasharray': [1.2, 1.6] } });
+  map.addLayer({ id: 'xy-dpr-b', type: 'line', source: 'xy-dpr', filter: ['==', ['get', 'k'], 'l1'], layout: LL, paint: { 'line-color': '#000', 'line-opacity': .35, 'line-width': ['interpolate', ['linear'], ['zoom'], 5, 6, 14, 14], 'line-blur': 3 } });
+  map.addLayer({ id: 'xy-dpr-l', type: 'line', source: 'xy-dpr', filter: ['==', ['get', 'k'], 'l1'], layout: LL, paint: { 'line-width': ['interpolate', ['linear'], ['zoom'], 5, 3.5, 14, 8], 'line-gradient': ['interpolate', ['linear'], ['line-progress'], 0, sec, 1, acc] } });
+  map.addLayer({ id: 'xy-dpr-a', type: 'line', source: 'xy-dpr', filter: ['==', ['get', 'k'], 'l1'], layout: LL, paint: { 'line-color': '#FFFFFF', 'line-opacity': 0, 'line-width': ['interpolate', ['linear'], ['zoom'], 5, 1.2, 14, 2.6], 'line-dasharray': DASH[0] } });
+  map.addSource('xy-dp', { type: 'geojson', data: E });
+  map.addLayer({ id: 'xy-dp-h', type: 'circle', source: 'xy-dp', filter: ['==', ['get', 'on'], 1], paint: { 'circle-radius': 18, 'circle-color': ['get', 'c'], 'circle-opacity': .16, 'circle-stroke-color': ['get', 'c'], 'circle-stroke-width': 1.5, 'circle-stroke-opacity': .7, 'circle-pitch-alignment': 'map' } });
+  map.addLayer({ id: 'xy-dp-c', type: 'circle', source: 'xy-dp', paint: { 'circle-radius': ['case', ['==', ['get', 'fx'], 1], 7, ['==', ['get', 'on'], 1], 10, 7.5], 'circle-color': ['get', 'c'], 'circle-stroke-color': '#0B0E12', 'circle-stroke-width': 2.5 } });
+  map.addLayer({ id: 'xy-dp-t', type: 'symbol', source: 'xy-dp', layout: { 'text-field': ['get', 't'], 'text-size': 12, 'text-offset': [0, 1.2], 'text-anchor': 'top', 'text-font': ['Noto Sans Bold'], 'text-max-width': 11, 'text-optional': true },
+    paint: { 'text-color': TX, 'text-halo-color': HA, 'text-halo-width': 1.6 } });
 }
 function mountLM(cid, sel) {
-  const slot = $('lmapSlot'), lm = ensureLM();
+  const slot = $('lmapSlot') || (S ? $('world') : null), lm = ensureLM();
   if (!slot) return; if (!lm) { render(true); return; }
-  slot.appendChild(lm.el); lm.map.resize();
+  if (lm.el.parentNode !== slot) { slot.appendChild(lm.el); lm.map.resize(); try { lm.map.setPadding(S ? mapPad() : { top: 0, bottom: 0, left: 0, right: 0 }); } catch (e) {} }
   lm.el.classList.toggle('placing', !!(ui.place || ui.placeB));
   const l = LOC[sel];
   if (lm.cid !== cid) {
@@ -1669,7 +1691,7 @@ function mountLM(cid, sel) {
   drawLM();
 }
 function animVeh() { // pozycje pojazdów co sekundę
-  const lm = LM; if (!S || !lm || !lm.ready || !lm.map.getSource('xy-vp') || !$('lmapSlot')) return;
+  const lm = LM; if (!S || !lm || !lm.ready || !lm.map.getSource('xy-vp') || !lm.el.isConnected) return;
   const t = Date.now(), lines = [], pts = [];
   for (const [u, ship] of [...S.veh.map(v => [v, false]), ...S.ships.map(x => [x, true])]) {
     if (!LOC[u.at] && !u.a) continue;
@@ -1755,7 +1777,7 @@ function vBudowa() {
   h += (ui.place ? `<div class="placebar"><span class="grow">${isAdmin() ? 'ADMIN: dotknij mapy — miejscowość pojawi się u wszystkich graczy.' : 'Dotknij mapy w miejscu, gdzie ma powstać nowa miejscowość.'}</span><button class="btn s" data-a="placeOff">Anuluj</button></div>` : '')
     + (ui.placeB ? `<div class="placebar"><span class="grow">Dotknij mapy w obrębie <b>${esc(LOC[ui.placeB.lid].n)}</b> (pomarańczowy okrąg): <b>${ui.placeB.k === 'mvp' ? 'nowe miejsce działki' : ui.placeB.k === 'plot' ? PSZ[ui.placeB.sz].n.toLowerCase() + ' działka' : 'nowe miejsce'}</b></span>
         ${ui.placeB.k === 'plot' ? '<button class="btn s" data-a="pbAuto">Losowo</button>' : ''}<button class="btn s" data-a="pbOff">Anuluj</button></div>` : '')
-    + (lmapOn() ? '<div id="lmapSlot" class="lslot"></div>' : locMap(cid, lid))
+    + (lmapOn() ? '' : locMap(cid, lid))
     + `<div class="lsearch"><input id="locQ" data-q="1" type="search" placeholder="Szukaj wśród ${nC.toLocaleString('pl-PL')} miejscowości…" value="${esc(ui.locQ || '')}" autocomplete="off">
        </div><div id="locRes">${locRes(cid, lid)}</div>`;
   h += `<div class="card"><div class="row"><div class="grow"><span class="bname">${esc(l.n)}</span> ${tag(l)}${l.port ? ' <span class="ltag p">Wybrzeże</span>' : ''}${l.u ? ' <span class="ltag u">Twoja osada</span>' : ''}${l.g ? ' <span class="ltag g">Nowa</span>' : ''}
@@ -1798,7 +1820,7 @@ function vBudowa() {
     <div class="depbtns"><button class="btn s b" data-a="recipes">☰ Przepisy</button><button class="btn s b" data-a="priceMap">🗺 Mapa cen</button>${dep ? `<button class="btn s b" data-a="dep" data-v="">‹</button>` : ''}</div></div>`;
   if (!dep) {
     h += `<div class="deps">${DEP.map(x => { const n = L ? L.bld.filter(b => B[b.t].d === x.id).length : 0, k = Object.values(B).filter(d => d.d === x.id).length;
-      return `<button class="depc" data-a="dep" data-v="${x.id}"><span class="depi">${x.i}</span><b>${x.n}</b><span class="mut small">${k} zakład${k > 4 ? 'ów' : k > 1 ? 'y' : ''}${n ? ` · masz tu ${n}` : ''}</span><span class="depgo">BUDUJ</span></button>`; }).join('')}</div>`;
+      return `<button class="depc" data-a="dep" data-v="${x.id}"><span class="depi">${x.i}</span><b>${x.n}</b><span class="mut small">${k} zakład${k > 4 ? 'ów' : k > 1 ? 'y' : ''}${n ? ` · masz tu ${n}` : ''}</span><span class="depgo">›</span></button>`; }).join('')}</div>`;
     return h;
   }
   for (const [id, d] of Object.entries(B).filter(([, d]) => d.d === dep.id)) {
@@ -1987,124 +2009,220 @@ function dropOpts(u, ship, g, pick, nT = 45, nF = 10) { // dokąd: firmy i gracz
       res.push({ k: 'st', lid, id: st.id, la, lo, g, n: `📦 ${st.n} (${LOC[lid].n}) — wolne ${qty(stFreeOf(st))} t` }); } }
   return res;
 }
-function defG(u, ship) { // domyślny towar: najcenniejszy w składach przy pojeździe
-  const L = S.L[u.at]; let b = null, bv = 0;
-  for (const [g, q] of Object.entries(invAll(L))) if (q * G[g].p > bv) { bv = q * G[g].p; b = g; }
-  return b || 'zboze';
-}
-function fPlan(kind, u) {
-  const ship = kind === 'sf', f = ui[kind][u.id] || (ui[kind][u.id] = {}), capT = uCap(u, ship), here = u.pos || [LOC[u.at].la, LOC[u.at].lo], P = { ship, here, f };
-  if (u.q > 0) { P.g = u.g; P.pick = { k: 'veh', lid: u.at, la: here[0], lo: here[1], g: u.g, have: u.q, n: `🚚 W pojeździe — ${uq(u.q, u.g)}` }; P.po = [P.pick]; }
-  else {
-    if (!G[f.g]) f.g = defG(u, ship); P.g = f.g;
-    P.po = pickOpts(u, ship, P.g);
-    const fp = f.pick && f.pick.g === P.g ? f.pick : null;
-    if (fp && !P.po.some(x => sameSp(x, fp))) P.po.unshift(fp);
-    P.pick = fp ? P.po.find(x => sameSp(x, fp)) : P.po[0];
-  }
-  if (!P.pick) return P;
-  if (P.pick.k === 'st') { const st = stById(S.L[P.pick.lid], P.pick.id); P.have = st ? (st.inv[P.g] || 0) : 0; } else P.have = P.pick.have ?? Infinity;
-  P.mx = fl(Math.min(capT / G[P.g].w, P.have)); P.q = clamp(fl(f.q ?? P.mx), 0, P.mx);
-  P.do = dropOpts(u, ship, P.g, P.pick);
-  const fd = f.drop && f.drop.g === P.g ? f.drop : null;
-  if (fd && !P.do.some(x => sameSp(x, fd))) P.do.unshift(fd);
-  P.drop = fd ? P.do.find(x => sameSp(x, fd)) : P.do[0];
-  P.pp = spPos(P.pick); P.dp = P.drop ? spPos(P.drop) : null;
-  P.leg0 = P.pick.k !== 'veh' && !(ship ? u.at === P.pick.lid : near(here, P.pp));
-  P.r0 = P.leg0 ? rtGet(rkey(here, P.pp)) : null; P.r1 = P.drop ? rtGet(rkey(P.pp, P.dp)) : null;
-  return P;
-}
 function revEst(f, g, q, lid) {
   if (f.player) return f.price * Math.min(q, f.left) * (1 - taxOf(lid));
   let r = 0, qq = q; const c = ctFor(f.id, g);
   if (c) { const left = Math.max(0, c.per - (c.done[cDay(S, c)] || 0)), qc = Math.min(qq, left); r += qc * c.price; qq -= qc; }
   return (r + (qq > 0 ? fPrice(S, f, g, qq / 2) * qq : 0)) * (1 + .04 * S.perk.sell) * (1 - taxOf(lid));
 }
-function sendForm(kind, u) {
-  const ship = kind === 'sf', P = fPlan(kind, u), f = P.f, opt = (v, t, on) => `<option value="${v}" ${on ? 'selected' : ''}>${t}</option>`;
-  const sel = (k, x) => `<select data-in="${kind}" data-s="${u.id}" data-k="${k}">${x}</select>`;
-  ui.opts = ui.opts || {}; ui.opts[kind + u.id] = { po: P.po, do: P.do || [] };
-  let h = '';
-  if (P.pick && P.pick.k === 'veh') h += `<div class="flow">W pojeździe: <b>${uq(u.q, u.g)} ${G[u.g].n}</b></div>`;
-  else h += `<label class="f">Towar</label>${sel('g', goodsOpts(P.g))}`;
-  if (!P.pick || P.pick.k !== 'veh') {
-    h += `<div class="lblrow"><label class="f">Skąd (${P.po.length})</label><button class="btn s" data-a="spMap" data-k="${kind}" data-id="${u.id}" data-w="pick">🗺 Wybierz na mapie</button></div>`;
-    h += P.po.length ? sel('pick', P.po.map((x, i) => opt(i, esc(x.n), x === P.pick)).join('')) : `<div class="warn">Nigdzie w okolicy nie ma: ${G[P.g].n}. Wybierz inny towar.</div>`;
+// ===== TRANSPORT: nowy kurs — mapa + panel od dołu =====
+const VIC = { van: '🚐', truck: '🚚', tir: '🚛' };
+const uIc = (u, ship) => ship ? '🚢' : VIC[u.k] || '🚚';
+const gIc = g => (DEP.find(x => x.id === GDEP(g)) || {}).i || '📦';
+const stIc = st => st.k === 'm' ? '🏬' : st.k === 'y' ? '🧱' : (DEP.find(x => x.id === (B[st.o.t] || {}).d) || {}).i || '🏭';
+const idleU = u => u.st === 'idle' && !u.r && !u.pend;
+const allU = () => [...S.veh.map(u => [u, false]), ...S.ships.map(u => [u, true])];
+const uFind = (id, ship) => (ship ? S.ships : S.veh).find(x => x.id == id);
+const uHere = u => u.pos || [LOC[u.at].la, LOC[u.at].lo];
+const dKm = (u, p) => { const h = uHere(u); return kmLL(h[0], h[1], p[0], p[1]); };
+const stripN = sp => sp ? String(sp.n || '').replace(/^\p{Extended_Pictographic}\uFE0F?\s*/u, '').replace(/ —.*/, '') : '';
+const DPST = { send: ['Skąd', 'Towar', 'Dokąd', 'Kurs'], buy: ['Towar', 'Od kogo', 'Dokąd', 'Kurs'] };
+const spec = x => { const o = { k: x.k, lid: x.lid, id: x.id, la: x.la, lo: x.lo, g: x.g, n: x.n2 || x.n }; for (const k of ['pr', 'have', 'vid', 'ship']) if (x[k] !== undefined) o[k] = x[k]; return o; };
+const gsTxt = gs => gs.slice(0, 2).map(([g, q]) => `${uq(q, g)} ${G[g].n.toLowerCase()}`).join(', ') + (gs.length > 2 ? ` i ${gs.length - 2} więcej` : '');
+function dpSources(g) { // Twoje składy z towarem i pojazdy z ładunkiem
+  const res = [];
+  for (const lid in S.L) for (const st of stores(S.L[lid])) {
+    const gs = Object.entries(st.inv).filter(([k, q]) => G[k] && q > 1e-3 && (!g || k === g)).sort((a, b) => b[1] * G[b[0]].p - a[1] * G[a[0]].p); if (!gs.length) continue;
+    const [la, lo] = stPos(lid, st);
+    res.push({ k: 'st', lid, id: st.id, la, lo, n: st.n, n2: `${st.n} (${LOC[lid].n})`, ic: stIc(st), gs, val: gs.reduce((a, [k, q]) => a + q * G[k].p, 0) });
   }
-  if (!P.pick) return h;
-  h += `<label class="f">Ilość (max ${uq(P.mx, P.g)} · ${qty(P.mx * G[P.g].w)} t)</label><input type="number" inputmode="decimal" step="any" data-in="${kind}" data-s="${u.id}" data-k="q" value="${P.q}" min="0" max="${P.mx}">`;
-  h += `<div class="lblrow"><label class="f">Dokąd (${P.do.length})</label><button class="btn s" data-a="spMap" data-k="${kind}" data-id="${u.id}" data-w="drop">🗺 Wybierz na mapie</button></div>`;
-  h += P.do.length ? sel('drop', P.do.map((x, i) => opt(i, esc(x.n), x === P.drop)).join('')) : `<div class="warn">W okolicy nikt nie kupuje: ${G[P.g].n}.</div>`;
-  let est = '', fee = 0, ok = !!P.drop && P.q > 0;
-  if (P.drop) {
-    if ((P.leg0 && !P.r0) || !P.r1) { ok = false; est = `<div class="flow mut">🛣 Liczę trasę po drogach…</div>`;
-      Promise.all([P.leg0 ? fetchRoute(P.here, P.pp, ship) : null, fetchRoute(P.pp, P.dp, ship)]).then(() => render()); }
-    else {
-      const tn = P.q * G[P.g].w;
-      const T0 = P.leg0 ? planTimes(S, u, ship, { from: u.at, to: P.pick.lid, rt: P.r0, endT: tn }) : null;
-      const T1 = planTimes(S, u, ship, { from: P.pick.lid, to: P.drop.lid, rt: P.r1, g: P.g, q: P.q, ldT: P.leg0 || P.pick.k === 'veh' ? 0 : tn, endT: tn });
-      fee = (T0 ? T0.fee : 0) + T1.fee;
-      const buyC = P.pick.k === 'f' ? fPrice(S, firmById(P.pick.lid, P.pick.id) || {}, P.g, -P.q / 2) * 1.15 * P.q : P.pick.k === 'of' ? P.pick.pr * P.q : 0;
-      const fr = P.drop.k === 'f' ? firmById(P.drop.lid, P.drop.id) : null, rev = fr ? revEst(fr, P.g, P.q, P.drop.lid) : 0;
-      const tt = (T0 ? T0.tot : 0) + T1.tot, usd = rev / 1 - buyC - fee;
-      est = `<div class="flow">${T0 ? `🚚 Dojazd po towar: ${qty(P.r0.km)} km · ${durTxt(T0.tot * 1e3)} (z załadunkiem)<br>` : ''}🛣 Kurs: ${qty(P.r1.km)} km${P.r1.est ? ' (szacunek)' : ''} · jazda ${durTxt(T1.drive * 1e3)}${T1.ld ? ` · załadunek ${durTxt(T1.ld * 1e3)}` : ''} · ${P.drop.k === 'st' ? 'rozładunek' : 'rozładunek u odbiorcy'} ${durTxt(T1.end * 1e3)}${T1.pk ? ` · korki +${durTxt(T1.pk * 1e3)}` : ''}
-        <div>Razem: <b>${durTxt(tt * 1e3)}</b> · koszt transportu ${mL(fee, u.at)}${T1.duty ? ` (w tym cło ${mL(T1.duty, u.at)})` : ''}</div>
-        ${buyC ? `<div>Zakup towaru ≈ ${mL(buyC, P.pick.lid)}</div>` : ''}${rev ? `<div>Sprzedaż ≈ <b>${mL(rev, P.drop.lid)}</b> (po podatku)</div>` : ''}
-        ${rev || buyC ? `<div class="${usd >= 0 ? 'pos' : 'neg'}">Wynik kursu ≈ <b>${mH(usd)}</b></div>` : ''}</div>`;
+  for (const [u, ship] of allU()) if (u.st === 'idle' && !u.r && !u.pend && u.q > 0 && G[u.g] && (!g || u.g === g)) {
+    const [la, lo] = uHere(u);
+    res.push({ k: 'veh', vid: u.id, ship, lid: u.at, la, lo, g: u.g, have: u.q, n: uName(u, ship), n2: `${uName(u, ship)} (ładunek)`, ic: uIc(u, ship), gs: [[u.g, u.q]], val: u.q * G[u.g].p });
+  }
+  return res.sort((a, b) => b.val - a.val);
+}
+function dpVehs(pick) { // wolne pojazdy: ten sam ląd (statki — w porcie tej miejscowości), najbliższe najpierw
+  if (pick.k === 'veh') { const u = uFind(pick.vid, pick.ship); return u ? [[u, !!pick.ship]] : []; }
+  const l = LOC[pick.lid], p = [pick.la, pick.lo], r = [];
+  for (const [u, ship] of allU()) { if (!idleU(u) || u.q > 0) continue;
+    if (ship ? u.at === pick.lid && !!(S.L[pick.lid] && S.L[pick.lid].port) : LOC[u.at].ld === l.ld) r.push([u, ship]); }
+  return r.sort((a, b) => (a[1] - b[1]) || dKm(a[0], p) - dKm(b[0], p));
+}
+function dpU() {
+  const d = ui.dp; if (!d || !d.pick) return null;
+  const vs = dpVehs(d.pick); let x = vs.find(([u, sh]) => u.id == d.vid && sh === !!d.ship);
+  if (!x && vs[0]) { x = vs[0]; d.vid = x[0].id; d.ship = x[1]; }
+  return x || null;
+}
+const adjSp = (sp, ship) => ship && sp && sp.k !== 'veh' ? { ...sp, la: LOC[sp.lid].la, lo: LOC[sp.lid].lo } : sp;
+function dpSellers(g) { // kto sprzedaje: oferty graczy i firmy w okolicy Twoich miejscowości (najtaniej najpierw)
+  const me = USER && USER.uid, towns = new Set(), res = [], base = Object.keys(S.L).length ? Object.keys(S.L) : [S.hl];
+  for (const lid of base) for (const t of townsNear(lid, false, 14)) towns.add(t);
+  for (const o of OFF) if (o.g === g && o.left > 1e-6 && o.uid !== me && LOC[o.lid])
+    res.push({ k: 'of', lid: o.lid, id: o.id, la: o.la || LOC[o.lid].la, lo: o.lo || LOC[o.lid].lo, g, have: o.left, pr: o.price, n: `Gracz ${clean(o.name || '?')}`, n2: `👤 ${clean(o.name || '?')} (${LOC[o.lid].n})`, ic: '👤', pl: 1 });
+  [...towns].flatMap(id => firmsOf(id).filter(f => f.gs.includes(g))).map(f => ({ f, p: fPrice(S, f, g) * 1.15 })).sort((a, b) => a.p - b.p).slice(0, 18)
+    .forEach(({ f, p }) => res.push({ k: 'f', lid: f.lid, id: f.id, la: f.la, lo: f.lo, g, pr: p, n: f.n, n2: `${f.n} (${LOC[f.lid].n})`, ic: '🏪' }));
+  return res;
+}
+function dpStores(u, ship, g, pick) { // Twoje składy z wolnym miejscem; najpierw zakłady, które zużywają ten towar
+  const ok = okLoc(u, ship), res = [], p = [pick.la, pick.lo];
+  for (const lid in S.L) { if (!ok(LOC[lid])) continue;
+    for (const st of stores(S.L[lid])) { if (st.k === 'y' || (pick.k === 'st' && pick.id === st.id && pick.lid === lid)) continue;
+      const fr = stFreeOf(st); if (fr < G[g].w * .01) continue;
+      const [la, lo] = ship ? [LOC[lid].la, LOC[lid].lo] : stPos(lid, st), use = st.k === 'b' && !!(B[st.o.t].in || {})[g];
+      res.push({ k: 'st', lid, id: st.id, la, lo, g, n: st.n, n2: `${st.n} (${LOC[lid].n})`, ic: stIc(st), free: fr, use, d: kmLL(p[0], p[1], la, lo) }); } }
+  return res.sort((a, b) => b.use - a.use || a.d - b.d);
+}
+function dpDrops(u, ship, g, pick) { // kto kupuje (firmy, gracze, kontrakty) + Twoje składy
+  const p = [pick.la, pick.lo], qm = Math.min(uCap(u, ship) / G[g].w, pick.have ?? (pick.k === 'st' ? ((stById(S.L[pick.lid], pick.id) || { inv: {} }).inv[g] || 0) : Infinity));
+  const fs = dropOpts(u, ship, g, pick, 45, 14).filter(x => x.k === 'f').map(x => {
+    const f = firmById(x.lid, x.id); if (!f) return null; const c = ctFor(f.id, g);
+    return { ...x, n: f.n, n2: `${f.n} (${LOC[x.lid].n})`, ic: f.player ? '👤' : c ? '📄' : '🏪', pl: f.player ? 1 : 0, ct: !!c, pr: c ? c.price : f.player ? f.price : fPrice(S, f, g), rev: revEst(f, g, qm, x.lid), left: f.player ? f.left : null, d: kmLL(p[0], p[1], x.la, x.lo) };
+  }).filter(Boolean);
+  return [...fs, ...dpStores(u, ship, g, pick)];
+}
+function dpGoods(pick) {
+  if (!pick) return [];
+  if (pick.k === 'veh') { const u = uFind(pick.vid, pick.ship); return u && u.q > 0 ? [[u.g, u.q]] : []; }
+  const st = stById(S.L[pick.lid], pick.id); return st ? Object.entries(st.inv).filter(([g, q]) => G[g] && q > 1e-3).sort((a, b) => b[1] * G[b[0]].p - a[1] * G[a[0]].p) : [];
+}
+function dpPlan() { // pełny plan kursu: dojazd, odbiór, jazda, rozładunek, koszty
+  const d = ui.dp, x = dpU(); if (!x || !d.pick || !d.drop || !G[d.g]) return null;
+  const [u, ship] = x, here = uHere(u), pick = adjSp(d.pick, ship), drop = adjSp(d.drop, ship);
+  let have = Infinity;
+  if (pick.k === 'st') { const st = stById(S.L[pick.lid], pick.id); have = st ? st.inv[d.g] || 0 : 0; }
+  else if (pick.k === 'veh') have = u.q; else if (pick.k === 'of') have = pick.have;
+  const mx = fl(Math.min(uCap(u, ship) / G[d.g].w, have)), q = clamp(fl(d.q ?? mx), 0, mx), pp = spPos(pick), dp = spPos(drop);
+  const leg0 = pick.k !== 'veh' && !(ship ? u.at === pick.lid : near(here, pp));
+  const r0 = leg0 ? rtGet(rkey(here, pp)) : null, r1 = rtGet(rkey(pp, dp));
+  const P = { u, ship, here, pick, drop, g: d.g, q, mx, have, pp, dp, leg0, r0, r1, ready: (!leg0 || !!r0) && !!r1 };
+  if (!P.ready) return P;
+  const tn = q * G[d.g].w;
+  const T0 = leg0 ? planTimes(S, u, ship, { from: u.at, to: pick.lid, rt: r0, endT: tn }) : null;
+  const T1 = planTimes(S, u, ship, { from: pick.lid, to: drop.lid, rt: r1, g: d.g, q, ldT: leg0 || pick.k === 'veh' ? 0 : tn, endT: tn });
+  const sf = pick.k === 'f' ? firmById(pick.lid, pick.id) : null, fr = drop.k === 'f' ? firmById(drop.lid, drop.id) : null;
+  Object.assign(P, { T0, T1, fee: (T0 ? T0.fee : 0) + T1.fee, tt: (T0 ? T0.tot : 0) + T1.tot, km: (r0 ? r0.km : 0) + r1.km, duty: T1.duty,
+    buyC: pick.k === 'f' ? (sf ? fPrice(S, sf, d.g, -q / 2) * 1.15 : pick.pr || 0) * q : pick.k === 'of' ? pick.pr * q : 0,
+    rev: fr ? revEst(fr, d.g, q, drop.lid) : 0, est: !!(r1.est || (r0 && r0.est)) });
+  P.net = P.rev - P.buyC - P.fee;
+  return P;
+}
+function dpRow(x, i, on, right) {
+  return `<button class="place ${on ? 'on' : ''}" data-a="dpSel" data-i="${i}" style="--i:${Math.min(i, 10)}"><span class="pi">${x.ic}</span>
+    <span class="grow"><div class="pn">${esc(x.n)}</div><div class="ps">${x.sub}</div></span>${right ? `<span class="pr">${right}</span>` : ''}</button>`;
+}
+const pinC = { me: '#3FD0E0', pl: '#B07CFF', fix: '#FFFFFF' };
+function priceCol(v) { return v > .66 ? '#4ADE8A' : v > .33 ? '#FFD25E' : '#FF6A5A'; }
+function vDispatch() {
+  const d = ui.dp, names = DPST[d.m], key = d.m + d.st, anim = ui.dpAnim !== key && !RM; if (ui.dpAnim !== key) ui.dpTop = true; ui.dpAnim = key;
+  let h = `<div class="dpw${anim ? ' anim' + (d.dir < 0 ? ' back' : '') : ''}"><div class="steps">${names.map((n, i) => `${i ? `<span class="ln ${i <= d.st ? 'done' : ''}${i === d.st ? ' now' : ''}"></span>` : ''}<button class="${i < d.st ? 'done' : i === d.st ? 'on' : ''}" data-a="dpStep" data-v="${i}" ${i > d.st ? 'disabled' : ''}><i>${i < d.st ? '✓' : i + 1}</i>${n}</button>`).join('')}</div>`;
+  h += `<div class="dpb">`;
+  const pts = [], lines = []; let body = '';
+  const fixPt = (sp, t) => sp && pts.push({ la: sp.la, lo: sp.lo, c: pinC.fix, t, i: -1, on: 1 });
+  const S0 = d.m === 'send' ? 0 : 1; // krok wyboru „skąd”
+  if (d.m === 'send' && d.st === 0) { // --- skąd: tylko Twoje miejsca ---
+    const src = ui.dpPts = dpSources(d.fixG ? d.g : null);
+    body += `<div class="dph">Skąd zabrać towar?</div><div class="dpsub">${d.fixG ? `Twoje składy, w których jest: ${G[d.g].n.toLowerCase()}.` : 'Twoje magazyny, zakłady i pojazdy z ładunkiem.'} Wybierz z listy albo dotknij punktu na mapie.</div>`;
+    body += src.map((x, i) => { x.sub = `${esc(LOC[x.lid].n)} · ${gsTxt(x.gs)}`; pts.push({ la: x.la, lo: x.lo, c: pinC.me, t: x.n, i, on: d.pick && sameSp(d.pick, x) ? 1 : 0 });
+      return dpRow(x, i, d.pick && sameSp(d.pick, x), `<b>${mL(x.val, x.lid)}</b><small>wartość</small>`); }).join('')
+      || `<div class="card"><b>Twoje składy są puste</b><div class="mut small" style="margin-top:4px">Poczekaj, aż zakłady coś wyprodukują, albo kup towar u firmy.</div><div class="btns"><button class="btn b" data-a="dpNew" data-v="buy">🛒 Zakupy</button></div></div>`;
+  } else if (d.m === 'send' && d.st === 1) { // --- towar ---
+    const gs = dpGoods(d.pick);
+    fixPt(d.pick, stripN(d.pick));
+    body += `<div class="dph">Co wieziesz?</div><div class="dpsub">${esc(stripN(d.pick))}</div>`;
+    body += gs.length ? `<div class="tiles">${gs.map(([g, q], i) => `<button class="tile ${g === d.g ? 'on' : ''}" data-a="dpG" data-g="${g}" style="--i:${i}"><span class="ti">${gIc(g)}</span><b>${G[g].n}</b><small>${uq(q, g)}</small><span class="tq">${mL(q * lBase(S, d.pick.lid, g), d.pick.lid)}</span></button>`).join('')}</div>`
+      : `<div class="card mut">Tu już nic nie ma. Wróć i wybierz inne miejsce.</div>`;
+  } else if (d.m === 'buy' && d.st === 0) { // --- zakupy: towar ---
+    const need = [...new Set(Object.values(S.L).flatMap(L => L.bld.flatMap(b => Object.keys(B[b.t].in || {}))))].filter(g => G[g]);
+    const dep = d.dep || (need.length ? 'need' : DEP[0].id), gs = dep === 'need' ? need : GK.filter(g => GDEP(g) === dep);
+    body += `<div class="dph">Co chcesz kupić?</div><div class="dpsub">Pojazd pojedzie do sprzedawcy i przywiezie towar do Twojego składu.</div>`;
+    body += `<div class="chips">${need.length ? `<button class="${dep === 'need' ? 'on' : ''}" data-a="dpDep" data-v="need">Dla Twoich zakładów</button>` : ''}${DEP.filter(x => GK.some(g => GDEP(g) === x.id)).map(x => `<button class="${dep === x.id ? 'on' : ''}" data-a="dpDep" data-v="${x.id}">${x.i} ${x.n}</button>`).join('')}</div>`;
+    body += `<div class="tiles">${gs.map((g, i) => `<button class="tile ${g === d.g ? 'on' : ''}" data-a="dpG" data-g="${g}" style="--i:${Math.min(i, 14)}"><span class="ti">${gIc(g)}</span><b>${G[g].n}</b><small>${G[g].u}</small><span class="tq">${mL(lBase(S, S.hl, g), S.hl)}</span></button>`).join('')}</div>`;
+  } else if (d.m === 'buy' && d.st === 1) { // --- zakupy: od kogo ---
+    const sl = ui.dpPts = dpSellers(d.g), prs = sl.map(x => x.pr), mn = Math.min(...prs), mx = Math.max(...prs);
+    body += `<div class="dph">Od kogo: ${G[d.g].n.toLowerCase()}</div><div class="dpsub">Firmy i gracze w okolicy Twoich miejscowości, najtaniej na górze. Zielone na mapie = taniej.</div>`;
+    body += sl.map((x, i) => { const v = mx > mn ? 1 - (x.pr - mn) / (mx - mn) : .5, dn = Math.min(...Object.keys(S.L).map(l => km(l, x.lid)), 9e9);
+      x.sub = `${esc(LOC[x.lid].n)}${dn < 9e9 ? ` · ${kmTxt(dn)} od Ciebie` : ''}${x.have ? ` · ma ${uq(x.have, d.g)}` : ''}`;
+      pts.push({ la: x.la, lo: x.lo, c: x.pl ? pinC.pl : priceCol(v), t: x.n, i, on: d.pick && sameSp(d.pick, x) ? 1 : 0 });
+      return dpRow(x, i, d.pick && sameSp(d.pick, x), `<b class="${v > .66 ? 'ok' : ''}">${mL(x.pr, x.lid)}</b><small>za ${G[d.g].u}</small>`); }).join('')
+      || `<div class="card mut">W okolicy nikt tego nie sprzedaje. Wybierz inny towar.</div>`;
+  } else if (d.st === 2) { // --- czym i dokąd ---
+    const x = dpU();
+    fixPt(d.pick, stripN(d.pick));
+    body += `<div class="dph">${d.m === 'send' ? 'Dokąd zawieźć?' : 'Do którego składu?'}</div><div class="dpsub">${G[d.g].n} z: ${esc(stripN(d.pick))}</div>`;
+    if (!x) {
+      body += `<div class="card"><b>Brak wolnego pojazdu</b><div class="mut small" style="margin-top:4px">Na tym lądzie nie ma wolnego pojazdu${d.pick.k !== 'veh' && LOC[d.pick.lid].port ? ' ani statku w tym porcie' : ''}. Kup pojazd w garażu albo poczekaj, aż któryś wróci.</div>
+        <div class="btns"><button class="btn p" data-a="dpGarage">Kup pojazd</button></div></div>`;
+    } else {
+      const [u, ship] = x, vs = dpVehs(d.pick), pk = adjSp(d.pick, ship);
+      if (vs.length > 1) body += `<label class="f">Pojazd</label><div class="vpick">${vs.slice(0, 10).map(([v, sh]) => `<button class="${v === u ? 'on' : ''}" data-a="dpVeh" data-id="${v.id}" data-sh="${sh ? 1 : ''}"><b>${uIc(v, sh)} ${uName(v, sh)}</b><small>${qty(uCap(v, sh))} t · ${kmTxt(dKm(v, [pk.la, pk.lo]))} stąd</small></button>`).join('')}</div>`;
+      else body += `<div class="mut small" style="margin:0 0 8px">${uIc(u, ship)} ${uName(u, ship)} · ładowność ${qty(uCap(u, ship))} t</div>`;
+      const list = ui.dpPts = d.m === 'send' ? dpDrops(u, ship, d.g, pk) : dpStores(u, ship, d.g, pk);
+      if (d.fixD && !list.some(y => sameSp(y, d.fixD))) list.unshift({ ...d.fixD, n: stripN(d.fixD), ic: '👤', pl: 1, pr: d.fixD.pr, d: kmLL(pk.la, pk.lo, d.fixD.la, d.fixD.lo) });
+      const prs = list.filter(y => y.pr).map(y => y.pr), mn = Math.min(...prs), mx = Math.max(...prs);
+      pts.push({ la: uHere(u)[0], lo: uHere(u)[1], c: '#FFB23E', t: uName(u, ship), i: -1, on: 1 });
+      body += `<div class="lblrow" style="margin-top:4px"><label class="f">${d.m === 'send' ? `Kupujący i Twoje składy (${list.length})` : `Twoje składy (${list.length})`}</label></div>`;
+      body += list.map((y, i) => {
+        const isSt = y.k === 'st', v = !isSt && mx > mn ? (y.pr - mn) / (mx - mn) : .5;
+        y.sub = `${esc(LOC[y.lid].n)} · ${kmTxt(y.d || 0)}${isSt ? ` · wolne ${qty(y.free)} t${y.use ? ' · zużywa ten towar' : ''}` : y.ct ? ' · kontrakt' : y.left ? ` · chce ${uq(y.left, d.g)}` : ''}`;
+        pts.push({ la: y.la, lo: y.lo, c: isSt ? pinC.me : y.pl ? pinC.pl : priceCol(v), t: y.n, i, on: d.drop && sameSp(d.drop, y) ? 1 : 0 });
+        return dpRow(y, i, d.drop && sameSp(d.drop, y), isSt ? `<small>Twój skład</small>` : `<b class="${v > .66 ? 'ok' : ''}">${mL(y.pr, y.lid)}</b><small>${y.rev ? '≈ ' + mL(y.rev, y.lid) : 'za ' + G[d.g].u}</small>`);
+      }).join('') || `<div class="card mut">${d.m === 'send' ? 'W okolicy nikt tego nie kupuje i nie masz wolnego składu.' : 'Nie masz składu z wolnym miejscem na tym lądzie. Postaw magazyn na działce.'}</div>`;
+    }
+  } else { // --- kurs: podsumowanie ---
+    const P = dpPlan();
+    if (!P) { d.st = 2; return vDispatch(); }
+    const { u, ship } = P;
+    pts.push({ la: P.here[0], lo: P.here[1], c: '#FFB23E', t: uName(u, ship), i: -1, on: 1 }); fixPt(P.pick, stripN(P.pick)); fixPt(P.drop, stripN(P.drop));
+    body += `<div class="rtl"><div><small>${P.leg0 ? 'Odbiór' : 'Start'}</small><b>${esc(stripN(P.pick))}</b><span>${esc(LOC[P.pick.lid].n)}</span></div>
+      <div class="rtrk"><i></i><em style="animation-delay:-${(Date.now() % 3200) / 1000}s">${uIc(u, ship)}</em></div><div><small>Cel</small><b>${esc(stripN(P.drop))}</b><span>${esc(LOC[P.drop.lid].n)}</span></div></div>`;
+    body += `<div class="row" style="margin:2px 0 6px"><span class="grow mut small">${uIc(u, ship)} ${uName(u, ship)} · ${qty(uCap(u, ship))} t</span><button class="lnk" data-a="dpStep" data-v="2">zmień</button></div>`;
+    if (P.pick.k === 'veh') body += `<div class="flow">W pojeździe: <em>${uq(P.q, P.g)} ${G[P.g].n}</em></div>`;
+    else body += `<label class="f">Ilość: ${G[P.g].n.toLowerCase()}</label><div class="qty"><input type="range" min="0" max="${P.mx}" step="${P.mx > 50 ? 1 : P.mx > 5 ? .1 : .001}" value="${P.q}" data-in="dpQ" style="--p:${P.mx ? P.q / P.mx * 100 : 0}%"><span class="qv" id="dpQv">${uq(P.q, P.g)}</span></div>
+      <div class="mut small">max ${uq(P.mx, P.g)} (${qty(P.mx * G[P.g].w)} t)${P.have < Infinity ? ` · dostępne ${uq(P.have, P.g)}` : ''}</div>`;
+    if (!P.ready) {
+      body += `<div class="card" style="margin-top:12px;display:flex;gap:10px;align-items:center"><span class="spin s" style="border-top-color:var(--acc)"></span><span>Liczę trasę po drogach…</span></div>`;
+      Promise.all([P.leg0 ? fetchRoute(P.here, P.pp, ship) : null, fetchRoute(P.pp, P.dp, ship)]).then(() => render(true));
+    } else {
+      if (P.r0) lines.push({ k: 'l0', geo: P.r0.geo }); lines.push({ k: 'l1', geo: P.r1.geo });
+      const cur = u.at, res = P.rev || P.buyC;
+      body += `<div class="sum">
+        <div style="--i:0"><span>Dystans</span><b>${kmTxt(P.km)}</b></div>
+        <div style="--i:1"><span>Czas do celu</span><b>${durTxt(P.tt * 1e3)}</b></div>
+        <div style="--i:2"><span>Transport${P.duty ? ' (z cłem)' : ''}</span><b>${mL(P.fee, cur)}</b></div>
+        <div style="--i:3"><span>${P.buyC ? 'Zakup towaru' : P.rev ? 'Sprzedaż (po podatku)' : 'Rozładunek'}</span><b>${P.buyC ? mL(P.buyC, P.pick.lid) : P.rev ? mL(P.rev, P.drop.lid) : 'do składu'}</b></div>
+        ${res ? `<div class="res ${P.net >= 0 ? 'ok' : 'ko'}" style="--i:4"><span>${P.rev ? 'Zysk z kursu' : 'Razem z transportem'}</span><b>${P.rev ? mH(P.net) : mH(P.buyC + P.fee)}</b></div>` : ''}</div>`;
+      body += `<div class="mut small">${P.T0 ? `Dojazd po towar ${kmTxt(P.r0.km)} · ${durTxt(P.T0.tot * 1e3)}. ` : ''}Jazda ${durTxt(P.T1.drive * 1e3)}${P.T1.ld ? `, załadunek ${durTxt(P.T1.ld * 1e3)}` : ''}, rozładunek ${durTxt(P.T1.end * 1e3)}${P.T1.pk ? `, korki +${durTxt(P.T1.pk * 1e3)}` : ''}.${P.est ? ' Trasa szacunkowa (brak połączenia z serwerem tras).' : ''}</div>`;
+      const canRt = P.pick.k !== 'veh' && !sameSp(P.pick, P.drop);
+      if (canRt) body += `<label class="chk"><input type="checkbox" data-in="dpRt" ${d.rt ? 'checked' : ''}> Powtarzaj w kółko (trasa)</label>`;
+      if (P.buyC && !canL(P.pick.lid, P.buyC)) body += `<div class="warn">Masz za mało ${curOf(P.pick.lid)} na cały zakup — pojazd kupi tyle, na ile starczy. Wymień walutę w kantorze (Rynek).</div>`;
+      const ok = P.q > 0 && canL(u.at, P.fee);
+      body += `<button class="btn p go" data-a="dpGo" ${ok ? '' : 'disabled'}><span class="tr">${uIc(u, ship)}</span>${!canL(u.at, P.fee) ? `Za mało ${curOf(u.at)} na transport` : canRt && d.rt ? 'Start trasy' : 'Wyślij kurs'}</button>`;
     }
   }
-  const canRt = P.pick.k !== 'veh' && !!P.drop && !sameSp(P.pick, P.drop);
-  return h + est + (canRt ? `<label class="chk"><input type="checkbox" data-in="${kind}" data-s="${u.id}" data-k="rt" ${f.rt ? 'checked' : ''}> Powtarzaj w kółko (trasa)</label>` : '')
-    + `<div class="btns"><button class="btn p" data-a="go" data-k="${kind}" data-id="${u.id}" ${!ok || !canL(u.at, fee) ? 'disabled' : ''}>${canRt && f.rt ? 'Start trasy' : 'Wyślij'}${fee ? ' · ' + mL(fee, u.at) : ''}</button></div>`;
+  ui.dpMap = pts; ui.dpLines = lines;
+  return h + body + `</div></div>`;
 }
-// mapa wyboru: pokazuje tylko miejsca, gdzie da się kupić / sprzedać towar
-let PKMAP = null;
-function openSpMap(kind, uid, w) {
-  const ship = kind === 'sf', u = (ship ? S.ships : S.veh).find(x => x.id == uid); if (!u) return;
-  const P = fPlan(kind, u), g = P.g; if (!g) return;
-  const list = w === 'pick' ? pickOpts(u, ship, g, 90, 80) : dropOpts(u, ship, g, P.pick, 90, 80);
-  ui.spList = { kind, uid, w, list };
-  const prs = list.filter(x => x.pr).map(x => x.pr), mn = Math.min(...prs, Infinity), mx = Math.max(...prs, 0);
-  $('modal').hidden = false;
-  $('modal').innerHTML = `<div class="sheet tall"><div class="row"><b class="grow" style="font-size:17px">🗺 ${w === 'pick' ? 'Skąd wziąć' : 'Dokąd zawieźć'}: ${G[g].n}</b><button class="btn s" data-a="close">Zamknij</button></div>
-    <div class="mut small" style="margin:6px 0">${w === 'pick' ? 'Twoje składy (niebieskie), oferty graczy (fioletowe) i firmy, które sprzedają — zielone = taniej.' : 'Firmy i gracze, którzy to kupują — zielone = drożej płacą. Niebieskie = Twoje składy.'} Dotknij punktu.</div>
-    <div id="spmap" class="pmap" style="height:330px"></div><div id="spSel" class="spsel mut small">Nic nie wybrano.</div>
-    <div class="card" style="margin-top:8px">${list.map((x, i) => `<button class="sprow" data-a="spPick" data-i="${i}"><span class="grow">${esc(x.n)}</span><small>${kmTxt(kmLL(P.here[0], P.here[1], x.la, x.lo))}</small></button>`).join('') || '<div class="mut">Brak miejsc w zasięgu.</div>'}</div></div>`;
-  const el = $('spmap');
-  if (!window.maplibregl || ui.noGL) { el.remove(); return; }
-  try { if (PKMAP) PKMAP.remove(); } catch (e) {}
-  try {
-    const m = PKMAP = new maplibregl.Map({ container: el, style: styleUrl('caros'), center: [P.here[1], P.here[0]], zoom: 8.5, attributionControl: { compact: true }, dragRotate: false, pitchWithRotate: false });
-    m.touchZoomRotate.disableRotation();
-    const col = x => x.k === 'st' ? '#3fa3ff' : x.k === 'of' || (x.id || '').startsWith('o:') ? '#b07cff' : (() => { const k = mx > mn ? (x.pr - mn) / (mx - mn) : .5, v = w === 'pick' ? 1 - k : k; return v > .66 ? '#3fcf7f' : v > .33 ? '#f5c542' : '#ff6a4f'; })();
-    m.on('style.load', () => {
-      try { applyCaros(m); } catch (e) {}
-      m.addSource('sp', { type: 'geojson', data: { type: 'FeatureCollection', features: [
-        ...list.map((x, i) => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [x.lo, x.la] }, properties: { i, c: col(x), t: x.n.replace(/^\S+\s/, '').replace(/ \(.*?\)/, '') } })),
-        { type: 'Feature', geometry: { type: 'Point', coordinates: [P.here[1], P.here[0]] }, properties: { i: -1, c: '#ffffff', t: uName(u, ship) } }] } });
-      m.addLayer({ id: 'sp-c', type: 'circle', source: 'sp', paint: { 'circle-radius': ['interpolate', ['linear'], ['zoom'], 6, 5, 13, 10], 'circle-color': ['get', 'c'], 'circle-stroke-width': 2, 'circle-stroke-color': '#0b0e12' } });
-      m.addLayer({ id: 'sp-t', type: 'symbol', source: 'sp', minzoom: 9.5, layout: { 'text-field': ['get', 't'], 'text-size': 11, 'text-offset': [0, 1.3], 'text-font': ['Noto Sans Bold'], 'text-max-width': 12 },
-        paint: { 'text-color': '#e8eef5', 'text-halo-color': '#0b0e12', 'text-halo-width': 1.4 } });
-      const pts = list.map(x => [x.lo, x.la]); if (pts.length) { const b = pts.reduce((a, p) => [[Math.min(a[0][0], p[0]), Math.min(a[0][1], p[1])], [Math.max(a[1][0], p[0]), Math.max(a[1][1], p[1])]], [[P.here[1], P.here[0]], [P.here[1], P.here[0]]]); m.fitBounds(b, { padding: 30, maxZoom: 12, animate: false }); }
-      m.on('click', 'sp-c', e => { const i = e.features[0].properties.i; if (i < 0) return; const x = list[i];
-        $('spSel').innerHTML = `<div class="row"><span class="grow">${esc(x.n)}</span><button class="btn s p" data-a="spPick" data-i="${i}">Wybierz</button></div>`; });
-    });
-  } catch (e) { el.remove(); }
-}
-function uCard(u, ship) {
-  const nm = uName(u, ship), t = Date.now(), k = ship ? 'sf' : 'vf';
-  const rt = u.r ? `<div class="route">🔁 ${esc((u.r.pk.n || '').replace(/ —.*/, ''))} → ${esc((u.r.dr.n || '').replace(/ —.*/, ''))} · ${G[u.r.g].n}${u.wait && u.st === 'idle' ? ` · <span class="neg">${esc(u.wait)}</span>` : ''}
-    <button class="btn s" data-a="rtStop" data-k="${k}" data-id="${u.id}">Zakończ trasę</button></div>` : '';
-  const map = `<button class="btn s" data-a="vFocus" data-k="${k}" data-id="${u.id}">📍 Mapa</button>`;
-  if (u.st !== 'idle') {
-    const ph = t < u.tD ? `załadunek (${durTxt(u.tD - t)})` : t < u.tA ? `w drodze ${qty(clamp((t - u.tD) / (u.tA - u.tD), 0, 1) * u.km)} / ${qty(u.km)} km` : u.job === 'pick' ? 'załadunek' : u.job ? 'rozładunek' : 'na miejscu';
-    const dest = u.job === 'pick' ? `po towar: ${(u.pk && u.pk.n || '').replace(/ —.*/, '')}` : u.dr ? (u.dr.n || '').replace(/ —.*/, '') : '';
-    return `<div class="card"><div class="row"><b class="grow">${nm}</b><span class="mut small">do celu ${durTxt(u.t1 - t)}</span>${map}</div>
-      <div class="flow">${LOC[u.from].n} → ${LOC[u.to].n}${dest ? ' · ' + esc(dest) : ''}${u.q ? ` · ${uq(u.q, u.g)} ${G[u.g].n}` : u.wg ? ` · ${G[u.wg].n}` : ' · pusty'} · ${ph}</div>
-      <div class="bar ${ship ? '' : 'y'}"><i style="width:${clamp((t - u.t0) / (u.t1 - u.t0), 0, 1) * 100}%"></i></div>${rt}</div>`;
+function vCard(u, ship, i) {
+  const t = Date.now(), k = ship ? 'sf' : 'vf', mv = u.st !== 'idle';
+  let s, s2 = '', right = '', bar = '';
+  if (mv) {
+    const ph = t < u.tD ? 'Załadunek' : t < u.tA ? 'W drodze' : u.job === 'pick' ? 'Odbiór towaru' : 'Rozładunek';
+    const dest = u.job === 'pick' ? `po towar: ${stripN(u.pk)}` : stripN(u.dr);
+    s = `${ph} · ${LOC[u.from].n} → ${LOC[u.to].n}`;
+    s2 = `${dest ? esc(dest) + ' · ' : ''}${u.q ? `${uq(u.q, u.g)} ${G[u.g].n.toLowerCase()}` : u.wg ? `jedzie po: ${G[u.wg].n.toLowerCase()}` : 'pusty'}`;
+    right = `<div class="veta">${durTxt(u.t1 - t)}<small>do celu</small></div>`;
+    bar = `<div class="bar live"><i style="width:${clamp((t - u.t0) / (u.t1 - u.t0), 0, 1) * 100}%;animation-delay:-${(t % 2200) / 1000}s"></i></div>`;
+  } else {
+    s = `${u.pend ? 'Rozliczenie z graczem…' : u.wait ? esc(u.wait) : 'Wolny'} · ${LOC[u.at].n}`;
+    if (u.q) s2 = `Ładunek: ${uq(u.q, u.g)} ${G[u.g].n.toLowerCase()}`;
   }
-  return `<div class="card"><div class="row"><b class="grow">${nm}</b><span class="mut small">${ship ? 'w porcie' : 'stoi w'}: ${LOC[u.at].n}</span>${map}</div>${rt}
-    ${u.pend ? '<div class="flow mut">⏳ Rozliczenie z graczem…</div>' : u.r ? '' : sendForm(k, u)}</div>`;
+  const rt = u.r ? `<div class="route">🔁 ${esc(stripN(u.r.pk))} → ${esc(stripN(u.r.dr))} · ${G[u.r.g].n}<button class="btn s" data-a="rtStop" data-k="${k}" data-id="${u.id}">Zakończ trasę</button></div>` : '';
+  const acts = !mv && !u.pend && !u.r ? `<div class="vacts">${u.q ? `<button class="btn s p" data-a="dpVehLoad" data-id="${u.id}" data-sh="${ship ? 1 : ''}">Zawieź ładunek</button>`
+    : `<button class="btn s p" data-a="dpNew" data-v="send" data-id="${u.id}" data-sh="${ship ? 1 : ''}">Wyślij</button><button class="btn s b" data-a="dpNew" data-v="buy" data-id="${u.id}" data-sh="${ship ? 1 : ''}">Zakupy</button>`}</div>` : '';
+  return `<div class="vcard ${mv ? 'mv' : ''}" style="--i:${i}"><button class="vic" data-a="vFocus" data-k="${k}" data-id="${u.id}" aria-label="Pokaż na mapie">${uIc(u, ship)}</button>
+    <div class="vn">${uName(u, ship)}</div>${right || '<span></span>'}<div class="vs">${s}${s2 ? `<br>${s2}` : ''}</div>${bar}${acts}${rt ? `<div style="grid-column:2/4">${rt}</div>` : ''}</div>`;
 }
 function portDests(at) {
   const k = 'p' + at;
@@ -2119,47 +2237,50 @@ function vehDests(at) { // Twoje miejscowości na tym samym lądzie + 25 najbli�
   const own = Object.keys(S.L).filter(id => id !== at && LOC[id].ld === a.ld).sort((x, y) => km(at, x) - km(at, y));
   return [...new Set([...own, ...NEAR[at]])];
 }
+const dOpen = (k, def) => { const o = ui.open || (ui.open = {}); if (o[k] === undefined) o[k] = def; return o[k]; };
+document.addEventListener('toggle', e => { const t = e.target; if (t.dataset && t.dataset.k && t.classList.contains('more')) (ui.open || (ui.open = {}))[t.dataset.k] = t.open; }, true);
 function vLogistyka() {
-  let h = lmapOn() ? '<div id="lmapSlot" class="lslot"></div><div class="mut small" style="margin:4px 2px 8px">Pojazdy jadą po prawdziwych drogach w czasie rzeczywistym.</div>' : '';
+  if (ui.dp) return vDispatch();
+  ui.dpAnim = null;
+  const all = allU(), mv = all.filter(([u]) => u.st !== 'idle').length, nr = all.filter(([u]) => u.r).length;
+  let h = `<div class="fstat"><div class="live"><b>${mv}</b><span>w trasie</span></div><div><b>${all.length - mv}</b><span>wolne</span></div><div><b>${nr}</b><span>trasy w kółko</span></div></div>`;
+  h += `<div class="fab"><button class="btn p" data-a="dpNew" data-v="send">🚚 Wyślij towar</button><button class="btn b" data-a="dpNew" data-v="buy">🛒 Zakupy</button></div>`;
+  if (!all.length) h += `<div class="card"><b>Nie masz jeszcze pojazdów</b><div class="mut small" style="margin-top:4px">Pojazdy wożą towar do firm, kupują surowce i jeżdżą po prawdziwych drogach. Kup pierwszy dostawczak w garażu poniżej.</div></div>`;
+  h += all.map(([u, ship], i) => vCard(u, ship, i)).join('');
   // --- garaże i pojazdy ---
   const gars = Object.keys(S.L).filter(l => S.L[l].gar);
-  h += `<h2>Garaże i pojazdy (${S.veh.length})</h2>`;
-  if (!gars.length) h += `<div class="card mut">Nie masz garażu. Kup działkę w zakładce Budowa i postaw na niej garaż (mała — dostawczaki, średnia — ciężarówki, duża — TIR-y). Pojazdy wożą towar na sprzedaż do dowolnej miejscowości na tym samym lądzie, kupują surowce i jeżdżą na trasach.</div>`;
+  h += `<details class="more" data-k="gar" ${dOpen('gar', !S.veh.length) ? 'open' : ''}><summary>Kup pojazd${gars.length ? ` · garaże: ${gars.length}` : ''}</summary><div>`;
+  if (!gars.length) h += `<div class="mut small">Nie masz garażu. Kup działkę w zakładce Budowa i postaw na niej garaż (mała — dostawczaki, średnia — ciężarówki, duża — TIR-y).</div>`;
   else {
     if (!gars.includes(ui.garAt)) ui.garAt = gars[0];
     if (!VEH[ui.vehK]) ui.vehK = 'van';
     const vk = VEH[ui.vehK], full = garUsed(S, ui.garAt) >= garCap(S, ui.garAt), gc = garCls(S, ui.garAt), big = VCLS[ui.vehK] > gc;
-    h += `<div class="card"><div class="grid2">
-      <div><label class="f">Garaż</label><select data-in="garAt">${gars.map(l => `<option value="${l}" ${l === ui.garAt ? 'selected' : ''}>${LOC[l].n} (${garUsed(S, l)}/${garCap(S, l)})</option>`).join('')}</select></div>
-      <div><label class="f">Pojazd</label><select data-in="vehK">${Object.entries(VEH).map(([k, v]) => `<option value="${k}" ${k === ui.vehK ? 'selected' : ''}>${v.n}${VCLS[k] > gc ? ' 🔒' : ''}</option>`).join('')}</select></div></div>
-      <div class="flow">${vk.n}: ładowność ${String(vk.cap).replace('.', ',')} t · ${vk.spd} km/h · paliwo ${mL(vk.fuel, ui.garAt)}/km</div>
-      <div class="btns"><button class="btn p" data-a="veh" ${!canL(ui.garAt, vk.cost) || full || big ? 'disabled' : ''}>${big ? `Wymaga garażu na ${['małej', 'średniej', 'dużej'][VCLS[ui.vehK]]} działce` : full ? 'Garaż pełny — rozbuduj' : `Kup — ${mL(vk.cost, ui.garAt)}`}</button></div></div>`;
+    h += `<label class="f">Garaż</label><div class="chips">${gars.map(l => `<button class="${l === ui.garAt ? 'on' : ''}" data-a="garSel" data-v="${l}">${esc(LOC[l].n)} <small>${garUsed(S, l)}/${garCap(S, l)}</small></button>`).join('')}</div>
+      <div class="vpick">${Object.entries(VEH).map(([k, v]) => `<button class="${k === ui.vehK ? 'on' : ''}" data-a="vehSel" data-v="${k}"><b>${VIC[k]} ${v.n}${VCLS[k] > gc ? ' 🔒' : ''}</b><small>${String(v.cap).replace('.', ',')} t · ${v.spd} km/h · ${mL(v.cost, ui.garAt)}</small></button>`).join('')}</div>
+      <div class="btns"><button class="btn p" data-a="veh" ${!canL(ui.garAt, vk.cost) || full || big ? 'disabled' : ''}>${big ? `Wymaga garażu na ${['małej', 'średniej', 'dużej'][VCLS[ui.vehK]]} działce` : full ? 'Garaż pełny — rozbuduj' : `Kup: ${vk.n} — ${mL(vk.cost, ui.garAt)}`}</button></div>`;
   }
-  for (const v of S.veh) h += uCard(v, false);
-  // --- porty ---
-  const coast = Object.keys(S.L).map(id => LOC[id]).filter(l => l.port);
-  h += `<h2>Porty</h2><div class="card">${coast.map(l => { const L = S.L[l.id];
-    return `<div class="row" style="padding:6px 0"><div class="grow">${l.n} <span class="mut small">${CN[l.c].n}</span></div>${L && L.port ? '<span class="pos small">Port czynny</span>' :
-      `<button class="btn s p" data-a="port" data-l="${l.id}" ${!canL(l.id, PORT_COST) ? 'disabled' : ''}>Zbuduj — ${mL(PORT_COST, l.id)}</button>`}</div>`; }).join('') ||
-      '<div class="mut small">Port zbudujesz w miejscowości nad morzem (oznaczonej „Wybrzeże” w Budowie), w której masz zakład lub magazyn.</div>'}</div>`;
-  // --- statki ---
-  const ports = Object.keys(S.L).filter(l => S.L[l].port);
-  h += `<h2>Flota (${S.ships.length})</h2>`;
+  h += `</div></details>`;
+  // --- porty i statki ---
+  const coast = Object.keys(S.L).map(id => LOC[id]).filter(l => l.port), ports = Object.keys(S.L).filter(l => S.L[l].port);
+  h += `<details class="more" data-k="port" ${dOpen('port', false) ? 'open' : ''}><summary>Porty i statki · ${ports.length} / ${S.ships.length}</summary><div>`;
+  h += coast.map(l => { const L = S.L[l.id];
+    return `<div class="row" style="padding:6px 0"><div class="grow">${esc(l.n)} <span class="mut small">${CN[l.c].n}</span></div>${L && L.port ? '<span class="pos small">Port czynny</span>' :
+      `<button class="btn s p" data-a="port" data-l="${l.id}" ${!canL(l.id, PORT_COST) ? 'disabled' : ''}>Zbuduj port — ${mL(PORT_COST, l.id)}</button>`}</div>`; }).join('') ||
+      '<div class="mut small">Port zbudujesz w miejscowości nad morzem (oznaczonej „Wybrzeże” w Budowie), w której masz zakład lub magazyn.</div>';
   if (ports.length) {
     if (!ports.includes(ui.shipAt)) ui.shipAt = ports[0];
-    h += `<div class="card"><div class="row"><div class="grow"><select data-in="shipAt">${ports.map(l => `<option value="${l}" ${l === ui.shipAt ? 'selected' : ''}>Port: ${LOC[l].n}</option>`).join('')}</select></div>
-      <button class="btn p" data-a="ship" ${!canL(ui.shipAt, SHIP_COST) ? 'disabled' : ''}>Kup statek — ${mL(SHIP_COST, ui.shipAt)}</button></div>
-      <div class="mut small" style="margin-top:6px">Ładowność ${SHIP_CAP.toLocaleString('pl-PL')} t. Statek pływa do dowolnego portu: sprzedaje tam albo rozładowuje do Twojego magazynu.</div></div>`;
-  } else h += `<div class="card mut">Zbuduj port, żeby kupić statek. Statki wożą towar między portami (inne kontynenty, wyspy).</div>`;
-  for (const sh of S.ships) h += uCard(sh, true);
-  return h;
+    h += `<label class="f">Port</label><div class="chips">${ports.map(l => `<button class="${l === ui.shipAt ? 'on' : ''}" data-a="shipSel" data-v="${l}">${esc(LOC[l].n)}</button>`).join('')}</div>
+      <div class="mut small">Ładowność ${SHIP_CAP.toLocaleString('pl-PL')} t. Statek pływa do dowolnego portu: sprzedaje tam albo rozładowuje do Twojego magazynu.</div>
+      <div class="btns"><button class="btn p" data-a="ship" ${!canL(ui.shipAt, SHIP_COST) ? 'disabled' : ''}>Kup statek — ${mL(SHIP_COST, ui.shipAt)}</button></div>`;
+  }
+  return h + `</div></details>`;
 }
 
 // ===== GIEŁDA GRACZY =====
 function vGielda() {
   const me = USER && USER.uid, gf = ui.gg || '', hqs = Object.keys(S.L);
   const dist = lid => hqs.length ? Math.min(...hqs.map(h => km(h, lid))) : 0;
-  let h = `<h2>Giełda graczy</h2>`;
+  let h = '';
   if (!me || !DB) return h + `<div class="card">Handel z innymi graczami działa po zalogowaniu (konto online). W ustawieniach możesz założyć konto — gra gościa przeniesie się na nie.</div>`;
   h += `<div class="card"><label class="f">Towar</label><select data-in="gg"><option value="">Wszystkie</option>${goodsOpts(gf)}</select>
     <div class="mut small" style="margin-top:6px">Oferty sprzedaży odbierasz własnym pojazdem (płacisz przy odbiorze). Zlecenia skupu realizujesz, dowożąc towar do zakładu gracza.</div></div>`;
@@ -2211,6 +2332,153 @@ function vRanking() {
   return h;
 }
 
+// ===== POWŁOKA: mapa w tle, panel od dołu, dok, motywy, kamera =====
+const TABS = ['firma', 'budowa', 'magazyn', 'logistyka', 'gielda', 'ranking'];
+const THEMES = {
+  noc: { n: 'Nocna zmiana', d: 'Asfalt nocą, światła sodowe', map: 'caros', tc: '#0E1620', pv: ['#0E1620', '#152130', '#FFB23E', '#3FD0E0'] },
+  hala: { n: 'Hala', d: 'Jasny beton i żółte oznaczenia', map: 'liberty', tc: '#D9DDE0', pv: ['#D9DDE0', '#F4F5F6', '#F2BE0A', '#141414'] },
+  szklo: { n: 'Szkło', d: 'Przezroczyste panele nad granatową mapą', map: 'szklo', tc: '#0A1018', pv: ['#1D2B55', 'rgba(12,18,28,.55)', '#7CF0D2', '#A99BFF'] },
+};
+const theme = () => THEMES[document.body.dataset.theme] ? document.body.dataset.theme : 'noc';
+const cssV = k => getComputedStyle(document.body).getPropertyValue(k).trim() || '#FFB23E';
+function setTheme(k) {
+  if (!THEMES[k]) return;
+  document.body.dataset.theme = k; try { localStorage.setItem('xyx_theme', k); } catch (e) {}
+  const m = document.querySelector('meta[name=theme-color]'); if (m) m.content = THEMES[k].tc;
+  if (S) { S.theme = k; S.mapStyle = THEMES[k].map; }
+  if (LM) { LM.ready = false; LM.sty = THEMES[k].map; LM.dpSig = null; try { LM.map.setStyle(styleUrl(LM.sty)); } catch (e) {} }
+}
+const TAB_SNAP = { firma: 'half', budowa: 'half', magazyn: 'half', logistyka: 'half', gielda: 'full', ranking: 'half' };
+const SNAPS = ['peek', 'half', 'full'];
+const topH = () => { const t = $('top'); return t ? Math.round(t.getBoundingClientRect().bottom) : 100; };
+function snapPx(k) {
+  const H = innerHeight, nav = $('nav'), dock = nav ? H - nav.getBoundingClientRect().top : 80, top = topH();
+  return k === 'peek' ? Math.round(dock + 88) : k === 'full' ? H - top - 8 : Math.round(clamp(H * .5, Math.min(320, H - top - 40), H - top - 60));
+}
+function mapPad() {
+  const sh = parseFloat(document.documentElement.style.getPropertyValue('--sh')) || innerHeight * .5, top = topH();
+  return { top: top + 10, bottom: Math.max(0, Math.min(sh, innerHeight - top - 140)) + 6, left: 14, right: 14 };
+}
+function applySnap(anim = true) {
+  const sh = $('sheet'); if (!sh) return;
+  const px = document.body.classList.contains('nomap') ? innerHeight : snapPx(ui.snap || 'half');
+  document.documentElement.style.setProperty('--sh', px + 'px');
+  document.documentElement.style.setProperty('--topH', topH() + 'px');
+  sh.dataset.snap = ui.snap || 'half';
+  if (LM && LM.el.isConnected) try { anim && !RM ? LM.map.easeTo({ padding: mapPad(), duration: 480 }) : LM.map.setPadding(mapPad()); } catch (e) {}
+}
+function setSnap(k, user) { ui.snap = k; if (user) (ui.snapU || (ui.snapU = {}))[ui.tab] = k; applySnap(); }
+function initSheet() {
+  const sh = $('sheet'); if (!sh || sh.dataset.init) return; sh.dataset.init = 1;
+  let y0 = 0, h0 = 0, drag = false, moved = false, lastY = 0, lastT = 0, vy = 0;
+  const down = e => {
+    if (e.target.closest('button,input,select,a,label')) return;
+    drag = true; moved = false; y0 = lastY = e.clientY; lastT = performance.now(); vy = 0; h0 = sh.getBoundingClientRect().height; sh.classList.add('drag');
+  };
+  const move = e => {
+    if (!drag) return; const dy = e.clientY - y0, now = performance.now(); if (Math.abs(dy) > 5) moved = true;
+    vy = .7 * vy + .3 * (e.clientY - lastY) / Math.max(1, now - lastT); lastY = e.clientY; lastT = now;
+    document.documentElement.style.setProperty('--sh', clamp(h0 - dy, snapPx('peek') * .75, snapPx('full')) + 'px');
+  };
+  const up = () => {
+    if (!drag) return; drag = false; sh.classList.remove('drag');
+    const h = sh.getBoundingClientRect().height, ord = SNAPS.map(k => [k, snapPx(k)]); let k;
+    if (!moved) k = ui.snap === 'full' ? 'half' : ui.snap === 'half' ? 'full' : 'half';
+    else if (Math.abs(vy) > .4) k = vy < 0 ? (ord.find(([, p]) => p > h + 8) || ['full'])[0] : ([...ord].reverse().find(([, p]) => p < h - 8) || ['peek'])[0];
+    else k = ord.reduce((a, b) => Math.abs(b[1] - h) < Math.abs(a[1] - h) ? b : a)[0];
+    setSnap(k, true);
+  };
+  for (const id of ['handle', 'shead']) $(id).addEventListener('pointerdown', down);
+  addEventListener('pointermove', move); addEventListener('pointerup', up); addEventListener('pointercancel', up);
+  addEventListener('resize', () => applySnap(false));
+}
+function headOf() {
+  const t = ui.tab;
+  if (t === 'logistyka' && ui.dp) return { t: ui.dp.m === 'send' ? 'Nowy kurs' : 'Zakupy', s: `Krok ${ui.dp.st + 1} z 4: ${DPST[ui.dp.m][ui.dp.st].toLowerCase()}`, a: '<button class="btn s" data-a="dpX">Anuluj</button>' };
+  if (t === 'firma') return { t: 'Firma', s: `${S.ceo ? 'Prezes ' + esc(S.ceo) + ', ' : ''}siedziba: ${esc(LOC[S.hl].n)}` };
+  if (t === 'budowa') { const l = LOC[ui.bl]; return l ? { t: esc(l.n), s: `${flag(l.cc)} ${esc(cName(l.cc))}${l.pop ? ', ' + popTxt(l.pop) + ' mieszk.' : ''}` } : { t: 'Budowa', s: '' }; }
+  if (t === 'magazyn') return { t: 'Rynek', s: 'Kantor, składy, kontrakty, ceny', a: '<button class="btn s b" data-a="dpNew" data-v="buy">🛒 Zakupy</button>' };
+  if (t === 'logistyka') { const all = allU(), mv = all.filter(([u]) => u.st !== 'idle').length; return { t: 'Transport', s: all.length ? `${mv} w trasie, ${all.length - mv} wolnych` : 'Pojazdy i statki' }; }
+  if (t === 'gielda') return { t: 'Giełda', s: 'Handel z innymi graczami' };
+  return { t: 'Ranking', s: `Sezon ${S.season}` };
+}
+function renderHead() {
+  const el = $('shead'), H = headOf(), html = `<div class="grow"><h1>${H.t}</h1><div class="sub">${H.s}</div></div>${H.a ? `<div class="acts">${H.a}</div>` : ''}`;
+  if (ui.headH === html) return; ui.headH = html;
+  const sw = el.dataset.t !== H.t; el.innerHTML = html; el.dataset.t = H.t;
+  if (sw && !RM) { el.classList.remove('swap'); void el.offsetWidth; el.classList.add('swap'); }
+}
+function fitPts(ps, maxZoom, pitch = 40) {
+  if (!LM || !ps.length) return;
+  let a = [ps[0][1], ps[0][0]], b = [...a];
+  for (const p of ps) { if (!isFinite(p[0]) || !isFinite(p[1])) continue; a = [Math.min(a[0], p[1]), Math.min(a[1], p[0])]; b = [Math.max(b[0], p[1]), Math.max(b[1], p[0])]; }
+  try { LM.map.fitBounds([a, b], { padding: { top: 40, bottom: 24, left: 64, right: 64 }, maxZoom, pitch, duration: RM ? 0 : 1200 }); } catch (e) {} // padding mapy (panel) dolicza się sam
+}
+function camFor(tab) { // ruch kamery przy zmianie zakładki
+  if (!LM || !S) return; const m = LM.map, pad = mapPad();
+  const fly = (lid, z, pitch) => { const l = LOC[lid]; if (l) try { m.flyTo({ center: [l.lo, l.la], zoom: z, pitch, bearing: 0, padding: pad, duration: RM ? 0 : 1500, essential: true }); } catch (e) {} };
+  const own = Object.keys(S.L).map(l => [LOC[l].la, LOC[l].lo]);
+  if (tab === 'firma') fly(S.hl, 13.4, 60);
+  else if (tab === 'budowa') fly(ui.bl, LOC[ui.bl] && LOC[ui.bl].t === 'm' ? 12.6 : 13.6, 52);
+  else if (tab === 'magazyn') fly(ui.ml || S.hl, 12.2, 45);
+  else if (tab === 'logistyka') { if (ui.dp) { ui.dpCam = null; return; } const ps = allU().map(([u]) => uPos(u)).filter(p => p && isFinite(p[0])); fitPts(ps.length ? [...ps, ...own] : own, 12.5); }
+  else if (tab === 'gielda') fitPts(own.length ? own : [[LOC[S.hl].la, LOC[S.hl].lo]], 8.5, 30);
+  else if (tab === 'ranking') { const b = MAPS[LOC[S.hl].c].box; try { m.fitBounds([b[0], b[1]], { padding: 10, pitch: 0, bearing: 0, duration: RM ? 0 : 1500 }); } catch (e) {} }
+}
+// punkty i trasa kursu na mapie świata
+const RA = { raf: 0, iv: 0, k: 0, t: 0 };
+const DASH = [[0, 4, 3], [.5, 4, 2.5], [1, 4, 2], [1.5, 4, 1.5], [2, 4, 1], [2.5, 4, .5], [3, 4, 0], [0, .5, 3, 3.5], [0, 1, 3, 3], [0, 1.5, 3, 2.5], [0, 2, 3, 2], [0, 2.5, 3, 1.5], [0, 3, 3, 1], [0, 3.5, 3, .5]];
+function stopRA() { cancelAnimationFrame(RA.raf); clearInterval(RA.iv); RA.raf = RA.iv = 0; }
+function routeAnim() {
+  stopRA(); if (!LM) return;
+  const m = LM.map, a = cssV('--acc'), b = cssV('--sec'), full = ['interpolate', ['linear'], ['line-progress'], 0, b, 1, a];
+  const set = (ly, p, v) => { try { m.setPaintProperty(ly, p, v); } catch (e) {} };
+  if (RM) { set('xy-dpr-l', 'line-gradient', full); set('xy-dpr-a', 'line-opacity', 0); return; }
+  set('xy-dpr-a', 'line-opacity', 0);
+  const t0 = performance.now(), step = t => {
+    const k = Math.min(1, (t - t0) / 1600), p = clamp(1 - (1 - k) ** 3, .002, .997);
+    set('xy-dpr-l', 'line-gradient', k >= 1 ? full : ['interpolate', ['linear'], ['line-progress'], 0, b, p, a, p + .002, 'rgba(0,0,0,0)']);
+    if (k < 1) { RA.raf = requestAnimationFrame(step); return; }
+    set('xy-dpr-a', 'line-opacity', .9);
+    RA.iv = setInterval(() => { RA.k = (RA.k + 1) % DASH.length; RA.t += .2; set('xy-dpr-a', 'line-dasharray', DASH[RA.k]); set('xy-dp-h', 'circle-radius', 17 + 5 * Math.sin(RA.t)); }, 70);
+  };
+  RA.raf = requestAnimationFrame(step);
+}
+function drawDP() {
+  const lm = LM; if (!lm || !lm.ready || !lm.map.getSource('xy-dp')) return;
+  const on = !!(ui.dp && ui.tab === 'logistyka'), pts = on ? ui.dpMap || [] : [], lines = on ? ui.dpLines || [] : [];
+  const sig = JSON.stringify([pts.map(p => [p.i, p.on, +(+p.la).toFixed(4), +(+p.lo).toFixed(4), p.c]), lines.map(l => l.k + ':' + l.geo.length)]);
+  if (sig !== lm.dpSig) {
+    lm.dpSig = sig;
+    try {
+      lm.map.getSource('xy-dp').setData({ type: 'FeatureCollection', features: pts.filter(p => isFinite(p.la) && isFinite(p.lo)).map(p => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [p.lo, p.la] },
+        properties: { i: p.i, c: p.c, t: String(p.t || '').slice(0, 34), on: p.on ? 1 : 0, fx: p.i < 0 ? 1 : 0 } })) });
+      lm.map.getSource('xy-dpr').setData({ type: 'FeatureCollection', features: lines.map(l => ({ type: 'Feature', geometry: { type: 'LineString', coordinates: l.geo }, properties: { k: l.k } })) });
+    } catch (e) {}
+    if (lines.length) routeAnim(); else stopRA();
+  }
+  const ck = on ? ui.dp.m + ui.dp.st + (lines.length ? 'r' : '') + (ui.dp.pick ? ui.dp.pick.id || ui.dp.pick.vid : '') : null;
+  if (on && ck !== ui.dpCam) { ui.dpCam = ck; const ps = [...pts.map(p => [p.la, p.lo]), ...lines.flatMap(l => l.geo.map(c => [c[1], c[0]]))]; if (ps.length) fitPts(ps, 14, 45); }
+  if (!on) ui.dpCam = null;
+}
+function dpLaunch() { // wyjazd zaplanowanego kursu
+  advance(S, Date.now());
+  const P = dpPlan(); if (!P || !P.ready || !(P.q > 0)) { render(true); return; }
+  const { u, ship } = P; if (u.st !== 'idle' || u.pend) { render(true); return; }
+  const g = P.g, want = P.q; let fee = 0;
+  u.dr = P.drop;
+  if (P.pick.k === 'veh') fee = goDrop(S, u, ship, 0);
+  else if (!P.leg0 && P.pick.k === 'st') { // towar ze składu na miejscu
+    const L = S.L[P.pick.lid], took = fl(takeL(L, g, want, P.pick.id)); if (took <= 0) { toast('Tego towaru już tu nie ma'); render(true); return; }
+    u.g = g; u.q = took; u.pos = P.pp; fee = goDrop(S, u, ship, took * G[g].w);
+    if (!fee) { putL(L, g, took, P.pick.id); u.g = null; u.q = 0; }
+  } else fee = goPick(S, u, ship, P.pick, P.drop, g, want);
+  if (!fee) { toast(`Za mało ${curOf(u.at)} na kurs`); render(true); return; }
+  if (ui.dp.rt && P.pick.k !== 'veh') { u.r = { pk: P.pick, dr: P.drop, g, want, rt2: { km: P.r1.km, s: P.r1.s } }; rtRev(P.pp, P.dp); }
+  ui.dp = null; ui.camT = null; save();
+  toast(`${uName(u, ship)} w drodze · ${durTxt(u.t1 - u.t0)}${u.r ? ' · trasa w kółko' : ''}`); render(true);
+}
+
 const VIEWS = { firma: vFirma, budowa: vBudowa, magazyn: vMagazyn, logistyka: vLogistyka, gielda: vGielda, ranking: vRanking };
 const RM = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
 function tweenCash() { // licznik gotówki płynnie dobija do wartości
@@ -2243,16 +2511,29 @@ function render(force) {
   renderTop();
   const ae = document.activeElement;
   if (ui.gesture || (!force && ae && (ae.tagName === 'INPUT' || ae.tagName === 'SELECT'))) return;
+  initSheet();
   const v = $('view');
   v.innerHTML = VIEWS[ui.tab]();
+  if (ui.dpTop) { ui.dpTop = false; v.scrollTop = 0; }
   if (ui.tab !== ui.animTab && !RM) { // wejście zakładki: karty wjeżdżają kaskadowo
     ui.animTab = ui.tab; v.classList.remove('enter'); void v.offsetWidth;
     [...v.children].forEach((c, i) => c.style.setProperty('--i', Math.min(i, 12)));
     v.classList.add('enter'); clearTimeout(ui.animT); ui.animT = setTimeout(() => v.classList.remove('enter'), 1000);
   }
   document.querySelectorAll('#nav button').forEach(b => b.classList.toggle('on', b.dataset.tab === ui.tab));
-  renderUpd(); renderTut();
-  if ((ui.tab === 'budowa' || ui.tab === 'logistyka') && $('lmapSlot')) mountLM(ui.bc, ui.bl);
+  $('nav').style.setProperty('--ti', Math.max(0, TABS.indexOf(ui.tab)));
+  renderHead(); renderUpd(); renderTut();
+  const on = lmapOn(); document.body.classList.toggle('nomap', !on);
+  const placing = !!(ui.placeB || ui.place);
+  if (ui.snapTab !== ui.tab) { ui.snapTab = ui.tab; ui.snap = (ui.snapU || {})[ui.tab] || TAB_SNAP[ui.tab]; applySnap(); }
+  else if (placing !== !!ui.placeSnap) { ui.placeSnap = placing; setSnap(placing ? 'peek' : (ui.snapU || {})[ui.tab] || TAB_SNAP[ui.tab]); }
+  else if (!ui.snapOk) applySnap(false);
+  ui.snapOk = true;
+  if (on) {
+    mountLM(ui.bc, ui.bl);
+    if (ui.camT !== ui.tab) { ui.camT = ui.tab; camFor(ui.tab); }
+    drawDP();
+  }
 }
 function renderUpd() {
   $('upd').innerHTML = ui.update ? `<div class="updbar"><div class="grow" style="flex:1"><b>Nowa wersja ${esc(ui.update.v)}</b><div class="mut small">Masz ${esc(VERSION)}</div></div><button class="btn p s" data-a="getUpd">${IS_WEB() ? 'Odśwież' : 'Pobierz'}</button></div>` : '';
@@ -2268,6 +2549,8 @@ function settings() {
     <h2>Konto</h2><div class="card"><div class="row"><div class="grow">${USER ? `<b>${isAdmin() ? 'admin <span class="ltag g">ADMIN</span>' : esc(USER.email)}</b><div class="mut small">Zapis w chmurze${cloudAt ? ': ' + new Date(cloudAt).toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit' }) : ' włączony'}</div>`
       : '<b>Gość</b><div class="mut small">Gra zapisana tylko na tym telefonie</div>'}</div>
       ${USER ? '<button class="btn" data-a="logout">Wyloguj</button>' : `<button class="btn p" data-a="toLogin" ${FB ? '' : 'disabled'}>Załóż konto</button>`}</div></div>
+    <h2>Wygląd</h2><div class="themes">${Object.entries(THEMES).map(([k, t]) => `<button class="theme ${theme() === k ? 'on' : ''}" data-a="theme" data-v="${k}"><div class="tv" style="background:${t.pv[0]}"><u style="background:${t.pv[2]}"></u><i style="background:${t.pv[1]};border:1px solid ${t.pv[3]}"></i></div><b>${t.n}</b></button>`).join('')}</div>
+    <div class="mut small" style="margin:6px 2px 0">${THEMES[theme()].d}. Motyw zmienia też wygląd mapy.</div>
     <h2>Mapa</h2><div class="card"><div class="row"><div class="grow">${S.mapMode === 'svg' ? 'Prosta (offline)' : 'Szczegółowa — drogi, miasta (internet)'}<div class="mut small">© OpenFreeMap, © OpenMapTiles, © OpenStreetMap</div></div>
       <button class="btn" data-a="mapMode">${S.mapMode === 'svg' ? 'Szczegółowa' : 'Prosta'}</button></div>
       ${S.mapMode === 'svg' ? '' : `<div class="btns">${Object.entries(MSTYLES).map(([k, n]) => `<button class="toggle ${(S.mapStyle || 'caros') === k ? 'on' : ''}" data-a="mapStyle" data-v="${k}">${n}</button>`).join('')}</div>`}</div>
@@ -2279,7 +2562,7 @@ function settings() {
 // ================== AKCJE ==================
 function act(a, d) {
   switch (a) {
-    case 'tab': ui.tab = d.t; window.scrollTo(0, 0); break;
+    case 'tab': ui.tab = d.t; $('view').scrollTop = 0; break;
     case 'bc': ui.bc = d.c; break;
     case 'bl': {
       ui.bl = d.l; ui.bc = LOC[d.l].c;
@@ -2366,7 +2649,7 @@ function act(a, d) {
       const c = licCost(d.cc), cu = curOfCC(d.cc); if (S.lic[d.cc] || !canC(S, cu, c)) return;
       payC(S, cu, c); S.lic[d.cc] = true; S.c[LOC[ui.bl].c] = {}; addNews(S, `Licencja: ${cName(d.cc)}`); toast(`${flag(d.cc)} Licencja na ${cName(d.cc)}!`); break;
     }
-    case 'plotPick': ui.placeB = { k: 'plot', lid: d.l, sz: +d.sz }; ui.flyB = d.l; window.scrollTo({ top: 0, behavior: 'smooth' }); break;
+    case 'plotPick': ui.placeB = { k: 'plot', lid: d.l, sz: +d.sz }; ui.flyB = d.l; break;
     case 'pMove': $('modal').hidden = true; ui.bc = LOC[d.l].c; ui.bl = d.l; ui.tab = 'budowa'; ui.placeB = { k: 'mvp', lid: d.l, id: +d.p }; ui.flyB = d.l; window.scrollTo({ top: 0, behavior: 'smooth' }); break;
     case 'bGo': $('modal').hidden = true; ui.bc = LOC[d.l].c; ui.bl = d.l; ui.tab = 'budowa'; ui.panTo = true; break;
     case 'pbOff': ui.placeB = null; break;
@@ -2454,30 +2737,48 @@ function act(a, d) {
       if (!ui.shipAt || !canL(ui.shipAt, SHIP_COST)) return;
       payC(S, curOf(ui.shipAt), SHIP_COST); S.ships.push({ id: S.nid++, st: 'idle', at: ui.shipAt, to: null, from: null, g: null, q: 0, eta: 0, dur: 1 }); toast('Nowy statek w porcie'); break;
     case 'pqSet': ui.pl = d.v; ui.pq = ''; break;
-    case 'goSell': { // z Rynku: najbliższy wolny pojazd na tym lądzie
-      const l0 = LOC[d.l], vs = S.veh.filter(x => x.st === 'idle' && !x.r && !x.q && !x.pend && LOC[x.at].ld === l0.ld).sort((a, b) => km(a.at, d.l) - km(b.at, d.l));
-      ui.tab = 'logistyka';
-      if (!vs.length) { toast('Brak wolnego pojazdu na tym lądzie'); break; }
-      const v = vs[0], st = stById(S.L[d.l], d.src), [la, lo] = stPos(d.l, st);
-      ui.vf[v.id] = { g: d.g, pick: { k: 'st', lid: d.l, id: d.src, la, lo, g: d.g, n: `📦 ${st.n} (${LOC[d.l].n})` } };
-      setTimeout(() => { const e = document.querySelector(`[data-a=go][data-id="${v.id}"]`); if (e) e.scrollIntoView({ behavior: 'smooth', block: 'center' }); }, 150); break;
+    case 'goSell': { // z Rynku: od razu „dokąd”
+      const st = stById(S.L[d.l], d.src); if (!st) return; const [la, lo] = stPos(d.l, st);
+      ui.tab = 'logistyka'; ui.dp = { m: 'send', st: 2, dir: 1, g: d.g, pick: { k: 'st', lid: d.l, id: d.src, la, lo, g: d.g, n: `${st.n} (${LOC[d.l].n})` } }; break;
     }
     case 'offNew': { const og = ui.og; offCreate(og.lid, og.sid, og.g, +($('ogQ') || {}).value, +($('ogP') || {}).value / rate(curOf(og.lid))); return; }
     case 'offDel': offCancel(d.id); return;
     case 'offGet': case 'ordFill': {
       const o = (a === 'offGet' ? OFF : ORD).find(x => x.id === d.id); if (!o || !LOC[o.lid]) return;
-      const vs = S.veh.filter(x => x.st === 'idle' && !x.r && !x.q && !x.pend && LOC[x.at].ld === LOC[o.lid].ld).sort((x, y) => km(x.at, o.lid) - km(y.at, o.lid));
-      ui.tab = 'logistyka'; if (!vs.length) { toast('Brak wolnego pojazdu na tym lądzie'); break; }
-      const v = vs[0];
-      if (a === 'offGet') ui.vf[v.id] = { g: o.g, pick: { k: 'of', lid: o.lid, id: o.id, la: o.la, lo: o.lo, g: o.g, have: o.left, pr: o.price, n: `👤 ${clean(o.name || '?')} (${LOC[o.lid].n})` } };
-      else ui.vf[v.id] = { g: o.g, drop: { k: 'f', lid: o.lid, id: 'o:' + o.id, la: o.la || LOC[o.lid].la, lo: o.lo || LOC[o.lid].lo, g: o.g, n: `👤 ${bName(o.bt)} — ${clean(o.name || '?')} (${LOC[o.lid].n})` } };
-      setTimeout(() => { const e = document.querySelector(`[data-a=go][data-id="${v.id}"]`); if (e) e.scrollIntoView({ behavior: 'smooth', block: 'center' }); }, 150); break;
+      const la = o.la || LOC[o.lid].la, lo = o.lo || LOC[o.lid].lo; ui.tab = 'logistyka';
+      if (a === 'offGet') ui.dp = { m: 'buy', st: 2, dir: 1, g: o.g, pick: { k: 'of', lid: o.lid, id: o.id, la, lo, g: o.g, have: o.left, pr: o.price, n: `👤 ${clean(o.name || '?')} (${LOC[o.lid].n})` } };
+      else ui.dp = { m: 'send', st: 0, dir: 1, g: o.g, fixG: true, fixD: { k: 'f', lid: o.lid, id: 'o:' + o.id, la, lo, g: o.g, pr: o.price, n: `${bName(o.bt)}, gracz ${clean(o.name || '?')} (${LOC[o.lid].n})` } };
+      break;
     }
-    case 'spMap': openSpMap(d.k, d.id, d.w); return;
-    case 'spPick': { const L = ui.spList, x = L && L.list[+d.i]; if (!x) return; const f = ui[L.kind][L.uid] || (ui[L.kind][L.uid] = {}); f[L.w] = x; if (L.w === 'pick') delete f.q;
-      $('modal').hidden = true; try { if (PKMAP) { PKMAP.remove(); PKMAP = null; } } catch (e) {} break; }
+    case 'dpNew': ui.tab = 'logistyka'; ui.dp = { m: d.v === 'buy' ? 'buy' : 'send', st: 0, dir: 1 }; if (d.id) { ui.dp.vid = d.id; ui.dp.ship = !!d.sh; } if (ui.snap === 'peek') setSnap('half'); break;
+    case 'dpVehLoad': { const sh = !!d.sh, u = uFind(d.id, sh); if (!u || !u.q) return; const [la, lo] = uHere(u);
+      ui.tab = 'logistyka'; ui.dp = { m: 'send', st: 2, dir: 1, g: u.g, vid: u.id, ship: sh, pick: { k: 'veh', vid: u.id, ship: sh, lid: u.at, la, lo, g: u.g, have: u.q, n: uName(u, sh) } }; break; }
+    case 'dpX': ui.dp = null; ui.camT = null; break;
+    case 'dpStep': { const v = +d.v; if (!ui.dp || v > ui.dp.st) return; ui.dp.dir = v < ui.dp.st ? -1 : 1; ui.dp.st = v; break; }
+    case 'dpDep': if (ui.dp) ui.dp.dep = d.v; break;
+    case 'dpG': { const dp = ui.dp; if (!dp) return; dp.g = d.g; dp.q = undefined; dp.dir = 1;
+      if (dp.m === 'send') { dp.drop = dp.fixD || null; dp.st = dp.fixD && dpU() ? 3 : 2; } else { dp.pick = null; dp.drop = null; dp.st = 1; } break; }
+    case 'dpVeh': { const dp = ui.dp; if (!dp) return; dp.vid = d.id; dp.ship = !!d.sh; if (!dp.fixD) dp.drop = null; break; }
+    case 'dpSel': { const dp = ui.dp, x = dp && (ui.dpPts || [])[+d.i]; if (!x) return; dp.dir = 1; dp.q = undefined;
+      if (dp.m === 'send' && dp.st === 0) {
+        dp.pick = spec(x);
+        if (x.k === 'veh') { dp.g = x.g; dp.vid = x.vid; dp.ship = x.ship; dp.st = 2; }
+        else { const gs = x.gs.map(([g]) => g); if (dp.fixG && gs.includes(dp.g)) dp.st = 2; else if (gs.length === 1) { dp.g = gs[0]; dp.st = 2; } else { if (!gs.includes(dp.g)) dp.g = null; dp.st = 1; } }
+        if (dp.st === 2 && dp.fixD) { dp.drop = dp.fixD; if (dpU()) dp.st = 3; }
+      } else if (dp.m === 'buy' && dp.st === 1) { dp.pick = spec(x); dp.drop = null; dp.st = 2; }
+      else if (dp.st === 2) { dp.drop = spec(x); dp.st = 3; }
+      else return;
+      break; }
+    case 'dpGarage': ui.dp = null; (ui.open || (ui.open = {})).gar = true; setTimeout(() => { const e = document.querySelector('details[data-k=gar]'); if (e) e.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, 150); break;
+    case 'dpGo': { const P = dpPlan(); if (!P || !P.ready || !(P.q > 0)) return;
+      const btn = document.querySelector('[data-a=dpGo]'); if (btn) { btn.classList.add('launch'); btn.disabled = true; }
+      setTimeout(dpLaunch, RM ? 0 : 650); return; }
+    case 'garSel': ui.garAt = d.v; break;
+    case 'vehSel': ui.vehK = d.v; break;
+    case 'shipSel': ui.shipAt = d.v; break;
+    case 'theme': setTheme(d.v); save(); settings(); render(true); return;
     case 'rtStop': { const u = (d.k === 'sf' ? S.ships : S.veh).find(x => x.id == d.id); if (u) { delete u.r; u.wait = ''; toast('Trasa zakończona — pojazd dokończy bieżący kurs'); } break; }
-    case 'vFocus': { const u = (d.k === 'sf' ? S.ships : S.veh).find(x => x.id == d.id); if (!u) return; ui.flyV = uPos(u); ui.tab = 'logistyka'; window.scrollTo({ top: 0, behavior: 'smooth' }); break; }
+    case 'vFocus': { const u = (d.k === 'sf' ? S.ships : S.veh).find(x => x.id == d.id); if (!u) return; ui.flyV = uPos(u); ui.tab = 'logistyka'; if (ui.snap === 'full') setSnap('half'); break; }
     case 'ctAcc': {
       const lid = d.id.split('#')[0], o = offersOf(lid).find(x => x.id === d.id); if (!o) return;
       S.ct = S.ct || []; if (S.ct.filter(c => c.st === 'on').length >= 5 || S.ct.some(c => c.id === o.id)) return;
@@ -2492,25 +2793,6 @@ function act(a, d) {
     case 'ordOpen': ordSheet(d.l, d.id); return;
     case 'ordNew': { const g = d.g, pr = +($('ordP_' + g) || {}).value, q = +($('ordQ_' + g) || {}).value; ordCreate(d.l, d.id, g, pr / rate(curOf(d.l)), q); return; }
     case 'ordDel': ordCancel(d.id, d.l, d.b); return;
-    case 'go': {
-      const ship = d.k === 'sf', u = (ship ? S.ships : S.veh).find(x => x.id == d.id); if (!u || u.st !== 'idle' || u.pend) return;
-      const P = fPlan(d.k, u), f = P.f; if (!P.pick || !P.drop || !(P.q > 0)) return;
-      Promise.all([P.leg0 ? fetchRoute(P.here, P.pp, ship) : null, fetchRoute(P.pp, P.dp, ship)]).then(([r0, r1]) => {
-        advance(S, Date.now()); if (u.st !== 'idle') return;
-        const g = P.g, want = P.q; let fee = 0;
-        u.dr = P.drop;
-        if (P.pick.k === 'veh') fee = goDrop(S, u, ship, 0);
-        else if (!P.leg0 && P.pick.k === 'st') { // towar ze składu na miejscu
-          const L = S.L[P.pick.lid], took = fl(takeL(L, g, want, P.pick.id)); if (took <= 0) return;
-          u.g = g; u.q = took; u.pos = P.pp; fee = goDrop(S, u, ship, took * G[g].w);
-          if (!fee) { putL(L, g, took, P.pick.id); u.g = null; u.q = 0; }
-        } else fee = goPick(S, u, ship, P.pick, P.drop, g, want);
-        if (!fee) { toast(`Za mało ${curOf(u.at)} na kurs`); render(); return; }
-        if (f.rt && P.pick.k !== 'veh') { u.r = { pk: P.pick, dr: P.drop, g, want, rt2: { km: r1.km, s: r1.s } }; rtRev(P.pp, P.dp); }
-        delete ui[d.k][d.id]; save(); toast(`${uName(u, ship)} w drodze · ${durTxt(u.t1 - u.t0)}${u.r ? ' · trasa' : ''}`); render();
-      });
-      return;
-    }
     case 'perk': { const c = S.perk[d.k] + 1; if (S.pp < c || S.perk[d.k] >= 10) return; S.pp -= c; S.perk[d.k]++; break; }
     case 'settings': ui.resetArm = false; settings(); return;
     case 'close': $('modal').hidden = true; return;
@@ -2557,7 +2839,7 @@ document.addEventListener('click', e => {
   if (ui.place && e.target.closest('.lmap svg')) { placeAt(e, e.target.closest('.lmap svg')); return; }
   const t = e.target.closest('[data-a],[data-tab]');
   if (!t) { if (e.target.id === 'modal') $('modal').hidden = true; return; }
-  if (t.dataset.tab) { ui.tab = t.dataset.tab; window.scrollTo(0, 0); render(true); return; }
+  if (t.dataset.tab) { if (ui.tab === t.dataset.tab) { ui.camT = null; setSnap(ui.snap === 'peek' ? 'half' : ui.snap); } ui.tab = t.dataset.tab; $('view').scrollTop = 0; render(true); return; }
   if (t.disabled) return;
   act(t.dataset.a, t.dataset);
 });
@@ -2578,11 +2860,8 @@ document.addEventListener('change', e => {
   else if (k === 'brg') { const cid = ui.bc, cc = LOC[ui.bl].cc;
     const ls = t.value === '' ? BYC[cid].filter(l => l.cc === cc) : BYC[cid].filter(l => l.rg === +t.value);
     ui.rgSel = t.value !== ''; if (ls.length) { const own = ls.find(l => S.L[l.id]); ui.bl = (own || ls[0]).id; fitTo(ls); } }
-  else if (k === 'sf' || k === 'vf') { const o = ui[k], f = o[t.dataset.s] || (o[t.dataset.s] = {}), kk = t.dataset.k;
-    const op = (ui.opts || {})[k + t.dataset.s] || {};
-    if (kk === 'pick') { f.pick = op.po[+t.value]; delete f.q; } else if (kk === 'drop') f.drop = op.do[+t.value];
-    else f[kk] = kk === 'rt' ? t.checked : kk === 'q' ? +t.value : t.value;
-    if (kk === 'g') { delete f.q; delete f.pick; delete f.drop; } }
+  else if (k === 'dpQ') { if (ui.dp) ui.dp.q = +t.value; }
+  else if (k === 'dpRt') { if (ui.dp) ui.dp.rt = t.checked; }
   else if (k === 'vehK') ui.vehK = t.value;
   t.blur(); render(true);
 });
@@ -2795,7 +3074,8 @@ async function onUser(user) {
 }
 function startGame(s) {
   if (!s.setup) Object.assign(wz, { step: 0, ceo: '', name: '', hl: '', cc: '', rg: null, lvl: 'ctry', q: '' });
-  S = s; registerCustom(S); ui.z = {}; ui.animTab = null; ui.cashShown = null; ui.wzLast = null; if (LM) LM.cid = null;
+  S = s; if (S.theme && THEMES[S.theme]) { if (S.theme !== theme()) setTheme(S.theme); } else { S.theme = theme(); S.mapStyle = THEMES[S.theme].map; }
+  registerCustom(S); ui.z = {}; ui.dp = null; ui.camT = null; ui.snapTab = null; ui.animTab = null; ui.cashShown = null; ui.wzLast = null; if (LM) LM.cid = null;
   ui.bc = S.hq; ui.bl = ui.ml = S.hl; ui.tab = 'firma';
   if (S.setup) {
     const off = (Date.now() - (S.clock || S.last || Date.now())) / HOUR;
